@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from sqlalchemy.future import select
 
 # Ensure root of repo/backend is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
