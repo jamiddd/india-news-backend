@@ -89,6 +89,10 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
 
     # Pass 1: filter malformed/duplicate entries down to real candidates.
     candidates = []
+    seen_hashes_this_batch = set()  # some feeds (e.g. Business Today's combined
+    # /rssfeeds?id=home) list the same story twice in one fetch — checking only
+    # already-committed rows misses that, since neither copy exists in the DB
+    # yet; both would pass the check and then collide on insert.
     for entry in items:
         title = getattr(entry, "title", "").strip()
         link = getattr(entry, "link", "").strip()
@@ -99,10 +103,15 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
 
         url_hash = compute_url_hash(link)
 
+        if url_hash in seen_hashes_this_batch:
+            continue
+
         # Exact Dedup check
         existing = await session.execute(select(Article).where(Article.url_hash == url_hash))
         if existing.scalar_one_or_none():
             continue
+
+        seen_hashes_this_batch.add(url_hash)
 
         snippet = getattr(entry, "summary", "") or getattr(entry, "description", "")
         if snippet and snippet.lower() in ["undefined", "none", "null"]:
