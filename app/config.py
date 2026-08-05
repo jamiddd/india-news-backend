@@ -1,0 +1,25 @@
+from pydantic_settings import BaseSettings
+from typing import Optional
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "India News App Backend"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
+    
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://news_user:news_password@localhost:5432/news_db"
+    
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    # Ingestion
+    DEFAULT_POLL_INTERVAL_SECONDS: int = 300  # 5 minutes
+    INGESTION_USER_AGENT: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36 (IndiaNewsApp Engine)"
+
+    # AI Enrichment
+    ANTHROPIC_API_KEY: Optional[str] = None
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
