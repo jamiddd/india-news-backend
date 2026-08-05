@@ -13,6 +13,7 @@ _TRUNCATE_MARKERS = [
     "about the author",
     "disclaimer: comments reflect",
     "loading comments",
+    "n18oc",  # News18's internal taxonomy tags, glued right before its sign-off block
     "is your trusted source for breaking news",  # News18/CNN-News18 sign-off
     "subscribe now and join our community",
     "follow every breaking story live",
@@ -63,8 +64,35 @@ def clean_extracted_text(text: Optional[str], title: Optional[str] = None) -> Op
         lowered = line.lower()
         if lowered in _DROP_LINE_EXACT:
             continue
-        if any(marker in lowered for marker in _TRUNCATE_MARKERS):
+
+        # Boilerplate is sometimes glued directly onto the tail of the last
+        # real sentence with no line break (e.g. a short "BREAKING:" stub
+        # whose one paragraph runs straight into News18's subscribe/social
+        # block) — truncate from the marker's position, not the whole line,
+        # so genuine leading text on that same line survives.
+        marker_pos = None
+        for marker in _TRUNCATE_MARKERS:
+            idx = lowered.find(marker)
+            if idx != -1 and (marker_pos is None or idx < marker_pos):
+                marker_pos = idx
+        if marker_pos is not None:
+            # If the marker sits inside a run of non-whitespace characters
+            # (e.g. News18's taxonomy tags glued straight onto real prose:
+            # "...safety. -newsn18oc_worldCNN-News18 is your trusted..."),
+            # back up to the start of that glued token so the whole blob
+            # gets dropped, not just the matched substring onward.
+            cut = marker_pos
+            while cut > 0 and not line[cut - 1].isspace():
+                cut -= 1
+            # Strip trailing bullet/dash clutter left dangling right before
+            # the cut (e.g. "...paragraph text.\n- ABOUT THE AUTHOR...");
+            # if nothing alphanumeric survives, the "prefix" was itself just
+            # boilerplate punctuation, not real content — drop it too.
+            prefix = line[:cut].strip().rstrip(" -–—•*:")
+            if prefix and any(ch.isalnum() for ch in prefix):
+                cleaned.append(prefix)
             break
+
         cleaned.append(line)
 
     result = "\n".join(cleaned).strip()
