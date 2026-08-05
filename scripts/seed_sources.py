@@ -1,10 +1,9 @@
 import asyncio
 import os
 import sys
-from sqlalchemy.future import select
 
-# Ensure project root is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+# Ensure root of repo/backend is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.database import AsyncSessionLocal, engine, Base
 from app.models import Source
@@ -114,7 +113,6 @@ VERIFIED_SOURCES = [
         "category": "official",
         "region": "national"
     },
-    # Phase 5: Regional Depth & Northeast India
     {
         "name": "EastMojo (Northeast)",
         "slug": "eastmojo-ne",

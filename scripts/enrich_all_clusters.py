@@ -1,10 +1,12 @@
 import asyncio
 import os
 import sys
+
+# Ensure root of repo/backend is in sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from app.database import AsyncSessionLocal
 from app.models import StoryCluster, Article

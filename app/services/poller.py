@@ -1,8 +1,8 @@
 import asyncio
 import logging
+import hashlib
 from datetime import datetime, timezone
-import time
-from typing import List, Optional, Dict, Any
+from typing import Optional, List, Dict, Any
 import httpx
 import feedparser
 from sqlalchemy.future import select
@@ -17,12 +17,20 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 HEADERS = {
-    "User-Agent": settings.INGESTION_USER_AGENT,
-    "Accept": "application/rss+xml, application/xml, text/xml, application/atom+xml, */*",
-    "Accept-Language": "en-US,en;q=0.9",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Accept": "application/rss+xml, application/xml, text/xml, */*"
 }
 
-async def fetch_source_feed(client: httpx.AsyncClient, source: Source) -> Dict[str, Any]:
+def parse_pub_date(entry) -> datetime:
+    parsed_tuple = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
+    if parsed_tuple:
+        try:
+            return datetime(*parsed_tuple[:6], tzinfo=timezone.utc)
+        except Exception:
+            pass
+    return utc_now()
+
+async def fetch_feed_data(client: httpx.AsyncClient, source: Source) -> Dict[str, Any]:
     headers = dict(HEADERS)
     if source.etag:
         headers["If-None-Match"] = source.etag
@@ -30,58 +38,34 @@ async def fetch_source_feed(client: httpx.AsyncClient, source: Source) -> Dict[s
         headers["If-Modified-Since"] = source.last_modified
 
     try:
-        response = await client.get(source.feed_url, headers=headers, timeout=6.0, follow_redirects=True)
+        response = await client.get(source.feed_url, headers=headers, follow_redirects=True, timeout=12.0)
         
         if response.status_code == 304:
-            return {"source_id": source.id, "status": "not_modified", "code": 304, "items": []}
-        
-        response.raise_for_status()
-        
-        new_etag = response.headers.get("ETag") or response.headers.get("etag")
-        new_last_modified = response.headers.get("Last-Modified") or response.headers.get("last-modified")
+            logger.info(f"Feed [{source.name}] returned 304 Not Modified. Skipping.")
+            return {"status": 304}
 
-        parsed = feedparser.parse(response.content)
-        items = parsed.entries or []
+        if response.status_code != 200:
+            logger.warning(f"Feed [{source.name}] returned HTTP status {response.status_code}")
+            return {"status": response.status_code}
 
+        etag = response.headers.get("etag")
+        last_modified = response.headers.get("last-modified")
+
+        parsed = feedparser.parse(response.text)
         return {
-            "source_id": source.id,
-            "status": "success",
-            "code": response.status_code,
-            "etag": new_etag,
-            "last_modified": new_last_modified,
-            "items": items
+            "status": 200,
+            "etag": etag,
+            "last_modified": last_modified,
+            "items": parsed.entries
         }
-
     except Exception as e:
-        logger.error(f"[Ingestion Error] Source '{source.name}' feed fetch error: {e}")
-        return {"source_id": source.id, "status": "error", "error": str(e), "items": []}
-
-
-def parse_pub_date(entry: Any) -> datetime:
-    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-        return datetime.fromtimestamp(time.mktime(entry.published_parsed), tz=timezone.utc)
-    elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-        return datetime.fromtimestamp(time.mktime(entry.updated_parsed), tz=timezone.utc)
-    return utc_now()
-
+        logger.error(f"Error fetching feed [{source.name}]: {str(e)}")
+        return {"status": 500, "error": str(e)}
 
 async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source: Source) -> int:
-    res = await fetch_source_feed(client, source)
-    
-    source.last_fetched_at = utc_now()
-    
-    if res["status"] == "error":
-        source.consecutive_failures += 1
-        if source.consecutive_failures >= 5:
-            source.status = "degraded"
-        await session.commit()
-        return 0
-
-    source.consecutive_failures = 0
-    if source.status == "degraded":
-        source.status = "active"
-
-    if res["status"] == "not_modified":
+    res = await fetch_feed_data(client, source)
+    if res.get("status") != 200:
+        source.last_polled_at = utc_now()
         await session.commit()
         return 0
 
@@ -104,6 +88,13 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
         
         # Filter out malformed, empty, or 'undefined' titles
         if not title or not link or title.lower() in ["undefined", "none", "null"] or len(title) < 3:
+            continue
+
+        url_hash = compute_url_hash(link)
+        
+        # Pass 1: Exact Dedup check
+        existing = await session.execute(select(Article).where(Article.url_hash == url_hash))
+        if existing.scalar_one_or_none():
             continue
 
         snippet = getattr(entry, "summary", "") or getattr(entry, "description", "")
@@ -162,26 +153,22 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
             )
             session.add(article)
             await session.flush()
-            
             new_cluster.representative_article_id = article.id
             recent_clusters.insert(0, new_cluster)
 
         new_articles_count += 1
 
+    source.last_polled_at = utc_now()
     await session.commit()
+    logger.info(f"Source [{source.name}] ingestion complete: {new_articles_count} new articles.")
     return new_articles_count
 
-
 async def poll_all_sources(session: AsyncSession) -> int:
-    result = await session.execute(select(Source).where(Source.status != "disabled"))
-    sources = result.scalars().all()
-    
-    if not sources:
-        return 0
-
+    res = await session.execute(select(Source))
+    sources = res.scalars().all()
     total_new = 0
-    limits = httpx.Limits(max_keepalive_connections=20, max_connections=30)
-    async with httpx.AsyncClient(verify=False, limits=limits) as client:
+
+    async with httpx.AsyncClient() as client:
         for source in sources:
             count = await ingest_source(session, client, source)
             total_new += count
