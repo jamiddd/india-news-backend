@@ -137,6 +137,70 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://www.northeasttoday.in",
         "category": "northeast",
         "region": "northeast"
+    },
+    {
+        "name": "Indian Express Sports",
+        "slug": "indian-express-sports",
+        "feed_url": "https://indianexpress.com/section/sports/feed/",
+        "homepage_url": "https://indianexpress.com/section/sports/",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times Cricket",
+        "slug": "hindustan-times-cricket",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/cricket/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/cricket",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Sports",
+        "slug": "toi-sports",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/4719148.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/sports",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "NDTV Sports",
+        "slug": "ndtv-sports",
+        "feed_url": "https://feeds.feedburner.com/ndtvsports-latest",
+        "homepage_url": "https://sports.ndtv.com",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Entertainment",
+        "slug": "indian-express-entertainment",
+        "feed_url": "https://indianexpress.com/section/entertainment/feed/",
+        "homepage_url": "https://indianexpress.com/section/entertainment/",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times Entertainment",
+        "slug": "hindustan-times-entertainment",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/entertainment/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/entertainment",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Entertainment",
+        "slug": "toi-entertainment",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/1081479906.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/entertainment",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        "name": "NDTV Movies",
+        "slug": "ndtv-movies",
+        "feed_url": "https://feeds.feedburner.com/ndtvmovies-latest",
+        "homepage_url": "https://movies.ndtv.com",
+        "category": "entertainment",
+        "region": "national"
     }
 ]
 
