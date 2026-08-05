@@ -19,6 +19,7 @@ _TRUNCATE_MARKERS = [
     "follow every breaking story live",
     "wait for it",
     "exceeded the limit to bookmark",
+    "get your daily dose of tech news",  # Gadgets 360 sign-off
 ]
 
 # Standalone lines that are pure site chrome wherever they occur — dropped

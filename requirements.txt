@@ -8,6 +8,9 @@ pydantic-settings>=2.2.1
 httpx>=0.27.0
 feedparser>=6.0.11
 trafilatura>=1.8.0
+curl_cffi>=0.13.0  # impersonates real browser TLS fingerprints — several sources
+                   # (Gadgets360, Indian Express) 403 plain httpx/curl at the WAF
+                   # (Akamai etc.) regardless of headers; this gets past that.
 google-auth>=2.29.0
 requests>=2.31.0  # required by google.auth.transport.requests
 redis>=5.0.3

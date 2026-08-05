@@ -3,8 +3,8 @@ import logging
 import hashlib
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-import httpx
 import feedparser
+from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, desc, func
@@ -12,7 +12,7 @@ from sqlalchemy import update, desc, func
 from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
-from app.services.extractor import extract_full_content
+from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image
 
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +22,12 @@ logger = logging.getLogger(__name__)
 # so one feed's poll can't hammer a publisher's site or stall the poller.
 EXTRACTION_CONCURRENCY = 5
 
+# Only conditional-GET headers here — no User-Agent/Accept. curl_cffi's
+# impersonate= already sends a full, internally-consistent Chrome header set
+# (User-Agent, Accept, sec-ch-ua, ...) matched to its TLS fingerprint; adding
+# our own User-Agent on top would make the two disagree, which is itself a
+# bot-detection signal.
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept": "application/rss+xml, application/xml, text/xml, */*"
 }
 
@@ -36,7 +40,7 @@ def parse_pub_date(entry) -> datetime:
             pass
     return utc_now()
 
-async def fetch_feed_data(client: httpx.AsyncClient, source: Source) -> Dict[str, Any]:
+async def fetch_feed_data(client: CurlAsyncSession, source: Source) -> Dict[str, Any]:
     headers = dict(HEADERS)
     if source.etag:
         headers["If-None-Match"] = source.etag
@@ -44,7 +48,9 @@ async def fetch_feed_data(client: httpx.AsyncClient, source: Source) -> Dict[str
         headers["If-Modified-Since"] = source.last_modified
 
     try:
-        response = await client.get(source.feed_url, headers=headers, follow_redirects=True, timeout=12.0)
+        response = await client.get(
+            source.feed_url, headers=headers, allow_redirects=True, timeout=12.0, impersonate=IMPERSONATE
+        )
         
         if response.status_code == 304:
             logger.info(f"Feed [{source.name}] returned 304 Not Modified. Skipping.")
@@ -68,7 +74,7 @@ async def fetch_feed_data(client: httpx.AsyncClient, source: Source) -> Dict[str
         logger.error(f"Error fetching feed [{source.name}]: {str(e)}")
         return {"status": 500, "error": str(e)}
 
-async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source: Source) -> int:
+async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source: Source) -> int:
     res = await fetch_feed_data(client, source)
     if res.get("status") != 200:
         source.last_polled_at = utc_now()
@@ -237,7 +243,7 @@ async def poll_all_sources(session: AsyncSession) -> int:
         sources = res.scalars().all()
         total_new = 0
 
-        async with httpx.AsyncClient() as client:
+        async with CurlAsyncSession() as client:
             for source in sources:
                 source_name = source.name  # capture before the try: once the
                 # session's transaction is aborted below, even this lazy ORM

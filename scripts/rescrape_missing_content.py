@@ -23,7 +23,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
-import httpx
+from curl_cffi.requests import AsyncSession as CurlAsyncSession
 
 # Ensure root of repo/backend is in sys.path (matches other scripts/ here)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -32,7 +32,7 @@ from sqlalchemy import select, update
 
 from app.database import AsyncSessionLocal
 from app.models import Article
-from app.services.extractor import extract_full_content
+from app.services.extractor import extract_full_content, IMPERSONATE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,15 +53,19 @@ async def main():
         semaphore = asyncio.Semaphore(CONCURRENCY)
         recovered = 0
 
-        async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0"}) as client:
+        async with CurlAsyncSession() as client:
             async def rescrape(article_id: int, title: str, url: str):
                 nonlocal recovered
                 async with semaphore:
-                    content = await extract_full_content(client, url, title)
-                if content:
-                    await session.execute(
-                        update(Article).where(Article.id == article_id).values(content=content)
-                    )
+                    extraction = await extract_full_content(client, url, title)
+                if extraction.content:
+                    values = {"content": extraction.content}
+                    if extraction.og_image_url:
+                        # Only set if we actually found one — these rows may
+                        # already have an RSS-provided image_url, and a
+                        # missing og:image here shouldn't clobber that.
+                        values["image_url"] = extraction.og_image_url
+                    await session.execute(update(Article).where(Article.id == article_id).values(**values))
                     recovered += 1
 
             await asyncio.gather(*(rescrape(r.id, r.title, r.url) for r in rows))

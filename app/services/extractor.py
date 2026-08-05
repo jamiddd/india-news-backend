@@ -4,14 +4,19 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
-import httpx
 import trafilatura
+from curl_cffi.requests import AsyncSession
 
 from app.services.content_cleaner import clean_extracted_text
 
 logger = logging.getLogger(__name__)
 
 EXTRACT_TIMEOUT_SECONDS = 10.0
+# Impersonate a real Chrome TLS fingerprint — several sources (Gadgets360,
+# Indian Express) 403 a plain httpx/curl request at the WAF layer (Akamai
+# etc.) no matter what headers are sent, because the block is keyed off the
+# TLS handshake itself, not anything in the HTTP request.
+IMPERSONATE = "chrome124"
 
 # Matches a <meta property="og:image" content="..."> tag regardless of
 # attribute order (some sites emit content= before property=).
@@ -34,7 +39,7 @@ def _extract_og_image(html: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-async def extract_full_content(client: httpx.AsyncClient, url: str, title: Optional[str] = None) -> ExtractedArticle:
+async def extract_full_content(client: AsyncSession, url: str, title: Optional[str] = None) -> ExtractedArticle:
     """
     Fetch the article page at `url` and pull out:
     - the main body text (byline/nav/ads/comments stripped) via trafilatura,
@@ -49,7 +54,7 @@ async def extract_full_content(client: httpx.AsyncClient, url: str, title: Optio
     snippet/no-image the same way a failed scrape would.
     """
     try:
-        response = await client.get(url, timeout=EXTRACT_TIMEOUT_SECONDS, follow_redirects=True)
+        response = await client.get(url, timeout=EXTRACT_TIMEOUT_SECONDS, allow_redirects=True, impersonate=IMPERSONATE)
         if response.status_code != 200 or not response.text:
             return ExtractedArticle(None, None)
 
