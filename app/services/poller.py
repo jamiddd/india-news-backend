@@ -123,11 +123,11 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
     # Pass 2: scrape full article body for each candidate, bounded concurrency.
     semaphore = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
 
-    async def fetch_bounded(link: str) -> Optional[str]:
+    async def fetch_bounded(link: str, title: str) -> Optional[str]:
         async with semaphore:
-            return await extract_full_content(client, link)
+            return await extract_full_content(client, link, title)
 
-    contents = await asyncio.gather(*(fetch_bounded(c["link"]) for c in candidates))
+    contents = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
 
     # Pass 3: near-duplicate clustering + insert, now that content is in hand.
     for candidate, content in zip(candidates, contents):

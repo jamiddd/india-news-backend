@@ -5,15 +5,20 @@ from typing import Optional
 import httpx
 import trafilatura
 
+from app.services.content_cleaner import clean_extracted_text
+
 logger = logging.getLogger(__name__)
 
 EXTRACT_TIMEOUT_SECONDS = 10.0
 
 
-async def extract_full_content(client: httpx.AsyncClient, url: str) -> Optional[str]:
+async def extract_full_content(client: httpx.AsyncClient, url: str, title: Optional[str] = None) -> Optional[str]:
     """
     Fetch the article page at `url` and pull out the main body text
-    (byline/nav/ads/comments stripped) via trafilatura.
+    (byline/nav/ads/comments stripped) via trafilatura, then run it through
+    clean_extracted_text() to strip recurring publisher boilerplate
+    (author bios, social/subscribe CTAs, comment disclaimers) trafilatura's
+    own boundary detection lets through.
 
     Returns None on any failure (network error, non-200, no extractable
     text) so callers can fall back to the RSS snippet.
@@ -30,11 +35,10 @@ async def extract_full_content(client: httpx.AsyncClient, url: str) -> Optional[
             response.text,
             include_comments=False,
             include_tables=False,
-            favor_recall=True,
+            favor_precision=True,  # prioritize cutting boilerplate over recall of every last line
+            deduplicate=True,
         )
-        if text:
-            text = text.strip()
-        return text or None
+        return clean_extracted_text(text, title)
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")
         return None
