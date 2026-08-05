@@ -9,6 +9,23 @@ from app.database import Base
 def utc_now():
     return datetime.now(timezone.utc)
 
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(64), primary_key=True)
+    email = Column(String(320), nullable=False, index=True)
+    display_name = Column(String(255), nullable=False)
+    provider = Column(String(50), nullable=False)
+    provider_uid = Column(String(255), nullable=True)
+    preferences = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("uq_users_provider_uid", "provider", "provider_uid", unique=True),
+    )
+
 class Source(Base):
     __tablename__ = "sources"
 

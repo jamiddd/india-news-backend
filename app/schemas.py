@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, List, Any
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 class SourceOut(BaseModel):
     id: int
@@ -50,3 +50,26 @@ class PaginatedClustersOut(BaseModel):
     items: List[StoryClusterOut]
     next_cursor: Optional[str] = None
     has_more: bool
+
+
+class UserPreferences(BaseModel):
+    theme_mode: str = "system"
+    accent_color: str = "blue"
+    language_pref: str = "all"
+    enabled_categories: List[str] = Field(default_factory=list)
+    custom_categories: List[str] = Field(default_factory=list)
+
+
+class UserAuthRequest(BaseModel):
+    email: str
+    display_name: str
+    provider: str
+    uid: Optional[str] = None
+
+
+class UserAuthResponse(BaseModel):
+    user_id: str
+    email: str
+    display_name: str
+    token: Optional[str] = None
+    preferences: UserPreferences

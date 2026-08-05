@@ -9,8 +9,12 @@ from sqlalchemy import desc, or_
 
 from app.config import settings
 from app.database import engine, Base, get_db
-from app.models import Source, Article, StoryCluster
-from app.schemas import SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut
+from app.models import Source, Article, StoryCluster, User, utc_now
+from app.schemas import (
+    SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
+    UserAuthRequest, UserAuthResponse, UserPreferences,
+)
+from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.enrichment import enrich_cluster_with_ai
 
@@ -26,6 +30,64 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+DEFAULT_PREFERENCES = UserPreferences(
+    enabled_categories=["all", "national", "business", "official", "tech"]
+)
+
+
+@app.post(f"{settings.API_V1_STR}/auth/login", response_model=UserAuthResponse)
+async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db)):
+    """Create/update a user and return the preferences saved for that account."""
+    lookup = (
+        select(User).where(User.provider == payload.provider, User.provider_uid == payload.uid)
+        if payload.uid else select(User).where(User.email == payload.email)
+    )
+    result = await db.execute(lookup)
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        user = User(
+            id=f"usr_{uuid4().hex[:12]}",
+            email=payload.email,
+            display_name=payload.display_name,
+            provider=payload.provider,
+            provider_uid=payload.uid,
+            preferences=DEFAULT_PREFERENCES.model_dump(),
+        )
+        db.add(user)
+    else:
+        user.email = payload.email
+        user.display_name = payload.display_name
+        user.provider = payload.provider
+        user.provider_uid = payload.uid
+        user.updated_at = utc_now()
+
+    await db.commit()
+    await db.refresh(user)
+    return UserAuthResponse(
+        user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        preferences=UserPreferences.model_validate(user.preferences or {}),
+    )
+
+
+@app.put(f"{settings.API_V1_STR}/users/{{user_id}}/preferences", status_code=200)
+async def update_user_preferences(
+    user_id: str,
+    preferences: UserPreferences,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.preferences = preferences.model_dump()
+    user.updated_at = utc_now()
+    await db.commit()
+    return {"message": "Preferences updated successfully"}
 
 @app.get("/")
 async def root():
