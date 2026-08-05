@@ -52,14 +52,30 @@ OUTPUT FORMAT: Return strictly valid JSON with keys:
 """
 
 def parse_json_response(text: str) -> Dict[str, Any]:
-    """Parse the model's JSON reply, tolerating a markdown code fence around it.
-    Despite the prompt asking for raw JSON, claude-haiku-4-5 reliably wraps its
-    answer in ```json ... ``` — strip that before handing off to json.loads."""
+    """Parse the model's JSON reply. Despite the prompt asking for strictly
+    raw JSON, claude-haiku-4-5 in practice wraps it in ```json ... ``` and
+    sometimes adds surrounding commentary the model wasn't asked for. Try, in
+    order: raw parse, fence-stripped parse, then a last-resort extraction of
+    the first {...} span regardless of what's around it."""
     cleaned = text.strip()
-    fence_match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```$", cleaned, re.DOTALL)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    fence_match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
     if fence_match:
-        cleaned = fence_match.group(1).strip()
-    return json.loads(cleaned)
+        try:
+            return json.loads(fence_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    brace_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if brace_match:
+        return json.loads(brace_match.group(0))
+
+    raise ValueError(f"Could not extract JSON from model response: {cleaned[:200]!r}")
 
 def extract_entities_rule_based(text: str) -> Dict[str, List[str]]:
     """Rule-based entity extraction for Indian news domain."""
