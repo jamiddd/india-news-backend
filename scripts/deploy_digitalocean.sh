@@ -24,11 +24,11 @@ sleep 5
 
 # 4. Seed initial sources inside container
 echo "Seeding 16 verified RSS feeds..."
-docker exec news_backend_prod python3 backend/scripts/seed_sources.py
+docker exec news_backend_prod python3 scripts/seed_sources.py
 
 # 5. Run initial ingestion sweep
 echo "Executing initial RSS ingestion sweep..."
-docker exec news_backend_prod python3 backend/scripts/run_poller_now.py
+docker exec news_backend_prod python3 scripts/run_poller_now.py
 
 echo "================================================================="
 echo " ✅ DEPLOYMENT COMPLETE! Backend is live on http://$(curl -s ifconfig.me):8000"

@@ -4,7 +4,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: Dockerfile
     container_name: news_backend_prod
     restart: always
     environment:
