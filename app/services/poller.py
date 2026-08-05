@@ -205,6 +205,9 @@ async def poll_all_sources(session: AsyncSession) -> int:
 
     async with httpx.AsyncClient() as client:
         for source in sources:
+            source_name = source.name  # capture before the try: once the
+            # session's transaction is aborted below, even this lazy ORM
+            # attribute access would itself raise PendingRollbackError
             try:
                 count = await ingest_source(session, client, source)
                 total_new += count
@@ -214,12 +217,12 @@ async def poll_all_sources(session: AsyncSession) -> int:
                 # url_hash constraint) leaves the shared session's
                 # transaction aborted; without rolling back here, every
                 # subsequent source in this loop would fail too since they
-                # all share this one session. Roll back and move on — this
-                # source's batch is skipped for this cycle, but it isn't
-                # lost: the next poll re-fetches the feed and dedupes
+                # all share this one session. Roll back first, then log —
+                # this source's batch is skipped for this cycle, but it
+                # isn't lost: the next poll re-fetches the feed and dedupes
                 # cleanly against whatever the other run already committed.
-                logger.error(f"Ingestion failed for source [{source.name}], skipping this cycle: {e}")
                 await session.rollback()
+                logger.error(f"Ingestion failed for source [{source_name}], skipping this cycle: {e}")
 
     logger.info(f"[Ingestion Complete] Ingested {total_new} new articles across {len(sources)} sources.")
     return total_new
