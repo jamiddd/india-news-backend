@@ -13,6 +13,7 @@ from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
 from app.services.extractor import extract_full_content
+from app.services.image_extractor import extract_rss_image
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,6 +120,7 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
 
         author = getattr(entry, "author", None)
         pub_date = parse_pub_date(entry)
+        rss_image_url = extract_rss_image(entry)
 
         candidates.append({
             "link": link,
@@ -127,25 +129,30 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
             "snippet": snippet,
             "author": author,
             "pub_date": pub_date,
+            "rss_image_url": rss_image_url,
         })
 
-    # Pass 2: scrape full article body for each candidate, bounded concurrency.
+    # Pass 2: scrape full article body (+ fallback og:image) per candidate, bounded concurrency.
     semaphore = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
 
-    async def fetch_bounded(link: str, title: str) -> Optional[str]:
+    async def fetch_bounded(link: str, title: str):
         async with semaphore:
             return await extract_full_content(client, link, title)
 
-    contents = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
+    extracted = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
 
     # Pass 3: near-duplicate clustering + insert, now that content is in hand.
-    for candidate, content in zip(candidates, contents):
+    for candidate, extraction in zip(candidates, extracted):
         title = candidate["title"]
         link = candidate["link"]
         url_hash = candidate["url_hash"]
         snippet = candidate["snippet"]
         author = candidate["author"]
         pub_date = candidate["pub_date"]
+        content = extraction.content
+        # Prefer the RSS feed's own image (usually higher quality / more
+        # reliably the lead image) over the scraped page's og:image fallback.
+        image_url = candidate["rss_image_url"] or extraction.og_image_url
 
         simhash_val = compute_simhash(title, snippet)
 
@@ -164,6 +171,7 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
                 title=title,
                 snippet=snippet,
                 content=content,
+                image_url=image_url,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
@@ -190,6 +198,7 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
                 title=title,
                 snippet=snippet,
                 content=content,
+                image_url=image_url,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
