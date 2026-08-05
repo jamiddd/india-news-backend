@@ -147,7 +147,20 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                structured = parse_json_response(data["content"][0]["text"])
+                content_blocks = data.get("content", [])
+                raw_text = content_blocks[0]["text"] if content_blocks else ""
+
+                try:
+                    structured = parse_json_response(raw_text)
+                except Exception as parse_err:
+                    # Log exactly what came back so a parsing failure is
+                    # diagnosable from the logs alone, not just "it failed".
+                    logger.warning(
+                        f"[Anthropic JSON parse failed] Cluster #{cluster.id} "
+                        f"stop_reason={data.get('stop_reason')!r} "
+                        f"raw_text={raw_text[:500]!r} — {parse_err}"
+                    )
+                    raise
 
                 cluster.headline = structured.get("neutral_headline", cluster.headline)
                 bullets = structured.get("summary_bullets", [])
