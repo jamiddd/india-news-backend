@@ -61,6 +61,7 @@ class Article(Base):
     
     title = Column(Text, nullable=False)
     snippet = Column(Text, nullable=True)
+    content = Column(Text, nullable=True)  # Full article body, scraped from the article URL
     author = Column(String(255), nullable=True)
     
     published_at = Column(DateTime(timezone=True), nullable=False, index=True)

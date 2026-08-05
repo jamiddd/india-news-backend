@@ -110,6 +110,7 @@ async def search_story_clusters(
                     url=art.url,
                     title=art.title,
                     snippet=art.snippet,
+                    content=art.content,
                     author=art.author,
                     published_at=art.published_at,
                     image_url=art.image_url
@@ -173,6 +174,7 @@ async def list_story_clusters(
                 url=art.url,
                 title=art.title,
                 snippet=art.snippet,
+                content=art.content,
                 author=art.author,
                 published_at=art.published_at,
                 image_url=art.image_url
@@ -222,6 +224,7 @@ async def get_story_cluster(cluster_id: int, db: AsyncSession = Depends(get_db))
             url=art.url,
             title=art.title,
             snippet=art.snippet,
+            content=art.content,
             author=art.author,
             published_at=art.published_at,
             image_url=art.image_url
