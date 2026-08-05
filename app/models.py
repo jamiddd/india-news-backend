@@ -26,6 +26,51 @@ class User(Base):
         Index("uq_users_provider_uid", "provider", "provider_uid", unique=True),
     )
 
+
+class CommunityPost(Base):
+    __tablename__ = "community_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    author_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    category = Column(String(80), nullable=False, index=True)
+    image_urls = Column(JSON, nullable=False, default=list)
+    status = Column(String(30), nullable=False, default="DRAFT", index=True)
+    rejection_reason = Column(Text, nullable=True)
+    reviewed_by = Column(String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+    author = relationship("User", foreign_keys=[author_id])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+
+class CommunityPostReview(Base):
+    __tablename__ = "community_post_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    admin_id = Column(String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action = Column(String(30), nullable=False)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class CommunityPostReport(Base):
+    __tablename__ = "community_post_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey("community_posts.id", ondelete="CASCADE"), nullable=False, index=True)
+    reporter_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(40), nullable=False)
+    details = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (Index("uq_community_reporter_post", "post_id", "reporter_id", unique=True),)
+
 class Source(Base):
     __tablename__ = "sources"
 

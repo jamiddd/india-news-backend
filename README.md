@@ -14,6 +14,7 @@ Multi-Outlet News Aggregation & AI Framing Analysis Engine for Indian Media Publ
   - `GET /api/v1/search?q=...`: Full-text search across headlines and summaries.
   - `POST /api/v1/ingest/poll`: Trigger background ingestion poller.
   - `POST /api/v1/clusters/{id}/enrich`: Trigger AI enrichment.
+- **Moderated community news**: allowlisted users can create drafts and submissions; admins approve, reject, audit, report, withdraw, or take down posts in a separate feed.
 
 ## 🚀 Quickstart (Local Development)
 
@@ -31,6 +32,9 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 ## ☁️ DigitalOcean Production Deployment
+
+Before deploying community news, set `COMMUNITY_ALLOWED_EMAILS` and `COMMUNITY_ADMIN_EMAILS` in the deployment environment. These values must match the allowlist in `CommunityScreen.kt`; the backend remains the source of truth and denies access when either list is empty.
+
 ```bash
 chmod +x scripts/deploy_digitalocean.sh
 ./scripts/deploy_digitalocean.sh

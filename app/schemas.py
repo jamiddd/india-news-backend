@@ -73,3 +73,58 @@ class UserAuthResponse(BaseModel):
     display_name: str
     token: Optional[str] = None
     preferences: UserPreferences
+
+
+class CommunityPostCreate(BaseModel):
+    user_id: str
+    title: str = Field(min_length=3, max_length=255)
+    body: str = Field(min_length=3, max_length=10000)
+    category: str = Field(min_length=1, max_length=80)
+    image_urls: List[str] = Field(default_factory=list, max_length=10)
+    submit_for_review: bool = True
+
+
+class CommunityPostOut(BaseModel):
+    id: int
+    author_id: str
+    author_display_name: str
+    title: str
+    body: str
+    category: str
+    image_urls: List[str] = []
+    status: str
+    rejection_reason: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    published_at: Optional[datetime] = None
+
+
+class CommunityPostModeration(BaseModel):
+    admin_user_id: str
+    rejection_reason: Optional[str] = None
+
+
+class CommunityPostUpdate(BaseModel):
+    user_id: str
+    title: str = Field(min_length=3, max_length=255)
+    body: str = Field(min_length=3, max_length=10000)
+    category: str = Field(min_length=1, max_length=80)
+    image_urls: List[str] = Field(default_factory=list, max_length=10)
+    submit_for_review: bool = True
+
+
+class CommunityPostReportCreate(BaseModel):
+    user_id: str
+    reason: str = Field(min_length=2, max_length=40)
+    details: Optional[str] = Field(default=None, max_length=2000)
+
+
+class CommunityPostReportOut(BaseModel):
+    id: int
+    post_id: int
+    reporter_id: str
+    reason: str
+    details: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # is rejected until this is set to a real value.
     GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
 
+    # Comma-separated accounts allowed to use the community-news area.
+    COMMUNITY_ALLOWED_EMAILS: str = ""
+    # Comma-separated administrator accounts allowed to moderate submissions.
+    COMMUNITY_ADMIN_EMAILS: str = ""
+
     # extra="ignore": .env / the container environment may carry vars that
     # aren't app settings at all (e.g. POSTGRES_PASSWORD, which docker-compose
     # only uses to interpolate DATABASE_URL) — don't fail startup over those.
