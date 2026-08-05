@@ -128,7 +128,7 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                         "content-type": "application/json"
                     },
                     json={
-                        "model": "claude-3-haiku-20240307",
+                        "model": "claude-haiku-4-5",
                         "max_tokens": 1000,
                         "system": ENRICHMENT_SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}"}]

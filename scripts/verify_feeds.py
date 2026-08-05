@@ -29,12 +29,15 @@ CANDIDATE_FEEDS = [
     {"id": "india_today", "name": "India Today", "category": "national", "url": "https://www.indiatoday.in/rss/1206578"},
 
     # Independent / Analysis
-    {"id": "scroll", "name": "Scroll.in", "category": "analysis", "url": "https://scroll.in/feed"},
-    {"id": "theprint", "name": "ThePrint", "category": "analysis", "url": "https://theprint.in/feed"},
-    {"id": "the_wire", "name": "The Wire", "category": "analysis", "url": "https://thewire.in/rss"},
+    # NOTE (re-checked 2026-08-05): all three below are currently dead/blocked.
+    # Not header/redirect-fixable — see per-feed comment. Kept in the candidate
+    # list so verify_feeds.py re-checks them each run in case that changes.
+    {"id": "scroll", "name": "Scroll.in", "category": "analysis", "url": "https://scroll.in/feed"},  # RSS retired: /feed/ 301s to /page/1 (HTML), /rss is 404.
+    {"id": "theprint", "name": "ThePrint", "category": "analysis", "url": "https://theprint.in/feed"},  # Cloudflare JS challenge ("Just a moment..."); needs a headless-browser fetch path, not a header fix.
+    {"id": "the_wire", "name": "The Wire", "category": "analysis", "url": "https://thewire.in/rss"},  # RSS retired: /rss and /feed serve the HTML SPA shell; old cdn.thewire.in/feed returns S3 AccessDenied.
 
     # Business / Markets
-    {"id": "business_standard", "name": "Business Standard", "category": "business", "url": "https://www.business-standard.com/rss/home_page_top_stories.rss"},
+    {"id": "business_standard", "name": "Business Standard", "category": "business", "url": "https://www.business-standard.com/rss/home_page_top_stories.rss"},  # Blanket WAF 403 regardless of UA/Referer/headers tested — not header-fixable without IP rotation (not doing that).
     {"id": "livemint", "name": "Livemint", "category": "business", "url": "https://www.livemint.com/rss/news"},
     {"id": "moneycontrol", "name": "Moneycontrol", "category": "business", "url": "https://www.moneycontrol.com/rss/MCtopnews.xml"},
     {"id": "economic_times", "name": "Economic Times", "category": "business", "url": "https://economictimes.indiatimes.com/rssfeedstopstories.cms"},
