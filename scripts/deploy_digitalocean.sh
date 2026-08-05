@@ -31,5 +31,5 @@ echo "Executing initial RSS ingestion sweep..."
 docker exec news_backend_prod python3 scripts/run_poller_now.py
 
 echo "================================================================="
-echo " ✅ DEPLOYMENT COMPLETE! Backend is live on http://$(curl -s ifconfig.me):8000"
+echo " ✅ DEPLOYMENT COMPLETE! Backend is live on http://$(curl -s ifconfig.me):8080"
 echo "================================================================="
