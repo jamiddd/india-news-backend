@@ -6,7 +6,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import desc, or_, func
+from sqlalchemy import desc, or_, func, text
 
 from app.config import settings
 from app.database import engine, Base, get_db
@@ -22,10 +22,24 @@ from app.services.poller import poll_all_sources
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.google_oauth import verify_google_id_token, InvalidGoogleIdToken
 
+# Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
+# Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
+# executing this lifespan on startup — without a lock, they can race to
+# CREATE TABLE for anything new, since create_all's "does it exist" check
+# and the actual CREATE aren't atomic together. Observed live: deploying the
+# community-post tables hit a UniqueViolation on Postgres's own pg_type
+# catalog when two workers' CREATE TABLE calls landed at the same moment.
+# Distinct from poller.py's POLL_LOCK_KEY (different purpose, same pattern).
+SCHEMA_LOCK_KEY = 918273645
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text(f"SELECT pg_advisory_lock({SCHEMA_LOCK_KEY})"))
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+        finally:
+            await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
 
 app = FastAPI(
