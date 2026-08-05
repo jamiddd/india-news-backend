@@ -9,6 +9,7 @@ httpx>=0.27.0
 feedparser>=6.0.11
 trafilatura>=1.8.0
 google-auth>=2.29.0
+requests>=2.31.0  # required by google.auth.transport.requests
 redis>=5.0.3
 python-dotenv>=1.0.1
 simhash>=2.1.2
