@@ -17,6 +17,7 @@ from app.schemas import (
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.google_oauth import verify_google_id_token, InvalidGoogleIdToken
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,10 +39,37 @@ DEFAULT_PREFERENCES = UserPreferences(
 
 @app.post(f"{settings.API_V1_STR}/auth/login", response_model=UserAuthResponse)
 async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db)):
-    """Create/update a user and return the preferences saved for that account."""
+    """
+    Create/update a user and return the preferences saved for that account.
+
+    For provider="google", `payload.uid` is the Google ID token (a signed JWT,
+    not a stable identifier) — it must be cryptographically verified against
+    Google's own keys before trusting the email/name it claims, and the
+    stable identity to key the user row on is the token's "sub" claim, not
+    the token string itself (which is different on every login).
+    """
+    verified_email = payload.email
+    verified_name = payload.display_name
+    provider_uid = payload.uid
+
+    if payload.provider == "google":
+        if not payload.uid:
+            raise HTTPException(status_code=401, detail="Missing Google ID token")
+        if not settings.GOOGLE_OAUTH_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Google OAuth client ID not configured on server")
+
+        try:
+            identity = await verify_google_id_token(payload.uid, settings.GOOGLE_OAUTH_CLIENT_ID)
+        except InvalidGoogleIdToken as e:
+            raise HTTPException(status_code=401, detail=f"Invalid Google ID token: {e}")
+
+        verified_email = identity.email
+        verified_name = identity.name
+        provider_uid = identity.subject  # stable per-account id, not the token itself
+
     lookup = (
-        select(User).where(User.provider == payload.provider, User.provider_uid == payload.uid)
-        if payload.uid else select(User).where(User.email == payload.email)
+        select(User).where(User.provider == payload.provider, User.provider_uid == provider_uid)
+        if provider_uid else select(User).where(User.email == verified_email)
     )
     result = await db.execute(lookup)
     user = result.scalar_one_or_none()
@@ -49,18 +77,18 @@ async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db
     if user is None:
         user = User(
             id=f"usr_{uuid4().hex[:12]}",
-            email=payload.email,
-            display_name=payload.display_name,
+            email=verified_email,
+            display_name=verified_name,
             provider=payload.provider,
-            provider_uid=payload.uid,
+            provider_uid=provider_uid,
             preferences=DEFAULT_PREFERENCES.model_dump(),
         )
         db.add(user)
     else:
-        user.email = payload.email
-        user.display_name = payload.display_name
+        user.email = verified_email
+        user.display_name = verified_name
         user.provider = payload.provider
-        user.provider_uid = payload.uid
+        user.provider_uid = provider_uid
         user.updated_at = utc_now()
 
     await db.commit()

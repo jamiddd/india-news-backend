@@ -11,6 +11,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://news_user:${POSTGRES_PASSWORD:-news_password}@postgres:5432/news_db
       - REDIS_URL=redis://redis:6379/0
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
     ports:
       - "8080:8000"
     depends_on:

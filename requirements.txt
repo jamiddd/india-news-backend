@@ -8,6 +8,7 @@ pydantic-settings>=2.2.1
 httpx>=0.27.0
 feedparser>=6.0.11
 trafilatura>=1.8.0
+google-auth>=2.29.0
 redis>=5.0.3
 python-dotenv>=1.0.1
 simhash>=2.1.2

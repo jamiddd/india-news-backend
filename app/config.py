@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Auth — must match the Android app's Google Sign-In server/web client ID
+    # (GetGoogleIdOption.setServerClientId(...) in LoginScreen.kt), since that's
+    # the audience Google's ID tokens are issued for. Login with provider="google"
+    # is rejected until this is set to a real value.
+    GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
+
     # extra="ignore": .env / the container environment may carry vars that
     # aren't app settings at all (e.g. POSTGRES_PASSWORD, which docker-compose
     # only uses to interpolate DATABASE_URL) — don't fail startup over those.
