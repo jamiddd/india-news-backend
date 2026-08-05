@@ -205,8 +205,21 @@ async def poll_all_sources(session: AsyncSession) -> int:
 
     async with httpx.AsyncClient() as client:
         for source in sources:
-            count = await ingest_source(session, client, source)
-            total_new += count
+            try:
+                count = await ingest_source(session, client, source)
+                total_new += count
+            except Exception as e:
+                # A failed commit (e.g. a duplicate-key race against an
+                # overlapping poll run — see IntegrityError from the unique
+                # url_hash constraint) leaves the shared session's
+                # transaction aborted; without rolling back here, every
+                # subsequent source in this loop would fail too since they
+                # all share this one session. Roll back and move on — this
+                # source's batch is skipped for this cycle, but it isn't
+                # lost: the next poll re-fetches the feed and dedupes
+                # cleanly against whatever the other run already committed.
+                logger.error(f"Ingestion failed for source [{source.name}], skipping this cycle: {e}")
+                await session.rollback()
 
     logger.info(f"[Ingestion Complete] Ingested {total_new} new articles across {len(sources)} sources.")
     return total_new
