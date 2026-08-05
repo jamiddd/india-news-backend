@@ -17,6 +17,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /app/
 
 ENV PYTHONPATH=/app
+# Unbuffered stdout/stderr — without this, `print()` output from scripts run
+# via `docker exec` (or redirected into a cron log file) doesn't show up
+# until the process exits, which looks indistinguishable from a hang.
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
