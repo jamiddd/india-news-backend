@@ -51,6 +51,16 @@ OUTPUT FORMAT: Return strictly valid JSON with keys:
 }
 """
 
+def parse_json_response(text: str) -> Dict[str, Any]:
+    """Parse the model's JSON reply, tolerating a markdown code fence around it.
+    Despite the prompt asking for raw JSON, claude-haiku-4-5 reliably wraps its
+    answer in ```json ... ``` — strip that before handing off to json.loads."""
+    cleaned = text.strip()
+    fence_match = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```$", cleaned, re.DOTALL)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+    return json.loads(cleaned)
+
 def extract_entities_rule_based(text: str) -> Dict[str, List[str]]:
     """Rule-based entity extraction for Indian news domain."""
     found_orgs = [org for org in KNOWN_ENTITIES["organizations"] if re.search(r'\b' + re.escape(org) + r'\b', text, re.IGNORECASE)]
@@ -137,7 +147,7 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                structured = json.loads(data["content"][0]["text"])
+                structured = parse_json_response(data["content"][0]["text"])
 
                 cluster.headline = structured.get("neutral_headline", cluster.headline)
                 bullets = structured.get("summary_bullets", [])
