@@ -7,7 +7,7 @@ import httpx
 import feedparser
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, desc
+from sqlalchemy import update, desc, func
 
 from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
@@ -198,31 +198,53 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
     logger.info(f"Source [{source.name}] ingestion complete: {new_articles_count} new articles.")
     return new_articles_count
 
+# Arbitrary fixed key identifying "a poll_all_sources cycle is running" as a
+# Postgres advisory lock. Cross-process by design: cron invokes the poller
+# as a brand-new `docker exec ... python3 scripts/run_poller_now.py` process
+# every 15 minutes, sharing no memory with the FastAPI app or any prior
+# invocation, so an in-process asyncio.Lock can't see across runs — only a
+# lock the DB itself arbitrates can. Session-scoped: Postgres releases it
+# automatically if the holding connection drops (crash, timeout), so there's
+# no stale-lock cleanup to worry about.
+POLL_LOCK_KEY = 872459123
+
 async def poll_all_sources(session: AsyncSession) -> int:
-    res = await session.execute(select(Source))
-    sources = res.scalars().all()
-    total_new = 0
+    got_lock = (await session.execute(select(func.pg_try_advisory_lock(POLL_LOCK_KEY)))).scalar()
+    if not got_lock:
+        logger.warning("Skipping poll: another poll_all_sources cycle is already running.")
+        return 0
 
-    async with httpx.AsyncClient() as client:
-        for source in sources:
-            source_name = source.name  # capture before the try: once the
-            # session's transaction is aborted below, even this lazy ORM
-            # attribute access would itself raise PendingRollbackError
-            try:
-                count = await ingest_source(session, client, source)
-                total_new += count
-            except Exception as e:
-                # A failed commit (e.g. a duplicate-key race against an
-                # overlapping poll run — see IntegrityError from the unique
-                # url_hash constraint) leaves the shared session's
-                # transaction aborted; without rolling back here, every
-                # subsequent source in this loop would fail too since they
-                # all share this one session. Roll back first, then log —
-                # this source's batch is skipped for this cycle, but it
-                # isn't lost: the next poll re-fetches the feed and dedupes
-                # cleanly against whatever the other run already committed.
-                await session.rollback()
-                logger.error(f"Ingestion failed for source [{source_name}], skipping this cycle: {e}")
+    try:
+        res = await session.execute(select(Source))
+        sources = res.scalars().all()
+        total_new = 0
 
-    logger.info(f"[Ingestion Complete] Ingested {total_new} new articles across {len(sources)} sources.")
-    return total_new
+        async with httpx.AsyncClient() as client:
+            for source in sources:
+                source_name = source.name  # capture before the try: once the
+                # session's transaction is aborted below, even this lazy ORM
+                # attribute access would itself raise PendingRollbackError
+                try:
+                    count = await ingest_source(session, client, source)
+                    total_new += count
+                except Exception as e:
+                    # A failed commit (e.g. a duplicate-key race, though this
+                    # should be rare now that overlapping cycles can't run
+                    # concurrently) leaves the shared session's transaction
+                    # aborted; without rolling back here, every subsequent
+                    # source in this loop would fail too since they all share
+                    # this one session. Roll back first, then log — this
+                    # source's batch is skipped for this cycle, but it isn't
+                    # lost: the next poll re-fetches the feed and dedupes
+                    # cleanly against whatever's already committed.
+                    await session.rollback()
+                    logger.error(f"Ingestion failed for source [{source_name}], skipping this cycle: {e}")
+
+        logger.info(f"[Ingestion Complete] Ingested {total_new} new articles across {len(sources)} sources.")
+        return total_new
+    finally:
+        # Defensive: if something above raised outside the per-source
+        # try/except, the session's transaction could still be aborted here,
+        # and an aborted session would reject even the unlock query itself.
+        await session.rollback()
+        await session.execute(select(func.pg_advisory_unlock(POLL_LOCK_KEY)))
