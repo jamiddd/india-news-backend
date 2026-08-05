@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    class Config:
-        env_file = ".env"
+    # extra="ignore": .env / the container environment may carry vars that
+    # aren't app settings at all (e.g. POSTGRES_PASSWORD, which docker-compose
+    # only uses to interpolate DATABASE_URL) — don't fail startup over those.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
