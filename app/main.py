@@ -7,12 +7,12 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import desc, or_
 
-from backend.app.config import settings
-from backend.app.database import engine, Base, get_db
-from backend.app.models import Source, Article, StoryCluster
-from backend.app.schemas import SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut
-from backend.app.services.poller import poll_all_sources
-from backend.app.services.enrichment import enrich_cluster_with_ai
+from app.config import settings
+from app.database import engine, Base, get_db
+from app.models import Source, Article, StoryCluster
+from app.schemas import SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut
+from app.services.poller import poll_all_sources
+from app.services.enrichment import enrich_cluster_with_ai
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

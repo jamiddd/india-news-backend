@@ -9,9 +9,9 @@ from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, desc
 
-from backend.app.config import settings
-from backend.app.models import Source, Article, StoryCluster, utc_now
-from backend.app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
+from app.config import settings
+from app.models import Source, Article, StoryCluster, utc_now
+from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

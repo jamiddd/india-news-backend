@@ -4,8 +4,8 @@ import logging
 from typing import Optional, Dict, Any, List
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.app.config import settings
-from backend.app.models import StoryCluster, Article
+from app.config import settings
+from app.models import StoryCluster, Article
 
 logger = logging.getLogger(__name__)
 

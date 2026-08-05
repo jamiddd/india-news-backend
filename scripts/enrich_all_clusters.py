@@ -6,9 +6,9 @@ from sqlalchemy.orm import selectinload
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from backend.app.database import AsyncSessionLocal
-from backend.app.models import StoryCluster, Article
-from backend.app.services.enrichment import enrich_cluster_with_ai
+from app.database import AsyncSessionLocal
+from app.models import StoryCluster, Article
+from app.services.enrichment import enrich_cluster_with_ai
 
 async def main():
     print("Running Entity Extraction & Framing Analysis enrichment across database clusters...")

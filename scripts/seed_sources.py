@@ -6,8 +6,8 @@ from sqlalchemy.future import select
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from backend.app.database import AsyncSessionLocal, engine, Base
-from backend.app.models import Source
+from app.database import AsyncSessionLocal, engine, Base
+from app.models import Source
 
 VERIFIED_SOURCES = [
     {

@@ -4,8 +4,8 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from backend.app.database import AsyncSessionLocal
-from backend.app.services.poller import poll_all_sources
+from app.database import AsyncSessionLocal
+from app.services.poller import poll_all_sources
 
 async def main():
     print("Starting background RSS polling sweep into PostgreSQL database...")
