@@ -201,6 +201,62 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://movies.ndtv.com",
         "category": "entertainment",
         "region": "national"
+    },
+    {
+        "name": "Indian Express Technology",
+        "slug": "indian-express-tech",
+        "feed_url": "https://indianexpress.com/section/technology/feed/",
+        "homepage_url": "https://indianexpress.com/section/technology/",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times Technology",
+        "slug": "hindustan-times-tech",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/technology/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/technology",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Gadgets 360 (NDTV)",
+        "slug": "gadgets360",
+        "feed_url": "https://feeds.feedburner.com/gadgets360-latest",
+        "homepage_url": "https://www.gadgets360.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Technology",
+        "slug": "toi-tech",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/66949542.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/technology",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Political Pulse",
+        "slug": "indian-express-politics",
+        "feed_url": "https://indianexpress.com/section/political-pulse/feed/",
+        "homepage_url": "https://indianexpress.com/section/political-pulse/",
+        "category": "politics",
+        "region": "national"
+    },
+    {
+        "name": "News18 Politics",
+        "slug": "news18-politics",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/politics.xml",
+        "homepage_url": "https://www.news18.com/politics/",
+        "category": "politics",
+        "region": "national"
+    },
+    {
+        "name": "Livemint Politics",
+        "slug": "livemint-politics",
+        "feed_url": "https://www.livemint.com/rss/politics",
+        "homepage_url": "https://www.livemint.com/politics",
+        "category": "politics",
+        "region": "national"
     }
 ]
 

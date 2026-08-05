@@ -33,9 +33,7 @@ app = FastAPI(
 )
 
 DEFAULT_PREFERENCES = UserPreferences(
-    # "tech" was listed here previously but no tech category/source has ever
-    # existed on the backend — swapped for the categories actually seeded.
-    enabled_categories=["all", "national", "business", "official", "sports", "entertainment"]
+    enabled_categories=["all", "national", "business", "official", "sports", "entertainment", "tech", "politics"]
 )
 
 
