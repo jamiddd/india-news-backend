@@ -23,6 +23,7 @@ class ArticleOut(BaseModel):
     url: str
     title: str
     snippet: Optional[str] = None
+    content: Optional[str] = None
     author: Optional[str] = None
     published_at: datetime
     image_url: Optional[str] = None

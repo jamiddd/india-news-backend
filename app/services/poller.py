@@ -12,9 +12,14 @@ from sqlalchemy import update, desc
 from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
+from app.services.extractor import extract_full_content
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Cap how many articles we scrape for full content at once, per source,
+# so one feed's poll can't hammer a publisher's site or stall the poller.
+EXTRACTION_CONCURRENCY = 5
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -82,17 +87,19 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
     )
     recent_clusters = list(recent_clusters_query.scalars().all())
 
+    # Pass 1: filter malformed/duplicate entries down to real candidates.
+    candidates = []
     for entry in items:
         title = getattr(entry, "title", "").strip()
         link = getattr(entry, "link", "").strip()
-        
+
         # Filter out malformed, empty, or 'undefined' titles
         if not title or not link or title.lower() in ["undefined", "none", "null"] or len(title) < 3:
             continue
 
         url_hash = compute_url_hash(link)
-        
-        # Pass 1: Exact Dedup check
+
+        # Exact Dedup check
         existing = await session.execute(select(Article).where(Article.url_hash == url_hash))
         if existing.scalar_one_or_none():
             continue
@@ -100,13 +107,39 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
         snippet = getattr(entry, "summary", "") or getattr(entry, "description", "")
         if snippet and snippet.lower() in ["undefined", "none", "null"]:
             snippet = ""
-            
+
         author = getattr(entry, "author", None)
         pub_date = parse_pub_date(entry)
-        
+
+        candidates.append({
+            "link": link,
+            "title": title,
+            "url_hash": url_hash,
+            "snippet": snippet,
+            "author": author,
+            "pub_date": pub_date,
+        })
+
+    # Pass 2: scrape full article body for each candidate, bounded concurrency.
+    semaphore = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
+
+    async def fetch_bounded(link: str) -> Optional[str]:
+        async with semaphore:
+            return await extract_full_content(client, link)
+
+    contents = await asyncio.gather(*(fetch_bounded(c["link"]) for c in candidates))
+
+    # Pass 3: near-duplicate clustering + insert, now that content is in hand.
+    for candidate, content in zip(candidates, contents):
+        title = candidate["title"]
+        link = candidate["link"]
+        url_hash = candidate["url_hash"]
+        snippet = candidate["snippet"]
+        author = candidate["author"]
+        pub_date = candidate["pub_date"]
+
         simhash_val = compute_simhash(title, snippet)
 
-        # Pass 2: Near-Duplicate Clustering
         matched_cluster: Optional[StoryCluster] = None
         for cluster in recent_clusters:
             rep_article = await session.get(Article, cluster.representative_article_id) if cluster.representative_article_id else None
@@ -121,6 +154,7 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
                 url_hash=url_hash,
                 title=title,
                 snippet=snippet,
+                content=content,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
@@ -146,6 +180,7 @@ async def ingest_source(session: AsyncSession, client: httpx.AsyncClient, source
                 url_hash=url_hash,
                 title=title,
                 snippet=snippet,
+                content=content,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
