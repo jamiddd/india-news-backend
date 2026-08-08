@@ -20,7 +20,7 @@ from app.schemas import (
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.enrichment import enrich_cluster_with_ai
-from app.services.google_oauth import verify_google_id_token, InvalidGoogleIdToken
+from app.services.firebase_auth import verify_firebase_id_token, InvalidFirebaseIdToken
 
 # Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
 # Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
@@ -59,9 +59,16 @@ def _emails(value: str) -> set[str]:
 async def _community_user(user_id: str, db: AsyncSession, admin: bool = False) -> User:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    allowed = _emails(settings.COMMUNITY_ADMIN_EMAILS if admin else settings.COMMUNITY_ALLOWED_EMAILS)
-    if user is None or user.email.lower() not in allowed:
+    if user is None:
         raise HTTPException(status_code=403, detail="Community access is not enabled for this account")
+    if admin:
+        allowed = _emails(settings.COMMUNITY_ADMIN_EMAILS)
+        if user.email.lower() not in allowed:
+            raise HTTPException(status_code=403, detail="Community access is not enabled for this account")
+    # Non-admin community actions (post, view, report, etc.) are open to any
+    # signed-in user. Previously gated by COMMUNITY_ALLOWED_EMAILS as a
+    # single-tester scaffold; opened up deliberately, see handoff doc §8
+    # Phase 6.
     return user
 
 def _community_out(post: CommunityPost) -> CommunityPostOut:
@@ -78,38 +85,34 @@ def _community_out(post: CommunityPost) -> CommunityPostOut:
 @app.post(f"{settings.API_V1_STR}/auth/login", response_model=UserAuthResponse)
 async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db)):
     """
-    Create/update a user and return the preferences saved for that account.
+    Create/update a user from a verified Firebase ID token and return the
+    preferences saved for that account.
 
-    For provider="google", `payload.uid` is the Google ID token (a signed JWT,
-    not a stable identifier) — it must be cryptographically verified against
-    Google's own keys before trusting the email/name it claims, and the
-    stable identity to key the user row on is the token's "sub" claim, not
-    the token string itself (which is different on every login).
+    `payload.uid` carries the Firebase ID token (a signed JWT, not a stable
+    identifier) for both provider="email" and provider="google" — Firebase
+    Authentication now backs both sign-in methods, so there's one verification
+    path instead of a per-provider branch. The stable identity to key the user
+    row on is the token's own "uid" claim (the same Firebase-assigned id
+    regardless of which linked provider signed in), not the token string
+    itself, which is different on every login. `payload.provider` is stored
+    for informational/analytics value only — it no longer drives verification.
     """
-    verified_email = payload.email
-    verified_name = payload.display_name
-    provider_uid = payload.uid
+    if not payload.uid:
+        raise HTTPException(status_code=401, detail="Missing Firebase ID token")
 
-    if payload.provider == "google":
-        if not payload.uid:
-            raise HTTPException(status_code=401, detail="Missing Google ID token")
-        if not settings.GOOGLE_OAUTH_CLIENT_ID:
-            raise HTTPException(status_code=500, detail="Google OAuth client ID not configured on server")
+    try:
+        identity = await verify_firebase_id_token(payload.uid)
+    except InvalidFirebaseIdToken as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Firebase ID token: {e}")
 
-        try:
-            identity = await verify_google_id_token(payload.uid, settings.GOOGLE_OAUTH_CLIENT_ID)
-        except InvalidGoogleIdToken as e:
-            raise HTTPException(status_code=401, detail=f"Invalid Google ID token: {e}")
+    if not identity.email_verified:
+        raise HTTPException(status_code=403, detail="Email not verified")
 
-        verified_email = identity.email
-        verified_name = identity.name
-        provider_uid = identity.subject  # stable per-account id, not the token itself
+    verified_email = identity.email
+    verified_name = identity.name
+    provider_uid = identity.uid
 
-    lookup = (
-        select(User).where(User.provider == payload.provider, User.provider_uid == provider_uid)
-        if provider_uid else select(User).where(User.email == verified_email)
-    )
-    result = await db.execute(lookup)
+    result = await db.execute(select(User).where(User.provider_uid == provider_uid))
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -126,7 +129,6 @@ async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db
         user.email = verified_email
         user.display_name = verified_name
         user.provider = payload.provider
-        user.provider_uid = provider_uid
         user.updated_at = utc_now()
 
     await db.commit()

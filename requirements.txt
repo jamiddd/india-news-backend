@@ -13,6 +13,7 @@ curl_cffi>=0.13.0  # impersonates real browser TLS fingerprints — several sour
                    # (Akamai etc.) regardless of headers; this gets past that.
 google-auth>=2.29.0
 requests>=2.31.0  # required by google.auth.transport.requests
+firebase-admin>=6.5.0  # verifies Firebase ID tokens for email/password + Google Sign-In
 redis>=5.0.3
 python-dotenv>=1.0.1
 simhash>=2.1.2

@@ -1,6 +1,9 @@
 # Secrets — must never be baked into the image. Keep in sync with .gitignore.
 .env
 .env.*
+# Firebase Admin SDK service-account key(s) — reaches the container via a
+# docker-compose.prod.yml bind mount instead, never baked into the image.
+*firebase-adminsdk*.json
 
 __pycache__/
 *.pyc

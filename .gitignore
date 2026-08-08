@@ -4,6 +4,13 @@ __pycache__/
 *.pyd
 .env
 .env.*
+# ...but .env.example is a template, not a secret — track it (was silently
+# swept up by the pattern above, never actually committed until now)
+!.env.example
+
+# Firebase Admin SDK service-account key(s) — real secrets, never commit
+*firebase-adminsdk*.json
+
 venv/
 .venv/
 env/

@@ -23,7 +23,12 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
     __table_args__ = (
-        Index("uq_users_provider_uid", "provider", "provider_uid", unique=True),
+        # Single-column, not composite with `provider`: Firebase Auth gives one
+        # stable uid per account regardless of which linked provider (password
+        # or Google) signed in, so provider_uid alone is the right identity key.
+        # See backend/scripts/migrate_users_provider_uid_index.py for the
+        # migration this required on an already-deployed database.
+        Index("uq_users_provider_uid", "provider_uid", unique=True),
     )
 
 

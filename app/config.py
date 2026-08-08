@@ -19,16 +19,24 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    # Auth — must match the Android app's Google Sign-In server/web client ID
-    # (GetGoogleIdOption.setServerClientId(...) in LoginScreen.kt), since that's
-    # the audience Google's ID tokens are issued for. Login with provider="google"
-    # is rejected until this is set to a real value.
+    # Deprecated: both email/password and Google Sign-In now go through
+    # Firebase Authentication (see FIREBASE_CREDENTIALS_PATH below), which
+    # verifies both under one token audience. Left in place, unused, in case
+    # anything still references it — safe to remove in a later pass.
     GOOGLE_OAUTH_CLIENT_ID: Optional[str] = None
 
-    # Comma-separated accounts allowed to use the community-news area.
-    COMMUNITY_ALLOWED_EMAILS: str = ""
+    # Path to the Firebase Admin SDK service-account JSON, used to verify
+    # Firebase ID tokens sent by the client (both email/password and Google
+    # Sign-In go through Firebase now). Login is rejected with a 500 until
+    # this points at a real, readable file. Never commit this file — it's
+    # bind-mounted onto the droplet, not baked into the image.
+    FIREBASE_CREDENTIALS_PATH: Optional[str] = None
+
+    # Deprecated/unused: community posting is open to any signed-in user now.
+    # Kept only so existing deployment env vars don't need to be pulled first.
+    COMMUNITY_ALLOWED_EMAILS: str = "jamiddeka1@gmail.com"
     # Comma-separated administrator accounts allowed to moderate submissions.
-    COMMUNITY_ADMIN_EMAILS: str = ""
+    COMMUNITY_ADMIN_EMAILS: str = "jamiddeka1@gmail.com"
 
     # extra="ignore": .env / the container environment may carry vars that
     # aren't app settings at all (e.g. POSTGRES_PASSWORD, which docker-compose

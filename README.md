@@ -33,7 +33,12 @@ uvicorn app.main:app --reload --port 8000
 
 ## ☁️ DigitalOcean Production Deployment
 
-Before deploying community news, set `COMMUNITY_ALLOWED_EMAILS` and `COMMUNITY_ADMIN_EMAILS` in the deployment environment. These values must match the allowlist in `CommunityScreen.kt`; the backend remains the source of truth and denies access when either list is empty.
+Community posting (submit/view/report) is open to any signed-in user. Only moderation (approve/reject/takedown, the admin queue and reports list) is gated — set `COMMUNITY_ADMIN_EMAILS` in the deployment environment to the comma-separated list of admin accounts. `COMMUNITY_ALLOWED_EMAILS` is no longer read by the backend and can be left unset.
+
+**Auth** is backed by Firebase Authentication (email/password + Google Sign-In, both verified server-side via `firebase-admin`). Before deploying:
+1. `scp` the Firebase Admin SDK service-account JSON onto the droplet (never commit it — see `.gitignore`/`.dockerignore`).
+2. In the droplet's `.env`, set `FIREBASE_CREDENTIALS_HOST_PATH` to that file's path — `docker-compose.prod.yml` bind-mounts it into the container and points `FIREBASE_CREDENTIALS_PATH` at the mounted location. Login fails with a 500 until this is set.
+3. `GOOGLE_OAUTH_CLIENT_ID` is deprecated (Firebase covers Google Sign-In verification now) and can be left unset.
 
 ```bash
 chmod +x scripts/deploy_digitalocean.sh
