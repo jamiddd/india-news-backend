@@ -165,7 +165,10 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         matched_cluster: Optional[StoryCluster] = None
         for cluster in recent_clusters:
             rep_article = await session.get(Article, cluster.representative_article_id) if cluster.representative_article_id else None
-            if rep_article and rep_article.simhash and is_near_duplicate(simhash_val, rep_article.simhash, max_distance=4):
+            # max_distance intentionally omitted here — is_near_duplicate's own
+            # default (18) is the empirically-calibrated value; keep this call
+            # site from silently overriding it if that default is ever revised.
+            if rep_article and rep_article.simhash and is_near_duplicate(simhash_val, rep_article.simhash):
                 matched_cluster = cluster
                 break
 

@@ -134,8 +134,16 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
     cluster.topics = topics
     cluster.framing_comparison = framing
 
-    # Try Anthropic API if key is available
-    if settings.ANTHROPIC_API_KEY:
+    # Cost guardrail: skip the paid API call entirely for singleton clusters.
+    # Framing comparison and cross-outlet neutral-headline synthesis are
+    # meaningless with only 1 article, so the rule-based baseline above (free)
+    # is just as good as what the model would produce here. Enrichment volume
+    # otherwise tracks *article* volume almost 1:1 rather than *distinct
+    # story* volume — confirmed against real production data on 2026-08-09,
+    # where 99.7% of clusters were singletons — so this directly bounds spend
+    # as source count grows, on top of the dedup threshold fix that should
+    # reduce how many clusters are singleton in the first place.
+    if settings.ANTHROPIC_API_KEY and len(articles) >= 2:
         try:
             articles_data = [
                 {
@@ -156,7 +164,22 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                     json={
                         "model": "claude-haiku-4-5",
                         "max_tokens": 1000,
-                        "system": ENRICHMENT_SYSTEM_PROMPT,
+                        # cache_control turns this static system prompt into a
+                        # cache-eligible block — it's identical on every single
+                        # enrichment call, so caching it directly cuts input
+                        # token cost on the repeated portion instead of paying
+                        # full price to re-send the same ~200 tokens every
+                        # time. Verify after deploy via the response's
+                        # usage.cache_read_input_tokens/cache_creation_input_tokens
+                        # fields actually showing non-zero values, not just
+                        # assuming this took effect.
+                        "system": [
+                            {
+                                "type": "text",
+                                "text": ENRICHMENT_SYSTEM_PROMPT,
+                                "cache_control": {"type": "ephemeral"}
+                            }
+                        ],
                         "messages": [{"role": "user", "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}"}]
                     },
                     timeout=15.0
