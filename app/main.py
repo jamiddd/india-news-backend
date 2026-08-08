@@ -1,7 +1,9 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -16,12 +18,18 @@ from app.database import engine, Base, get_db
 from app.models import Source, Article, StoryCluster, User, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
-    UserAuthRequest, UserAuthResponse, UserPreferences,
+    UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.enrichment import enrich_cluster_with_ai
-from app.services.firebase_auth import verify_firebase_id_token, InvalidFirebaseIdToken
+from app.services.firebase_auth import (
+    verify_firebase_id_token,
+    InvalidFirebaseIdToken,
+    delete_firebase_user,
+)
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 # Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
 # Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
@@ -151,6 +159,41 @@ async def root(request: Request):
         "app": settings.PROJECT_NAME,
         "version": settings.VERSION
     }
+
+@app.get("/privacy", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def privacy_policy(request: Request):
+    return (STATIC_DIR / "privacy.html").read_text()
+
+@app.get("/terms", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def terms_of_service(request: Request):
+    return (STATIC_DIR / "terms.html").read_text()
+
+@app.post(f"{settings.API_V1_STR}/account/delete", status_code=204)
+@limiter.limit("5/hour")
+async def delete_account(request: Request, payload: AccountDeleteRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Permanently deletes the caller's account. `payload.uid` carries a fresh
+    Firebase ID token, verified server-side here — same as /auth/login. The
+    account deleted is derived from the verified token's own uid claim, not
+    a client-supplied user_id, so this endpoint can't be used to delete
+    someone else's account by guessing/observing their internal id (unlike
+    other endpoints, e.g. preferences update, which still trust a raw
+    client-supplied user_id — see india-news-app-handoff.md).
+    """
+    try:
+        identity = await verify_firebase_id_token(payload.uid)
+    except InvalidFirebaseIdToken as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Firebase ID token: {e}")
+
+    result = await db.execute(select(User).where(User.provider_uid == identity.uid))
+    user = result.scalar_one_or_none()
+    if user is not None:
+        await db.delete(user)
+        await db.commit()
+
+    await delete_firebase_user(identity.uid)
 
 @app.get(f"{settings.API_V1_STR}/sources", response_model=List[SourceOut])
 @limiter.limit("30/minute")

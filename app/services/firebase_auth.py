@@ -70,3 +70,16 @@ async def verify_firebase_id_token(id_token_str: str) -> VerifiedFirebaseIdentit
         name=claims.get("name") or email,
         email_verified=bool(claims.get("email_verified", False)),
     )
+
+
+async def delete_firebase_user(uid: str) -> None:
+    """
+    Deletes the Firebase Auth user identified by uid. Treats "already gone"
+    as success — the account may have been partially deleted by a prior
+    failed/retried delete-account attempt, and this needs to stay idempotent.
+    """
+    app = _get_firebase_app()
+    try:
+        await asyncio.to_thread(firebase_auth_sdk.delete_user, uid, app=app)
+    except firebase_auth_sdk.UserNotFoundError:
+        pass

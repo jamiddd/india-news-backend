@@ -73,3 +73,7 @@ class UserAuthResponse(BaseModel):
     display_name: str
     token: Optional[str] = None
     preferences: UserPreferences
+
+
+class AccountDeleteRequest(BaseModel):
+    uid: str  # Firebase ID token, verified server-side — same convention as UserAuthRequest.uid
