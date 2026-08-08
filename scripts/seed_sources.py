@@ -257,6 +257,329 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://www.livemint.com/politics",
         "category": "politics",
         "region": "national"
+    },
+
+    # --- Added 2026-08-09: national source/category expansion pass. Every
+    # feed below was verified live (HTTP 200 + real XML + non-zero <item>
+    # count) before being added — see india-news-app-handoff.md for the
+    # full methodology and the honest coverage gaps (Gujarat, Rajasthan,
+    # Goa, Bihar, Jharkhand, Madhya Pradesh, Chhattisgarh — no viable
+    # publisher-sanctioned English RSS found for any of these).
+
+    # South India (Tamil Nadu, Kerala, Karnataka, Andhra Pradesh, Telangana)
+    {
+        "name": "The Hindu (Tamil Nadu)",
+        "slug": "the-hindu-tamil-nadu",
+        "feed_url": "https://www.thehindu.com/news/national/tamil-nadu/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/news/national/tamil-nadu/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "The Hindu (Kerala)",
+        "slug": "the-hindu-kerala",
+        "feed_url": "https://www.thehindu.com/news/national/kerala/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/news/national/kerala/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "The Hindu (Karnataka)",
+        "slug": "the-hindu-karnataka",
+        "feed_url": "https://www.thehindu.com/news/national/karnataka/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/news/national/karnataka/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "The Hindu (Andhra Pradesh)",
+        "slug": "the-hindu-andhra-pradesh",
+        "feed_url": "https://www.thehindu.com/news/national/andhra-pradesh/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/news/national/andhra-pradesh/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "The Hindu (Telangana)",
+        "slug": "the-hindu-telangana",
+        "feed_url": "https://www.thehindu.com/news/national/telangana/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/news/national/telangana/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "New Indian Express (Tamil Nadu)",
+        "slug": "nie-tamil-nadu",
+        "feed_url": "https://www.newindianexpress.com/states/tamil-nadu/rssfeed/?id=170&getXmlFeed=true",
+        "homepage_url": "https://www.newindianexpress.com/states/tamil-nadu/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "New Indian Express (Kerala)",
+        "slug": "nie-kerala",
+        "feed_url": "https://www.newindianexpress.com/states/kerala/rssfeed/?id=170&getXmlFeed=true",
+        "homepage_url": "https://www.newindianexpress.com/states/kerala/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "New Indian Express (Karnataka)",
+        "slug": "nie-karnataka",
+        "feed_url": "https://www.newindianexpress.com/states/karnataka/rssfeed/?id=170&getXmlFeed=true",
+        "homepage_url": "https://www.newindianexpress.com/states/karnataka/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "New Indian Express (Andhra Pradesh)",
+        "slug": "nie-andhra-pradesh",
+        "feed_url": "https://www.newindianexpress.com/states/andhra-pradesh/rssfeed/?id=170&getXmlFeed=true",
+        "homepage_url": "https://www.newindianexpress.com/states/andhra-pradesh/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "New Indian Express (Telangana)",
+        "slug": "nie-telangana",
+        "feed_url": "https://www.newindianexpress.com/states/telangana/rssfeed/?id=170&getXmlFeed=true",
+        "homepage_url": "https://www.newindianexpress.com/states/telangana/",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "Deccan Chronicle",
+        "slug": "deccan-chronicle",
+        "feed_url": "https://www.deccanchronicle.com/feeds.xml",
+        "homepage_url": "https://www.deccanchronicle.com",
+        "category": "regional_south",
+        "region": "south"
+    },
+
+    # West India (Maharashtra)
+    {
+        "name": "Free Press Journal",
+        "slug": "free-press-journal",
+        "feed_url": "https://www.freepressjournal.in/stories.rss",
+        "homepage_url": "https://www.freepressjournal.in",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "Mid-Day (Mumbai)",
+        "slug": "mid-day-mumbai",
+        "feed_url": "https://www.mid-day.com/Resources/midday/rss/mumbai-news.xml",
+        "homepage_url": "https://www.mid-day.com",
+        "category": "regional_west",
+        "region": "west"
+    },
+
+    # East India (Odisha)
+    {
+        "name": "OdishaTV (OTV)",
+        "slug": "odishatv",
+        "feed_url": "https://odishatv.in/feed",
+        "homepage_url": "https://odishatv.in",
+        "category": "regional_east",
+        "region": "east"
+    },
+
+    # World
+    {
+        "name": "Indian Express World",
+        "slug": "indian-express-world",
+        "feed_url": "https://indianexpress.com/section/world/feed/",
+        "homepage_url": "https://indianexpress.com/section/world/",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times World",
+        "slug": "hindustan-times-world",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/world-news/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/world-news",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Times of India World",
+        "slug": "toi-world",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/296589292.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "News18 World",
+        "slug": "news18-world",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/world.xml",
+        "homepage_url": "https://www.news18.com/world/",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "BBC World",
+        "slug": "bbc-world",
+        "feed_url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "homepage_url": "https://www.bbc.com/news/world",
+        "category": "world",
+        "region": "national"
+    },
+
+    # Health
+    {
+        "name": "Indian Express Health",
+        "slug": "indian-express-health",
+        "feed_url": "https://indianexpress.com/section/lifestyle/health/feed/",
+        "homepage_url": "https://indianexpress.com/section/lifestyle/health/",
+        "category": "health",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times Health",
+        "slug": "hindustan-times-health",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/lifestyle/health/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/lifestyle/health",
+        "category": "health",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Health & Fitness",
+        "slug": "toi-health",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3908999.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/life-style/health-fitness",
+        "category": "health",
+        "region": "national"
+    },
+    {
+        # Confirmed working but only 1 item at verification time (2026-08-09)
+        # — real, live, publisher-sanctioned feed, just thin. Kept in, not
+        # excluded, but worth monitoring.
+        "name": "News18 Health",
+        "slug": "news18-health",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/health.xml",
+        "homepage_url": "https://www.news18.com/health-and-fitness/",
+        "category": "health",
+        "region": "national"
+    },
+
+    # Science
+    {
+        "name": "Indian Express Science",
+        "slug": "indian-express-science",
+        "feed_url": "https://indianexpress.com/section/technology/science/feed/",
+        "homepage_url": "https://indianexpress.com/section/technology/science/",
+        "category": "science",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Science",
+        "slug": "toi-science",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/-2128672765.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/science",
+        "category": "science",
+        "region": "national"
+    },
+    # Note: HT's technology/science feed (hindustantimes.com/feeds/rss/technology/science/rssfeed.xml)
+    # returns HTTP 200 but is a broken stub (title: null, 0 items) — a
+    # status-code false positive, deliberately not seeded. News18 has no
+    # science section feed (returns a JSON 404, not XML). Science is the
+    # thinnest topical category as a result — worth a future gap-fill
+    # search (e.g. a reputable international science outlet) if parity
+    # with the other categories matters.
+
+    # Education
+    {
+        "name": "Indian Express Education",
+        "slug": "indian-express-education",
+        "feed_url": "https://indianexpress.com/section/education/feed/",
+        "homepage_url": "https://indianexpress.com/section/education/",
+        "category": "education",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Education",
+        "slug": "toi-education",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/913168846.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/education",
+        "category": "education",
+        "region": "national"
+    },
+    {
+        "name": "News18 Education and Career",
+        "slug": "news18-education",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/education-career.xml",
+        "homepage_url": "https://www.news18.com/education-career/",
+        "category": "education",
+        "region": "national"
+    },
+    {
+        # Confirmed working but only 6 items at verification time — real and
+        # correctly populated, just a thinner feed than the other three.
+        "name": "Hindustan Times Education",
+        "slug": "hindustan-times-education",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/education/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/education",
+        "category": "education",
+        "region": "national"
+    },
+
+    # Crypto
+    {
+        "name": "News18 Cryptocurrency",
+        "slug": "news18-crypto",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/cryptocurrency.xml",
+        "homepage_url": "https://www.news18.com/cryptocurrency/",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "CoinDesk",
+        "slug": "coindesk",
+        "feed_url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+        "homepage_url": "https://www.coindesk.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Cointelegraph",
+        "slug": "cointelegraph",
+        "feed_url": "https://cointelegraph.com/rss",
+        "homepage_url": "https://cointelegraph.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    # Note: Moneycontrol and Business Standard crypto feeds both return
+    # HTTP 403 (WAF block) — same vendor pattern as Business Standard's
+    # already-documented blanket block. No working TOI/Livemint crypto RSS
+    # could be confirmed either (a guessed plausible TOI feed ID silently
+    # returned an unrelated city feed instead of erroring — not worth the
+    # risk of guessing another one).
+
+    # Lifestyle
+    {
+        "name": "Indian Express Lifestyle",
+        "slug": "indian-express-lifestyle",
+        "feed_url": "https://indianexpress.com/section/lifestyle/feed/",
+        "homepage_url": "https://indianexpress.com/section/lifestyle/",
+        "category": "lifestyle",
+        "region": "national"
+    },
+    {
+        "name": "Hindustan Times Lifestyle",
+        "slug": "hindustan-times-lifestyle",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/lifestyle/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/lifestyle",
+        "category": "lifestyle",
+        "region": "national"
+    },
+    {
+        "name": "Times of India Lifestyle",
+        "slug": "toi-lifestyle",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/2886704.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/life-style",
+        "category": "lifestyle",
+        "region": "national"
     }
 ]
 
