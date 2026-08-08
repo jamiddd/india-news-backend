@@ -13,8 +13,6 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
-      - COMMUNITY_ALLOWED_EMAILS=${COMMUNITY_ALLOWED_EMAILS:-jamiddeka1@gmail.com}
-      - COMMUNITY_ADMIN_EMAILS=${COMMUNITY_ADMIN_EMAILS:-jamiddeka1@gmail.com}
     volumes:
       # Firebase Admin SDK service-account key — scp'd onto the host once,
       # never committed/baked into the image. FIREBASE_CREDENTIALS_HOST_PATH

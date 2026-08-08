@@ -14,7 +14,6 @@ Multi-Outlet News Aggregation & AI Framing Analysis Engine for Indian Media Publ
   - `GET /api/v1/search?q=...`: Full-text search across headlines and summaries.
   - `POST /api/v1/ingest/poll`: Trigger background ingestion poller.
   - `POST /api/v1/clusters/{id}/enrich`: Trigger AI enrichment.
-- **Moderated community news**: allowlisted users can create drafts and submissions; admins approve, reject, audit, report, withdraw, or take down posts in a separate feed.
 
 ## 🚀 Quickstart (Local Development)
 
@@ -32,8 +31,6 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 ## ☁️ DigitalOcean Production Deployment
-
-Community posting (submit/view/report) is open to any signed-in user. Only moderation (approve/reject/takedown, the admin queue and reports list) is gated — set `COMMUNITY_ADMIN_EMAILS` in the deployment environment to the comma-separated list of admin accounts. `COMMUNITY_ALLOWED_EMAILS` is no longer read by the backend and can be left unset.
 
 **Auth** is backed by Firebase Authentication (email/password + Google Sign-In, both verified server-side via `firebase-admin`). Before deploying:
 1. `scp` the Firebase Admin SDK service-account JSON onto the droplet (never commit it — see `.gitignore`/`.dockerignore`).

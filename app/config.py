@@ -32,12 +32,6 @@ class Settings(BaseSettings):
     # bind-mounted onto the droplet, not baked into the image.
     FIREBASE_CREDENTIALS_PATH: Optional[str] = None
 
-    # Deprecated/unused: community posting is open to any signed-in user now.
-    # Kept only so existing deployment env vars don't need to be pulled first.
-    COMMUNITY_ALLOWED_EMAILS: str = "jamiddeka1@gmail.com"
-    # Comma-separated administrator accounts allowed to moderate submissions.
-    COMMUNITY_ADMIN_EMAILS: str = "jamiddeka1@gmail.com"
-
     # extra="ignore": .env / the container environment may carry vars that
     # aren't app settings at all (e.g. POSTGRES_PASSWORD, which docker-compose
     # only uses to interpolate DATABASE_URL) — don't fail startup over those.
