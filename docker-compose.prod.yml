@@ -19,7 +19,12 @@ services:
       # is set in the droplet's .env, same mechanism as POSTGRES_PASSWORD etc.
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
     ports:
-      - "8080:8000"
+      # Bound to localhost only — the system-level Caddy (see
+      # india-news-app-handoff.md §8b) reverse-proxies HTTPS traffic to
+      # 127.0.0.1:8080, so this must stay published, but it should never
+      # be reachable directly from the public internet. Not "8080:8000"
+      # (which binds 0.0.0.0) — that would expose plain HTTP publicly.
+      - "127.0.0.1:8080:8000"
     depends_on:
       postgres:
         condition: service_healthy
