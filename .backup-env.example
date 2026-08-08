@@ -1,0 +1,21 @@
+# Template for the backup script's credentials file. This is NOT app config
+# (docker-compose.prod.yml/.env never read it) — it's an ops-only file that
+# lives at /root/.backup-env on the droplet (chmod 600), sourced directly by
+# scripts/backup_database.sh. Never commit the real values.
+
+# DigitalOcean Spaces bucket name (create via the DO console — Spaces is
+# S3-compatible object storage, same account/billing as the droplet).
+SPACES_BUCKET=your-bucket-name
+
+# Region endpoint for that bucket, e.g. https://nyc3.digitaloceanspaces.com
+SPACES_ENDPOINT_URL=https://REGION.digitaloceanspaces.com
+
+# Spaces access key/secret (DO console -> API -> Spaces Keys). These map
+# directly to AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY because Spaces is
+# S3-API-compatible and the backup script uses the standard `aws` CLI.
+AWS_ACCESS_KEY_ID=your-spaces-access-key
+AWS_SECRET_ACCESS_KEY=your-spaces-secret-key
+
+# Optional overrides (defaults shown)
+# BACKUP_DIR=/root/backups
+# RETENTION_DAYS=14

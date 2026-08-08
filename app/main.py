@@ -1,11 +1,15 @@
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional, List
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import desc, or_, func, text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 from app.database import engine, Base, get_db
@@ -46,12 +50,23 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Per-IP rate limiting, backed by the same Redis instance used elsewhere —
+# a plain in-memory limiter would let each of the 4 uvicorn workers (see
+# Dockerfile CMD) enforce its own separate count, effectively multiplying
+# the real limit by ~4. default_limits is a blanket per-IP fallback for any
+# route below without its own explicit @limiter.limit(...).
+limiter = Limiter(key_func=get_remote_address, storage_uri=settings.REDIS_URL, default_limits=["100/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
 DEFAULT_PREFERENCES = UserPreferences(
     enabled_categories=["all", "national", "business", "official", "sports", "entertainment", "tech", "politics"]
 )
 
 @app.post(f"{settings.API_V1_STR}/auth/login", response_model=UserAuthResponse)
-async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("20/minute")
+async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSession = Depends(get_db)):
     """
     Create/update a user from a verified Firebase ID token and return the
     preferences saved for that account.
@@ -110,7 +125,9 @@ async def login_user(payload: UserAuthRequest, db: AsyncSession = Depends(get_db
 
 
 @app.put(f"{settings.API_V1_STR}/users/{{user_id}}/preferences", status_code=200)
+@limiter.limit("30/minute")
 async def update_user_preferences(
+    request: Request,
     user_id: str,
     preferences: UserPreferences,
     db: AsyncSession = Depends(get_db),
@@ -127,7 +144,8 @@ async def update_user_preferences(
 
 
 @app.get("/")
-async def root():
+@limiter.exempt
+async def root(request: Request):
     return {
         "status": "healthy",
         "app": settings.PROJECT_NAME,
@@ -135,17 +153,20 @@ async def root():
     }
 
 @app.get(f"{settings.API_V1_STR}/sources", response_model=List[SourceOut])
-async def list_sources(db: AsyncSession = Depends(get_db)):
+@limiter.limit("30/minute")
+async def list_sources(request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Source))
     return result.scalars().all()
 
 @app.post(f"{settings.API_V1_STR}/ingest/poll")
-async def trigger_poll(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/hour")
+async def trigger_poll(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     background_tasks.add_task(poll_all_sources, db)
     return {"message": "Ingestion polling triggered in background."}
 
 @app.post(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/enrich")
-async def enrich_cluster_endpoint(cluster_id: int, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/hour")
+async def enrich_cluster_endpoint(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
     query = (
         select(StoryCluster)
         .where(StoryCluster.id == cluster_id)
@@ -160,7 +181,9 @@ async def enrich_cluster_endpoint(cluster_id: int, db: AsyncSession = Depends(ge
     return {"message": "Cluster enriched successfully", "data": enriched}
 
 @app.get(f"{settings.API_V1_STR}/search", response_model=PaginatedClustersOut)
+@limiter.limit("60/minute")
 async def search_story_clusters(
+    request: Request,
     q: str = Query(..., min_length=2, description="Search query string across headlines and summaries"),
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
@@ -227,7 +250,9 @@ async def search_story_clusters(
     )
 
 @app.get(f"{settings.API_V1_STR}/clusters", response_model=PaginatedClustersOut)
+@limiter.limit("60/minute")
 async def list_story_clusters(
+    request: Request,
     category: Optional[str] = Query(None, description="Category filter (national, business, official, northeast)"),
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
@@ -303,7 +328,8 @@ async def list_story_clusters(
     )
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)
-async def get_story_cluster(cluster_id: int, db: AsyncSession = Depends(get_db)):
+@limiter.limit("60/minute")
+async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
     query = (
         select(StoryCluster)
         .where(StoryCluster.id == cluster_id)
