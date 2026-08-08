@@ -26,6 +26,20 @@ services:
       redis:
         condition: service_healthy
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: news_caddy_prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
   postgres:
     image: postgres:16-alpine
     container_name: news_postgres_prod
@@ -57,3 +71,5 @@ services:
 volumes:
   postgres_data_prod:
   redis_data_prod:
+  caddy_data:
+  caddy_config:
