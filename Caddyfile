@@ -1,7 +1,0 @@
-www.openindiannews.com {
-    redir https://openindiannews.com{uri} 308
-}
-
-openindiannews.com {
-    reverse_proxy app:8000
-}
