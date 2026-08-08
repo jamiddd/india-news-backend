@@ -20,8 +20,13 @@ set -e
 
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/root/.backup-env}"
 if [ -f "$BACKUP_ENV_FILE" ]; then
+    # set -a: auto-export everything sourced below, so the `aws` subprocess
+    # can actually see AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY — a plain
+    # `source` only sets shell variables in this script's own scope.
+    set -a
     # shellcheck disable=SC1090
     source "$BACKUP_ENV_FILE"
+    set +a
 else
     echo "Missing credentials file: $BACKUP_ENV_FILE (see backend/.backup-env.example)" >&2
     exit 1
