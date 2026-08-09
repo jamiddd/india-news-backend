@@ -184,3 +184,31 @@ class DailyQuizQuestionOut(BaseModel):
 class DailyQuizOut(BaseModel):
     date: date
     questions: List[DailyQuizQuestionOut]
+
+
+class WordOfTheDayOut(BaseModel):
+    date: date
+    word: str
+    pronunciation: str
+    part_of_speech: str
+    definition: str
+    example: str
+    origin: str
+
+
+class QuoteOfTheDayOut(BaseModel):
+    date: date
+    quote: str
+    author: str
+
+
+class HistoricalEventOut(BaseModel):
+    year: int
+    text: str
+    article_url: Optional[str] = None
+
+
+class OnThisDayOut(BaseModel):
+    date: date
+    events: List[HistoricalEventOut]
+    attribution: str

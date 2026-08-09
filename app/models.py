@@ -146,6 +146,16 @@ class DailyQuiz(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailyEditorial(Base):
+    __tablename__ = "daily_editorial_features"
+    id = Column(Integer, primary_key=True, index=True)
+    feature_date = Column(Date, nullable=False, unique=True, index=True)
+    word = Column(JSON, nullable=False)
+    quote = Column(JSON, nullable=False)
+    historical_events = Column(JSON, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class Source(Base):
     __tablename__ = "sources"
 
