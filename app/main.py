@@ -51,6 +51,7 @@ from app.schemas import (
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
     CrosswordRevealRequest, CrosswordRevealResponse,
     DailySudokuOut,
+    DailyWordSearchOut,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -58,6 +59,7 @@ from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
+from app.services.word_search import get_or_create_word_search
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
@@ -346,6 +348,19 @@ async def daily_sudoku(request: Request, db: AsyncSession = Depends(get_db)):
         "date": sudoku.puzzle_date,
         "puzzle": sudoku.puzzle,
         "solution": sudoku.solution,
+    }
+
+
+@app.get(f"{settings.API_V1_STR}/word-search/daily", response_model=DailyWordSearchOut)
+@limiter.limit("30/minute")
+async def daily_word_search(request: Request, db: AsyncSession = Depends(get_db)):
+    puzzle = await get_or_create_word_search(db, india_today())
+    return {
+        "date": puzzle.puzzle_date,
+        "theme": puzzle.theme,
+        "size": len(puzzle.grid),
+        "rows": puzzle.grid,
+        "words": puzzle.words,
     }
 
 

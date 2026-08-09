@@ -105,6 +105,18 @@ class DailySudoku(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailyWordSearch(Base):
+    """One canonical themed word search for an India calendar date."""
+    __tablename__ = "daily_word_searches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    theme = Column(String(80), nullable=False)
+    grid = Column(JSON, nullable=False)
+    words = Column(JSON, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class Source(Base):
     __tablename__ = "sources"
 

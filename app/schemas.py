@@ -148,3 +148,11 @@ class DailySudokuOut(BaseModel):
     date: date
     puzzle: List[int]
     solution: List[int]
+
+
+class DailyWordSearchOut(BaseModel):
+    date: date
+    theme: str
+    size: int
+    rows: List[str]
+    words: List[str]
