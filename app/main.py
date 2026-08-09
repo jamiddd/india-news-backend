@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import desc, or_, func, text
+from sqlalchemy import desc, or_, func, text, tuple_
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -299,16 +299,23 @@ async def list_story_clusters(
     request: Request,
     category: Optional[str] = Query(None, description="Category filter (national, business, official, northeast)"),
     limit: int = Query(20, ge=1, le=50),
-    cursor: Optional[int] = Query(None, description="Cursor for pagination"),
+    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
-    query = (
-        select(StoryCluster)
-        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
+    is_all = not category or category.lower() == "all"
+
+    query = select(StoryCluster).options(
+        selectinload(StoryCluster.articles).selectinload(Article.source)
     )
 
-    if category and category.lower() != "all":
+    if is_all:
+        # Default "All Stories" feed: ranked by importance (headline_score —
+        # distinct-outlet corroboration decayed by recency, recomputed once
+        # per poll cycle in poller.py), not raw recency. This is what keeps
+        # a story 6 outlets are covering above a single regional outlet's
+        # story that merely updated more recently.
+        query = query.order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
+    else:
         cat = category.lower()
         subquery = (
             select(Article.cluster_id)
@@ -330,9 +337,30 @@ async def list_story_clusters(
                 )
             )
         query = query.where(StoryCluster.id.in_(subquery))
+        # Category/region tabs stay pure reverse-chronological — someone who
+        # picked a specific lens wants everything in it, in order, not a
+        # curated subset.
+        query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
 
     if cursor:
-        query = query.where(StoryCluster.id < cursor)
+        if is_all:
+            # Compound "score:id" cursor — headline_score isn't monotonic
+            # with id, so a plain id cursor can't express "everything after
+            # this point in score order". Malformed/stale cursors (e.g. the
+            # old bare-int format, from a client mid-scroll across a
+            # deploy) are treated as "start over" rather than a 500.
+            try:
+                score_str, id_str = cursor.split(":", 1)
+                query = query.where(
+                    tuple_(StoryCluster.headline_score, StoryCluster.id) < (float(score_str), int(id_str))
+                )
+            except (ValueError, TypeError):
+                pass
+        else:
+            try:
+                query = query.where(StoryCluster.id < int(cursor))
+            except (ValueError, TypeError):
+                pass
 
     query = query.limit(limit + 1)
     result = await db.execute(query)
@@ -340,7 +368,11 @@ async def list_story_clusters(
 
     has_more = len(clusters) > limit
     items = clusters[:limit]
-    next_cursor = str(items[-1].id) if has_more and items else None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = f"{last.headline_score}:{last.id}" if is_all else str(last.id)
+    else:
+        next_cursor = None
 
     formatted_clusters = []
     seen_ids = set()

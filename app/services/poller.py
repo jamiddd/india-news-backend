@@ -1,13 +1,14 @@
 import asyncio
 import logging
 import hashlib
+from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 import feedparser
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, desc, func
+from sqlalchemy import update, desc, func, text
 
 from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
@@ -100,6 +101,20 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         select(StoryCluster).order_by(desc(StoryCluster.last_updated_at)).limit(100)
     )
     recent_clusters = list(recent_clusters_query.scalars().all())
+
+    # Which sources have already contributed to each of these clusters —
+    # used below to keep distinct_source_count a genuine distinct-outlet
+    # count (article_count alone isn't source-deduped: two articles from
+    # the same outlet would both increment it).
+    cluster_source_ids: Dict[int, Set[int]] = defaultdict(set)
+    if recent_clusters:
+        membership_rows = await session.execute(
+            select(Article.cluster_id, Article.source_id).where(
+                Article.cluster_id.in_([c.id for c in recent_clusters])
+            )
+        )
+        for cid, sid in membership_rows:
+            cluster_source_ids[cid].add(sid)
 
     # Pass 1: filter malformed/duplicate entries down to real candidates.
     candidates = []
@@ -234,16 +249,25 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             session.add(article)
             matched_cluster.article_count += 1
             matched_cluster.last_updated_at = utc_now()
+            # Only a genuinely new outlet bumps distinct_source_count — a
+            # second candidate from a source already in this cluster (either
+            # from before this poll or earlier in this same batch, since the
+            # set below is updated immediately) must not double-count.
+            if source.id not in cluster_source_ids[matched_cluster.id]:
+                matched_cluster.distinct_source_count += 1
+                cluster_source_ids[matched_cluster.id].add(source.id)
         else:
             new_cluster = StoryCluster(
                 headline=title,
                 summary=snippet,
                 article_count=1,
+                distinct_source_count=1,
                 first_seen_at=pub_date,
                 last_updated_at=pub_date
             )
             session.add(new_cluster)
             await session.flush()
+            cluster_source_ids[new_cluster.id] = {source.id}
 
             article = Article(
                 source_id=source.id,
@@ -313,6 +337,21 @@ async def poll_all_sources(session: AsyncSession) -> int:
                     logger.error(f"Ingestion failed for source [{source_name}], skipping this cycle: {e}")
 
         logger.info(f"[Ingestion Complete] Ingested {total_new} new articles across {len(sources)} sources.")
+
+        # Recompute the "All Stories" ranking score for every cluster, not
+        # just ones touched this cycle — its recency-decay term moves for
+        # every row on every cycle regardless of new ingestion. Pure column
+        # arithmetic, no joins, cheap even at 100k+ clusters. See
+        # StoryCluster.headline_score and app/main.py's use of it.
+        await session.execute(text("""
+            UPDATE story_clusters SET headline_score =
+                distinct_source_count / POWER(
+                    GREATEST(EXTRACT(EPOCH FROM (now() - last_updated_at)) / 3600.0, 0) + 2,
+                    1.5
+                )
+        """))
+        await session.commit()
+
         return total_new
     finally:
         # Defensive: if something above raised outside the per-source

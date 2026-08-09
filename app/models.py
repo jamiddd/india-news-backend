@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
-    Column, Integer, String, Text, BigInteger, DateTime, ForeignKey, Index, JSON, Boolean
+    Column, Integer, String, Text, BigInteger, DateTime, ForeignKey, Index, JSON, Boolean, Float
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -62,10 +62,24 @@ class StoryCluster(Base):
     headline = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     article_count = Column(Integer, default=1)
-    
+
+    # Distinct Source.id count among this cluster's articles — NOT the same
+    # as article_count, which isn't source-deduped (two articles from the
+    # same outlet both increment it). Maintained incrementally in
+    # poller.py's matching loop. The real signal for "how independently
+    # corroborated is this story", used to rank the default "All Stories"
+    # feed by importance rather than raw recency.
+    distinct_source_count = Column(Integer, default=1)
+    # Precomputed ranking score (distinct_source_count decayed by recency,
+    # HN-style) — recomputed in bulk once per poll cycle in
+    # poll_all_sources(). Stored rather than computed at query time so the
+    # "All Stories" feed can keyset-paginate against an index instead of
+    # re-aggregating on every request. See app/services/poller.py.
+    headline_score = Column(Float, default=0.0)
+
     first_seen_at = Column(DateTime(timezone=True), default=utc_now, index=True)
     last_updated_at = Column(DateTime(timezone=True), default=utc_now, index=True)
-    
+
     entities = Column(JSON, nullable=True)  # {"persons": [], "organizations": [], "locations": []}
     topics = Column(JSON, nullable=True)    # ["politics", "economy"]
     framing_comparison = Column(JSON, nullable=True) # Outlet headline angle comparison
@@ -104,3 +118,4 @@ class Article(Base):
 Index("idx_articles_published_at", Article.published_at.desc())
 Index("idx_articles_source_published", Article.source_id, Article.published_at.desc())
 Index("idx_clusters_last_updated", StoryCluster.last_updated_at.desc())
+Index("idx_clusters_headline_score", StoryCluster.headline_score.desc(), StoryCluster.id.desc())
