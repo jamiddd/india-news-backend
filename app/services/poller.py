@@ -15,7 +15,7 @@ from app.models import Source, Article, StoryCluster, utc_now
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image
-from app.services.content_cleaner import decode_entities
+from app.services.content_cleaner import decode_entities, clean_extracted_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -143,6 +143,16 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         seen_hashes_this_batch.add(url_hash)
 
         snippet = decode_entities(getattr(entry, "summary", "") or getattr(entry, "description", ""))
+        # Some publishers' RSS <description> bakes the same sign-off/CTA
+        # boilerplate into every single item (e.g. News18's "CNN-News18 is
+        # your trusted source..." + social links block, verbatim on every
+        # article). clean_extracted_text already strips this for scraped
+        # article content — reuse it here too. Left uncleaned, that shared
+        # boilerplate text was long and repetitive enough to make
+        # shares_topic() (dedup.py) see two completely unrelated articles
+        # from the same outlet as sharing a topic, since the boilerplate
+        # alone supplied enough matching significant tokens.
+        snippet = clean_extracted_text(snippet, title) or snippet
         if snippet and snippet.lower() in ["undefined", "none", "null"]:
             snippet = ""
 
