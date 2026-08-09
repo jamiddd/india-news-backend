@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     ASTROJSON_API_KEY: Optional[str] = None
     HOROSCOPE_ENABLED: bool = True
 
+    # Human-reviewed AI daily poll. All secrets are backend-only.
+    POLL_ADMIN_USERNAME: str = "admin"
+    POLL_ADMIN_PASSWORD: Optional[str] = None
+    POLL_SESSION_SECRET: Optional[str] = None
+    POLL_VOTER_HASH_SECRET: Optional[str] = None
+
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
     # X-Client-Version header on every request (see main.py's

@@ -235,3 +235,27 @@ class DailyHoroscopeOut(BaseModel):
     mood: str
     horoscope: HoroscopeThemesOut
     scores: dict[str, int]
+
+
+class PollOptionOut(BaseModel):
+    id: int
+    text: str
+    votes: Optional[int] = None
+    percentage: Optional[float] = None
+
+
+class DailyPollOut(BaseModel):
+    id: int
+    date: date
+    question: str
+    context: str
+    source_cluster_id: Optional[int] = None
+    source_headline: Optional[str] = None
+    closes_at: datetime
+    options: List[PollOptionOut]
+    selected_option_id: Optional[int] = None
+    total_votes: Optional[int] = None
+
+
+class PollVoteRequest(BaseModel):
+    option_id: int

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
-    Column, Integer, String, Text, BigInteger, Date, DateTime, ForeignKey, Index, JSON, Boolean, Float
+    Column, Integer, String, Text, BigInteger, Date, DateTime, ForeignKey, Index, JSON, Boolean, Float, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -166,6 +166,52 @@ class DailyHoroscope(Base):
     provider = Column(String(30), nullable=False, default="astrojson")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     __table_args__ = (Index("uq_daily_horoscope_date_sign", "forecast_date", "sign", unique=True),)
+
+
+class DailyPoll(Base):
+    __tablename__ = "daily_polls"
+    id = Column(Integer, primary_key=True)
+    poll_date = Column(Date, nullable=False, unique=True, index=True)
+    question = Column(Text, nullable=False)
+    context = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="draft", index=True)
+    source_cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="SET NULL"), nullable=True)
+    source_headline = Column(Text, nullable=True)
+    generation_method = Column(String(20), nullable=False, default="ai")
+    publish_at = Column(DateTime(timezone=True), nullable=False)
+    closes_at = Column(DateTime(timezone=True), nullable=False)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class PollOption(Base):
+    __tablename__ = "poll_options"
+    id = Column(Integer, primary_key=True)
+    poll_id = Column(Integer, ForeignKey("daily_polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    __table_args__ = (UniqueConstraint("poll_id", "position", name="uq_poll_option_position"),)
+
+
+class PollVote(Base):
+    __tablename__ = "poll_votes"
+    id = Column(Integer, primary_key=True)
+    poll_id = Column(Integer, ForeignKey("daily_polls.id", ondelete="CASCADE"), nullable=False, index=True)
+    option_id = Column(Integer, ForeignKey("poll_options.id", ondelete="CASCADE"), nullable=False, index=True)
+    voter_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    __table_args__ = (UniqueConstraint("poll_id", "voter_hash", name="uq_poll_vote_voter"),)
+
+
+class PollFallback(Base):
+    __tablename__ = "poll_fallbacks"
+    id = Column(Integer, primary_key=True)
+    question = Column(Text, nullable=False)
+    context = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Source(Base):

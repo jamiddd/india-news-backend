@@ -13,6 +13,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
       - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
+      - POLL_ADMIN_USERNAME=${POLL_ADMIN_USERNAME:-admin}
+      - POLL_ADMIN_PASSWORD=${POLL_ADMIN_PASSWORD:-}
+      - POLL_SESSION_SECRET=${POLL_SESSION_SECRET:-}
+      - POLL_VOTER_HASH_SECRET=${POLL_VOTER_HASH_SECRET:-}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
       # Optional — error tracking is a no-op until this is actually set in
@@ -46,6 +50,20 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://news_user:${POSTGRES_PASSWORD:-news_password}@postgres:5432/news_db
       - REDIS_URL=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  poll_scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_poll_scheduler_prod
+    restart: always
+    command: ["python3", "scripts/run_poll_scheduler.py"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://news_user:${POSTGRES_PASSWORD:-news_password}@postgres:5432/news_db
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       postgres:

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
@@ -43,7 +43,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -53,7 +53,7 @@ from app.schemas import (
     DailySudokuOut,
     DailyWordSearchOut,
     DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
-    WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut,
+    WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -65,11 +65,14 @@ from app.services.word_search import get_or_create_word_search
 from app.services.daily_games import get_or_create_daily_games
 from app.services.editorial_features import get_or_create_editorial
 from app.services.horoscope import get_or_create_horoscope
+from app.services.polls import IST, activate_poll, serialize_poll, voter_hash
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
     delete_firebase_user,
 )
+from app.poll_admin import router as poll_admin_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -137,6 +140,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+app.include_router(poll_admin_router)
 
 # Per-IP rate limiting, backed by the same Redis instance used elsewhere —
 # a plain in-memory limiter would let each of the 4 uvicorn workers (see
@@ -422,6 +426,44 @@ async def on_this_day(request: Request, db: AsyncSession = Depends(get_db)):
 async def daily_horoscope(request: Request, sign: str, db: AsyncSession = Depends(get_db)):
     forecast = await get_or_create_horoscope(db, india_today(), sign)
     return {"date": forecast.forecast_date, **forecast.forecast}
+
+
+async def _current_poll(db: AsyncSession) -> DailyPoll:
+    now = datetime.now(IST)
+    poll_day = now.date() if now.time() >= time(9) else now.date() - timedelta(days=1)
+    poll = await db.scalar(select(DailyPoll).where(DailyPoll.poll_date == poll_day, DailyPoll.status == "active"))
+    if poll is None and now.time() >= time(9):
+        poll = await activate_poll(db, poll_day)
+    if poll is None:
+        raise HTTPException(status_code=404, detail="Today's poll is not available yet")
+    return poll
+
+
+@app.get(f"{settings.API_V1_STR}/polls/daily", response_model=DailyPollOut)
+@limiter.limit("60/minute")
+async def daily_poll(request: Request, db: AsyncSession = Depends(get_db)):
+    poll = await _current_poll(db)
+    installation_id = request.headers.get("X-Installation-ID")
+    hashed = voter_hash(installation_id) if installation_id else None
+    return await serialize_poll(db, poll, hashed)
+
+
+@app.put(f"{settings.API_V1_STR}/polls/daily/vote", response_model=DailyPollOut)
+@limiter.limit("20/minute")
+async def vote_daily_poll(request: Request, payload: PollVoteRequest, db: AsyncSession = Depends(get_db)):
+    installation_id = request.headers.get("X-Installation-ID")
+    if not installation_id:
+        raise HTTPException(status_code=422, detail="Missing installation identifier")
+    hashed = voter_hash(installation_id)
+    poll = await _current_poll(db)
+    option = await db.scalar(select(PollOption).where(PollOption.id == payload.option_id, PollOption.poll_id == poll.id))
+    if option is None:
+        raise HTTPException(status_code=422, detail="Option does not belong to today's poll")
+    statement = pg_insert(PollVote).values(poll_id=poll.id, option_id=option.id, voter_hash=hashed).on_conflict_do_update(
+        constraint="uq_poll_vote_voter", set_={"option_id": option.id, "updated_at": utc_now()}
+    )
+    await db.execute(statement); await db.commit()
+    return await serialize_poll(db, poll, hashed)
 
 
 @app.post(f"{settings.API_V1_STR}/crossword/daily/check", response_model=CrosswordCheckResponse)
