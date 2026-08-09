@@ -212,3 +212,26 @@ class OnThisDayOut(BaseModel):
     date: date
     events: List[HistoricalEventOut]
     attribution: str
+
+
+class HoroscopeThemesOut(BaseModel):
+    general: str
+    career: str
+    finance: str
+    health: str
+    romance: str
+
+
+class DailyHoroscopeOut(BaseModel):
+    date: date
+    sign: str
+    symbol: str
+    element: str
+    color: str
+    color_hex: Optional[str] = None
+    compatibility: List[str]
+    lucky_number: int
+    lucky_time: str
+    mood: str
+    horoscope: HoroscopeThemesOut
+    scores: dict[str, int]

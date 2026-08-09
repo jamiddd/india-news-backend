@@ -11,6 +11,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://news_user:${POSTGRES_PASSWORD:-news_password}@postgres:5432/news_db
       - REDIS_URL=redis://redis:6379/0
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
+      - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
       # Optional — error tracking is a no-op until this is actually set in

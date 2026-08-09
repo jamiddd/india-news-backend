@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Daily sign-level horoscope provider. Kept server-side so the provider
+    # can be changed or the feature disabled without releasing a new app.
+    ASTROJSON_API_KEY: Optional[str] = None
+    HOROSCOPE_ENABLED: bool = True
+
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
     # X-Client-Version header on every request (see main.py's

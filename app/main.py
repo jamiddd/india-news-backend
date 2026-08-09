@@ -53,7 +53,7 @@ from app.schemas import (
     DailySudokuOut,
     DailyWordSearchOut,
     DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
-    WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut,
+    WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -64,6 +64,7 @@ from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
 from app.services.daily_games import get_or_create_daily_games
 from app.services.editorial_features import get_or_create_editorial
+from app.services.horoscope import get_or_create_horoscope
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
@@ -414,6 +415,13 @@ async def quote_of_the_day(request: Request, db: AsyncSession = Depends(get_db))
 async def on_this_day(request: Request, db: AsyncSession = Depends(get_db)):
     feature = await get_or_create_editorial(db, india_today())
     return {"date": feature.feature_date, "events": feature.historical_events, "attribution": "Wikipedia contributors (CC BY-SA)"}
+
+
+@app.get(f"{settings.API_V1_STR}/horoscope/daily/{{sign}}", response_model=DailyHoroscopeOut)
+@limiter.limit("30/minute")
+async def daily_horoscope(request: Request, sign: str, db: AsyncSession = Depends(get_db)):
+    forecast = await get_or_create_horoscope(db, india_today(), sign)
+    return {"date": forecast.forecast_date, **forecast.forecast}
 
 
 @app.post(f"{settings.API_V1_STR}/crossword/daily/check", response_model=CrosswordCheckResponse)

@@ -156,6 +156,18 @@ class DailyEditorial(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailyHoroscope(Base):
+    """Canonical provider response for one zodiac sign on one India date."""
+    __tablename__ = "daily_horoscopes"
+    id = Column(Integer, primary_key=True, index=True)
+    forecast_date = Column(Date, nullable=False, index=True)
+    sign = Column(String(20), nullable=False)
+    forecast = Column(JSON, nullable=False)
+    provider = Column(String(30), nullable=False, default="astrojson")
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    __table_args__ = (Index("uq_daily_horoscope_date_sign", "forecast_date", "sign", unique=True),)
+
+
 class Source(Base):
     __tablename__ = "sources"
 
