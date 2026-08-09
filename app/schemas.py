@@ -41,6 +41,11 @@ class StoryClusterOut(BaseModel):
     entities: Optional[Any] = None
     topics: Optional[Any] = None
     framing_comparison: Optional[Any] = None
+    # True only on a confirmed successful Anthropic API call — NOT implied
+    # by entities/topics/framing_comparison being present, since those are
+    # always populated by the free rule-based fallback first regardless of
+    # whether the paid API call succeeds. See StoryCluster.ai_enriched.
+    ai_enriched: bool = False
     articles: List[ArticleOut] = []
 
     model_config = ConfigDict(from_attributes=True)

@@ -268,6 +268,7 @@ async def search_story_clusters(
             entities=cluster.entities,
             topics=cluster.topics,
             framing_comparison=cluster.framing_comparison,
+            ai_enriched=cluster.ai_enriched,
             articles=[
                 ArticleOut(
                     id=art.id,
@@ -408,6 +409,7 @@ async def list_story_clusters(
                 entities=cluster.entities,
                 topics=cluster.topics,
                 framing_comparison=cluster.framing_comparison,
+                ai_enriched=cluster.ai_enriched,
                 articles=articles_out
             )
         )
@@ -458,5 +460,6 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
         entities=cluster.entities,
         topics=cluster.topics,
         framing_comparison=cluster.framing_comparison,
+        ai_enriched=cluster.ai_enriched,
         articles=articles_out
     )

@@ -84,6 +84,17 @@ class StoryCluster(Base):
     topics = Column(JSON, nullable=True)    # ["politics", "economy"]
     framing_comparison = Column(JSON, nullable=True) # Outlet headline angle comparison
 
+    # True only when the Anthropic API call in enrich_cluster_with_ai()
+    # actually succeeded — NOT when entities/topics/framing_comparison are
+    # merely non-null. Those three are always populated by the free
+    # rule-based baseline first, unconditionally, before the paid API call
+    # is even attempted — so a cluster can have "enrichment" data on it
+    # purely from the fallback (e.g. because the Anthropic key ran out of
+    # credit) while this stays False. See app/services/enrichment.py and
+    # scripts/enrich_all_clusters.py, which targets this column (not
+    # entities.is_(None)) to find clusters that still need a real AI pass.
+    ai_enriched = Column(Boolean, default=False, nullable=False, index=True)
+
     articles = relationship("Article", back_populates="cluster", foreign_keys="Article.cluster_id")
 
 

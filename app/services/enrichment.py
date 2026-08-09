@@ -211,6 +211,7 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                     cluster.topics = structured.get("topics")
                 if structured.get("framing_comparison"):
                     cluster.framing_comparison = structured.get("framing_comparison")
+                cluster.ai_enriched = True
 
                 logger.info(f"[Anthropic AI Enriched] Cluster #{cluster.id}")
         except Exception as e:
