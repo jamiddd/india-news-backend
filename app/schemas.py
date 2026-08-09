@@ -63,6 +63,19 @@ class UserPreferences(BaseModel):
     language_pref: str = "all"
     enabled_categories: List[str] = Field(default_factory=list)
     custom_categories: List[str] = Field(default_factory=list)
+    # "off" | "daily" | "breaking" — see scripts/send_notifications.py for
+    # what each mode actually sends.
+    notification_frequency: str = "off"
+    # HH:MM, UTC — the client converts the user's local time-of-day pick to
+    # UTC before saving (see NewsViewModel's preferred-time setter), so the
+    # backend never needs a timezone field or per-user tz math. Only
+    # meaningful when notification_frequency == "daily".
+    notification_time_utc: Optional[str] = None
+
+
+class DeviceTokenRegisterRequest(BaseModel):
+    fcm_token: str
+    platform: str = "android"
 
 
 class UserAuthRequest(BaseModel):

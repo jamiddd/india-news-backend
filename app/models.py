@@ -31,6 +31,52 @@ class User(Base):
         Index("uq_users_provider_uid", "provider_uid", unique=True),
     )
 
+    device_tokens = relationship("DeviceToken", cascade="all, delete-orphan")
+
+
+class DeviceToken(Base):
+    """An FCM registration token for one (user, device) pairing. A separate
+    table rather than a column on User so one account can hold multiple
+    devices/reinstalls without clobbering prior tokens, and a token can be
+    looked up/deactivated independently (e.g. on an FCM
+    UNREGISTERED/invalid-argument delivery error — see
+    scripts/send_notifications.py). Unique on fcm_token alone, not
+    (user_id, fcm_token): re-registering the same physical token under a
+    different logged-in user (shared device, re-login) should reassign
+    ownership via upsert, not create a duplicate row."""
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    fcm_token = Column(String(512), nullable=False)
+    platform = Column(String(20), default="android")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("uq_device_tokens_fcm_token", "fcm_token", unique=True),
+    )
+
+
+class NotificationLog(Base):
+    """One row per push notification actually sent to a user for a given
+    cluster. Serves two purposes for scripts/send_notifications.py: (1)
+    dedup — never notify the same user about the same cluster twice, and
+    (2) breaking-mode daily-cap enforcement — count today's rows for
+    (user_id, mode='breaking') before sending another."""
+    __tablename__ = "notification_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False)
+    mode = Column(String(20), nullable=False)  # "daily" | "breaking"
+    sent_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_notiflog_user_sent", "user_id", "sent_at"),
+        Index("idx_notiflog_user_cluster", "user_id", "cluster_id"),
+    )
+
 
 class Source(Base):
     __tablename__ = "sources"

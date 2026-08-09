@@ -16,10 +16,11 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 from app.database import engine, Base, get_db
-from app.models import Source, Article, StoryCluster, User, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
+    DeviceTokenRegisterRequest,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -164,6 +165,39 @@ async def update_user_preferences(
     user.updated_at = utc_now()
     await db.commit()
     return {"message": "Preferences updated successfully"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/device-tokens", status_code=200)
+@limiter.limit("30/minute")
+async def register_device_token(
+    request: Request,
+    user_id: str,
+    payload: DeviceTokenRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upsert an FCM registration token for push notifications. Keyed unique on
+    fcm_token alone (not user_id+token): if this exact token already belongs
+    to a *different* user_id, reassign it rather than erroring or duplicating
+    — covers a shared/reused device where a different account just logged
+    in, which would otherwise leave the token still pointing at the previous
+    owner. If it already belongs to this user, just touch updated_at.
+    """
+    result = await db.execute(select(User).where(User.id == user_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    existing = await db.execute(select(DeviceToken).where(DeviceToken.fcm_token == payload.fcm_token))
+    token_row = existing.scalar_one_or_none()
+    if token_row is None:
+        db.add(DeviceToken(user_id=user_id, fcm_token=payload.fcm_token, platform=payload.platform))
+    else:
+        token_row.user_id = user_id
+        token_row.platform = payload.platform
+        token_row.updated_at = utc_now()
+
+    await db.commit()
+    return {"message": "Device token registered"}
 
 
 @app.get("/")
