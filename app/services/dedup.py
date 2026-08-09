@@ -1,5 +1,6 @@
 import hashlib
 import re
+import unicodedata
 from urllib.parse import urlparse, parse_qs, urlunparse, urlencode
 from typing import Optional, List, Set
 
@@ -85,7 +86,18 @@ def normalize_text(text: str) -> str:
     if not text:
         return ""
     text = re.sub(r'<[^>]+>', ' ', text)
-    text = re.sub(r'[^\w\s]', ' ', text)
+    # Not `re.sub(r'[^\w\s]', ' ', text)`: Python's \w excludes combining
+    # marks (Unicode category Mn/Mc) — the vowel signs and virama that
+    # Devanagari (and other Indic scripts) syllables are built from. That
+    # blunt regex shattered every Hindi word at each vowel sign, leaving
+    # significant_tokens() with almost nothing but stray digits to compare
+    # — two IDENTICAL Hindi PIB press-release titles were being flagged as
+    # sharing no topic. Keep anything unicodedata classifies as a letter,
+    # mark, or number; drop only actual punctuation/symbols.
+    text = ''.join(
+        ch if ch.isspace() or unicodedata.category(ch)[0] in ('L', 'M', 'N') else ' '
+        for ch in text
+    )
     return ' '.join(text.lower().split())
 
 def to_signed_64(val: int) -> int:
