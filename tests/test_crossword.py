@@ -1,20 +1,30 @@
 import pytest
 
-from app.services.crossword import fallback_puzzle, validate_and_normalize
+from datetime import date
+
+from app.services.crossword import algorithmic_fallback_puzzle, legacy_fallback_puzzle, validate_and_normalize
 
 
 def test_fallback_is_public_11_by_11_and_fully_clued():
-    puzzle = fallback_puzzle()
+    puzzle = algorithmic_fallback_puzzle(date(2026, 8, 9))
     assert len(puzzle["grid"]) == 11
     assert all(len(row) == 11 for row in puzzle["grid"])
     assert all(set(row) <= {"#", "."} for row in puzzle["grid"])
-    assert len(puzzle["clues"]) == 10
+    assert len(puzzle["clues"]) >= 8
     assert all(clue["length"] >= 3 for clue in puzzle["clues"])
-    assert puzzle["solution"][3] == "###HEART###"
+    across = {
+        "".join(puzzle["solution"][clue["row"]][clue["col"] + i] for i in range(clue["length"]))
+        for clue in puzzle["clues"] if clue["direction"] == "across"
+    }
+    down = {
+        "".join(puzzle["solution"][clue["row"] + i][clue["col"]] for i in range(clue["length"]))
+        for clue in puzzle["clues"] if clue["direction"] == "down"
+    }
+    assert across != down
 
 
 def test_validator_rejects_asymmetric_blocks():
-    puzzle = fallback_puzzle()
+    puzzle = legacy_fallback_puzzle()
     rows = list(puzzle["solution"])
     rows[0] = ".##########"
     with pytest.raises(ValueError, match="symmetry"):
@@ -22,11 +32,17 @@ def test_validator_rejects_asymmetric_blocks():
 
 
 def test_validator_rejects_missing_clue():
-    puzzle = fallback_puzzle()
+    puzzle = legacy_fallback_puzzle()
     with pytest.raises(ValueError, match="Missing clue"):
         validate_and_normalize({"rows": puzzle["solution"], "clues": puzzle["clues"][:-1]})
 
 
 def test_answers_are_not_present_in_public_grid():
-    puzzle = fallback_puzzle()
+    puzzle = algorithmic_fallback_puzzle(date(2026, 8, 9))
     assert "HEART" not in "".join(puzzle["grid"])
+
+
+def test_different_dates_produce_different_shapes_or_answers():
+    first = algorithmic_fallback_puzzle(date(2026, 8, 9))
+    second = algorithmic_fallback_puzzle(date(2026, 8, 10))
+    assert first["solution"] != second["solution"]
