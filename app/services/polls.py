@@ -104,6 +104,13 @@ async def generate_draft(session: AsyncSession, poll_date: date, replace: bool =
     if existing:
         existing.question, existing.context = question, context
         existing.source_cluster_id, existing.source_headline = cluster.id, cluster.headline
+        # Bug fix: this update-in-place path previously left generation_method
+        # untouched, so a row first created as a "fallback" (e.g. the scheduler
+        # auto-published a fallback because no draft was ready in time) and
+        # later regenerated here with real AI content kept showing
+        # generation_method="fallback" — wrong for admin/audit purposes even
+        # though the actual question/context/options were genuinely AI-drafted.
+        existing.generation_method = "ai"
         await session.execute(delete(PollOption).where(PollOption.poll_id == existing.id))
         await session.flush()
         poll = existing
