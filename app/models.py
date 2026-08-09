@@ -117,6 +117,35 @@ class DailyWordSearch(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailySpellingBee(Base):
+    __tablename__ = "daily_spelling_bees"
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    letters = Column(JSON, nullable=False)
+    center_letter = Column(String(1), nullable=False)
+    words = Column(JSON, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class DailyWordLadder(Base):
+    __tablename__ = "daily_word_ladders"
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    start_word = Column(String(20), nullable=False)
+    target_word = Column(String(20), nullable=False)
+    allowed_words = Column(JSON, nullable=False)
+    optimal_steps = Column(Integer, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class DailyQuiz(Base):
+    __tablename__ = "daily_quizzes"
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    questions = Column(JSON, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class Source(Base):
     __tablename__ = "sources"
 

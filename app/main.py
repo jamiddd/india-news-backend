@@ -52,6 +52,7 @@ from app.schemas import (
     CrosswordRevealRequest, CrosswordRevealResponse,
     DailySudokuOut,
     DailyWordSearchOut,
+    DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -60,6 +61,7 @@ from app.services.enrichment import enrich_cluster_with_ai
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
+from app.services.daily_games import get_or_create_daily_games
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
@@ -362,6 +364,33 @@ async def daily_word_search(request: Request, db: AsyncSession = Depends(get_db)
         "rows": puzzle.grid,
         "words": puzzle.words,
     }
+
+
+@app.get(f"{settings.API_V1_STR}/spelling-bee/daily", response_model=DailySpellingBeeOut)
+@limiter.limit("30/minute")
+async def daily_spelling_bee(request: Request, db: AsyncSession = Depends(get_db)):
+    bee, _, _ = await get_or_create_daily_games(db, india_today())
+    return {"date": bee.puzzle_date, "letters": bee.letters, "center_letter": bee.center_letter, "words": bee.words}
+
+
+@app.get(f"{settings.API_V1_STR}/word-ladder/daily", response_model=DailyWordLadderOut)
+@limiter.limit("30/minute")
+async def daily_word_ladder(request: Request, db: AsyncSession = Depends(get_db)):
+    _, ladder, _ = await get_or_create_daily_games(db, india_today())
+    return {
+        "date": ladder.puzzle_date,
+        "start_word": ladder.start_word,
+        "target_word": ladder.target_word,
+        "allowed_words": ladder.allowed_words,
+        "optimal_steps": ladder.optimal_steps,
+    }
+
+
+@app.get(f"{settings.API_V1_STR}/quiz/daily", response_model=DailyQuizOut)
+@limiter.limit("30/minute")
+async def daily_quiz(request: Request, db: AsyncSession = Depends(get_db)):
+    _, _, quiz = await get_or_create_daily_games(db, india_today())
+    return {"date": quiz.puzzle_date, "questions": quiz.questions}
 
 
 @app.post(f"{settings.API_V1_STR}/crossword/daily/check", response_model=CrosswordCheckResponse)

@@ -156,3 +156,31 @@ class DailyWordSearchOut(BaseModel):
     size: int
     rows: List[str]
     words: List[str]
+
+
+class DailySpellingBeeOut(BaseModel):
+    date: date
+    letters: List[str]
+    center_letter: str
+    words: List[str]
+
+
+class DailyWordLadderOut(BaseModel):
+    date: date
+    start_word: str
+    target_word: str
+    allowed_words: List[str]
+    optimal_steps: int
+
+
+class DailyQuizQuestionOut(BaseModel):
+    id: int
+    question: str
+    options: List[str]
+    correct_index: int
+    explanation: str
+
+
+class DailyQuizOut(BaseModel):
+    date: date
+    questions: List[DailyQuizQuestionOut]

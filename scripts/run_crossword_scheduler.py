@@ -7,6 +7,7 @@ from app.database import AsyncSessionLocal, Base, engine
 from app.services.crossword import get_or_create_puzzle
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
+from app.services.daily_games import get_or_create_daily_games
 from sqlalchemy import text
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -22,6 +23,9 @@ async def ensure(day):
     async with AsyncSessionLocal() as session:
         await get_or_create_word_search(session, day)
         print(f"Word search ready for {day}", flush=True)
+    async with AsyncSessionLocal() as session:
+        await get_or_create_daily_games(session, day)
+        print(f"Spelling bee, word ladder, and quiz ready for {day}", flush=True)
 
 
 async def main():
