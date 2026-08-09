@@ -75,6 +75,11 @@ async def main():
         # as evidence of a genuine AI response. RULE_BASED_ANGLES is a fixed
         # list of literals defined in this file, not user input — safe to
         # inline directly rather than fight SQLAlchemy's IN-clause binding.
+        # jsonb_array_elements errors out (aborting the whole set-based
+        # UPDATE) if it hits a row where framing_comparison isn't actually a
+        # JSON array — guard with jsonb_typeof first; anything else is left
+        # at the column default (False), the safe direction per the module
+        # docstring.
         angles_sql = ", ".join("'" + a.replace("'", "''") + "'" for a in RULE_BASED_ANGLES)
         result = await conn.execute(text(f"""
             UPDATE story_clusters
@@ -82,7 +87,9 @@ async def main():
                 SELECT 1 FROM jsonb_array_elements(framing_comparison::jsonb) AS elem
                 WHERE elem->>'headline_angle' NOT IN ({angles_sql})
             )
-            WHERE article_count >= 2 AND framing_comparison IS NOT NULL
+            WHERE article_count >= 2
+              AND framing_comparison IS NOT NULL
+              AND jsonb_typeof(framing_comparison::jsonb) = 'array'
         """))
         logger.info(f"Backfilled ai_enriched heuristically for {result.rowcount} multi-source clusters.")
 
