@@ -1,5 +1,26 @@
+import html
 import re
 from typing import Optional
+
+
+def decode_entities(text: Optional[str]) -> Optional[str]:
+    """
+    Unescape HTML entities (&amp;, &#39;, ...), repeating up to a few times
+    since some publisher CMSes (News18, HT) double-encode their RSS titles
+    (e.g. "J&amp;amp;K" in the raw feed survives feedparser's one pass of
+    decoding and lands in the DB as the literal string "J&amp;K"). Stops as
+    soon as a pass changes nothing, so plain text with a bare "&" is left
+    alone.
+    """
+    if not text:
+        return text
+    decoded = text
+    for _ in range(3):
+        next_pass = html.unescape(decoded)
+        if next_pass == decoded:
+            break
+        decoded = next_pass
+    return decoded
 
 # Once any of these phrases turns up (case-insensitive, anywhere in a line),
 # that line and everything after it is discarded. Each one reliably marks

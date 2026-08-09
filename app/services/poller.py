@@ -11,9 +11,10 @@ from sqlalchemy import update, desc, func
 
 from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
-from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate
+from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image
+from app.services.content_cleaner import decode_entities
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,6 +31,12 @@ EXTRACTION_CONCURRENCY = 5
 HEADERS = {
     "Accept": "application/rss+xml, application/xml, text/xml, */*"
 }
+
+# Source.category values that identify a specific geography rather than a
+# topic. Two sources in different geographic categories are never the same
+# story for clustering purposes — see the guard in ingest_source's matching
+# loop below.
+GEOGRAPHIC_CATEGORIES = {"northeast", "regional_south", "regional_west", "regional_east"}
 
 def parse_pub_date(entry) -> datetime:
     parsed_tuple = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
@@ -101,7 +108,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
     # already-committed rows misses that, since neither copy exists in the DB
     # yet; both would pass the check and then collide on insert.
     for entry in items:
-        title = getattr(entry, "title", "").strip()
+        title = decode_entities(getattr(entry, "title", "").strip())
         link = getattr(entry, "link", "").strip()
 
         # Filter out malformed, empty, or 'undefined' titles
@@ -120,7 +127,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
 
         seen_hashes_this_batch.add(url_hash)
 
-        snippet = getattr(entry, "summary", "") or getattr(entry, "description", "")
+        snippet = decode_entities(getattr(entry, "summary", "") or getattr(entry, "description", ""))
         if snippet and snippet.lower() in ["undefined", "none", "null"]:
             snippet = ""
 
@@ -164,13 +171,51 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
 
         matched_cluster: Optional[StoryCluster] = None
         for cluster in recent_clusters:
-            rep_article = await session.get(Article, cluster.representative_article_id) if cluster.representative_article_id else None
+            rep_article = None
+            rep_source_category = None
+            if cluster.representative_article_id:
+                rep_row = (
+                    await session.execute(
+                        select(Article, Source.category)
+                        .join(Source, Article.source_id == Source.id)
+                        .where(Article.id == cluster.representative_article_id)
+                    )
+                ).first()
+                if rep_row:
+                    rep_article, rep_source_category = rep_row
+
             # max_distance intentionally omitted here — is_near_duplicate's own
             # default (18) is the empirically-calibrated value; keep this call
             # site from silently overriding it if that default is ever revised.
-            if rep_article and rep_article.simhash and is_near_duplicate(simhash_val, rep_article.simhash):
-                matched_cluster = cluster
-                break
+            if not (rep_article and rep_article.simhash and is_near_duplicate(simhash_val, rep_article.simhash)):
+                continue
+
+            # is_near_duplicate is only a cheap prefilter (see its docstring)
+            # — confirm with actual shared content words before merging.
+            # Without this, unrelated short headlines that happen to share
+            # enough common filler words coincidentally land within Hamming
+            # range of each other; in production this let one cluster
+            # silently absorb 20+ completely unrelated stories over weeks.
+            if not shares_topic(title, snippet, rep_article.title, rep_article.snippet):
+                continue
+
+            # SimHash on short headlines is loose enough (threshold 18/64
+            # bits) that unrelated stories can coincidentally land within
+            # range. That's tolerable within one geography/topic, but never
+            # across two different "geographic" categories (northeast vs.
+            # regional_south, etc.) — merging those doesn't just misfile one
+            # article, it makes a whole cluster (and everything in it)
+            # appear under the wrong region's tab. Refuse that merge and
+            # fall through to starting a new cluster instead.
+            if (
+                source.category in GEOGRAPHIC_CATEGORIES
+                and rep_source_category in GEOGRAPHIC_CATEGORIES
+                and source.category != rep_source_category
+            ):
+                continue
+
+            matched_cluster = cluster
+            break
 
         if matched_cluster:
             article = Article(

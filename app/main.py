@@ -22,6 +22,7 @@ from app.schemas import (
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
+from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.firebase_auth import (
     verify_firebase_id_token,
@@ -308,11 +309,26 @@ async def list_story_clusters(
     )
 
     if category and category.lower() != "all":
+        cat = category.lower()
         subquery = (
             select(Article.cluster_id)
             .join(Source)
-            .where(Source.category == category.lower())
+            .where(Source.category == cat)
         )
+        # For tabs where the source's RSS section alone is too coarse a
+        # signal (broad section feeds mixing in off-topic stories, or a
+        # regional outlet occasionally running an unrelated wire story),
+        # also require the article to actually mention something on-topic.
+        # See app/services/topic_filters.py for why and the keyword lists.
+        gate_keywords = CONTENT_GATED_CATEGORIES.get(cat)
+        if gate_keywords:
+            pattern = keyword_regex(gate_keywords)
+            subquery = subquery.where(
+                or_(
+                    Article.title.op("~*")(pattern),
+                    Article.snippet.op("~*")(pattern),
+                )
+            )
         query = query.where(StoryCluster.id.in_(subquery))
 
     if cursor:
