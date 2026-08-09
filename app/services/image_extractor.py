@@ -1,7 +1,43 @@
 import re
+import logging
 from typing import Any, Optional
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Article
+
+logger = logging.getLogger(__name__)
 
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+# How many *distinct* articles from the same source may reuse the exact same
+# image URL before we conclude it isn't a real per-story photo but a
+# publisher-wide default/logo/placeholder (e.g. The Hindu falls back to a
+# generic section thumbnail on some feeds when a story has no dedicated
+# image). Kept low because a legitimate photo being reused 3+ times across
+# unrelated stories from one outlet is rare.
+PLACEHOLDER_REUSE_THRESHOLD = 3
+
+
+async def is_placeholder_image(session: AsyncSession, source_id: int, image_url: Optional[str], url_hash: str) -> bool:
+    """Detect a per-source default/placeholder image by frequency: if a
+    source has already used this exact image URL on N-or-more other
+    (different-article) rows, treat it as a non-story-specific placeholder
+    rather than a real lead image, so callers can drop it and show no image
+    (or a fallback) instead of a repeated stock/logo thumbnail."""
+    if not image_url:
+        return False
+    count = await session.scalar(
+        select(func.count(Article.id)).where(
+            Article.source_id == source_id,
+            Article.image_url == image_url,
+            Article.url_hash != url_hash,
+        )
+    )
+    if count and count >= PLACEHOLDER_REUSE_THRESHOLD:
+        logger.info(f"[Placeholder image detected] source_id={source_id} reused {count}x: {image_url}")
+        return True
+    return False
 
 
 def extract_rss_image(entry: Any) -> Optional[str]:

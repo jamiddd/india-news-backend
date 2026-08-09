@@ -103,7 +103,25 @@ async def main(apply: bool, min_article_count: int):
                 cluster.entities = None
                 cluster.topics = None
                 cluster.framing_comparison = None
-            cluster.last_updated_at = utc_now()
+                # Left with just the representative article: this cluster
+                # isn't "freshly updated", it just got cleaned up — its
+                # last_updated_at should reflect the one remaining article's
+                # own date, not the moment the repair ran. Stamping utc_now()
+                # here unconditionally (the old behavior) is exactly what
+                # made a batch of old, single-outlet articles rank as if
+                # currently developing stories in both the category-tab
+                # ordering (last_updated_at desc) and the "All" feed's
+                # headline_score recency-decay term — confirmed in
+                # production against a batch of 2022-2025 crypto clusters
+                # that all picked up an identical utc_now() timestamp from
+                # one repair run. See docs/... incident note if one exists.
+                cluster.last_updated_at = rep.published_at
+            else:
+                # Still a genuine multi-outlet cluster after cleanup —
+                # membership actually changed, so treat it like real new
+                # coverage, consistent with the ordinary ingestion path
+                # (poller.py bumps last_updated_at on every real match too).
+                cluster.last_updated_at = utc_now()
 
         if apply:
             await session.commit()

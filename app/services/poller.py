@@ -2,7 +2,7 @@ import asyncio
 import logging
 import hashlib
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Set
 import feedparser
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
@@ -14,7 +14,7 @@ from app.config import settings
 from app.models import Source, Article, StoryCluster, utc_now
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
-from app.services.image_extractor import extract_rss_image
+from app.services.image_extractor import extract_rss_image, is_placeholder_image
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 # Cap how many articles we scrape for full content at once, per source,
 # so one feed's poll can't hammer a publisher's site or stall the poller.
 EXTRACTION_CONCURRENCY = 5
+
+# Drop any RSS item whose own <pubDate> is older than this, so a feed that
+# infrequently refreshes (confirmed e.g. on News18's crypto feed, whose
+# newest item was already ~40 days stale at check time, vs. CoinDesk/
+# Cointelegraph updating within hours) can't keep re-surfacing month-old
+# "news" just because it's still sitting in the feed's item list. Items with
+# no parseable pubDate default to "now" in parse_pub_date() and always pass.
+MAX_ARTICLE_AGE = timedelta(days=4)
 
 # Only conditional-GET headers here — no User-Agent/Accept. curl_cffi's
 # impersonate= already sends a full, internally-consistent Chrome header set
@@ -158,6 +166,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
 
         author = getattr(entry, "author", None)
         pub_date = parse_pub_date(entry)
+        if utc_now() - pub_date > MAX_ARTICLE_AGE:
+            continue
         rss_image_url = extract_rss_image(entry)
 
         candidates.append({
@@ -191,6 +201,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         # Prefer the RSS feed's own image (usually higher quality / more
         # reliably the lead image) over the scraped page's og:image fallback.
         image_url = candidate["rss_image_url"] or extraction.og_image_url
+        if await is_placeholder_image(session, source.id, image_url, url_hash):
+            image_url = None
 
         simhash_val = compute_simhash(title, snippet)
 

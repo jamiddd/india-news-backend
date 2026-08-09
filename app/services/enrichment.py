@@ -94,15 +94,36 @@ def generate_framing_comparison(articles: List[Article]) -> List[Dict[str, str]]
         src = art.source.name if art.source else "Source"
         title = art.title
         
-        # Categorize angle
-        if any(w in title.lower() for w in ["says", "announced", "launches", "approves", "meets"]):
+        # Categorize angle. Ordered from most to least specific so a headline
+        # matching multiple buckets gets the more informative one. The old
+        # version fell through to a bare "General Reporting" for anything
+        # that didn't hit one of 3 narrow buckets, which in practice was most
+        # headlines — these extra buckets and the title-based fallback below
+        # cut how often that generic label actually surfaces.
+        lower_title = title.lower()
+        if any(w in lower_title for w in ["says", "announced", "launches", "approves", "meets", "unveils", "signs", "orders"]):
             angle = "Official / Policy Statement"
-        elif any(w in title.lower() for w in ["protest", "clash", "row", "lynches", "rape", "crime", "vs"]):
+        elif any(w in lower_title for w in ["protest", "clash", "row", "lynches", "rape", "crime", " vs ", "slams", "accuses", "blames"]):
             angle = "Conflict & Opposition Impact"
-        elif any(w in title.lower() for w in ["rate", "sensex", "nifty", "market", "gold", "price", "quarter"]):
+        elif any(w in lower_title for w in ["rate", "sensex", "nifty", "market", "gold", "price", "quarter", "stock", "ipo", "gdp", "inflation"]):
             angle = "Financial & Market Impact"
+        elif any(w in lower_title for w in ["court", "hc", "verdict", "judge", "bail", "petition", "cbi", "ed raids", "probe"]):
+            angle = "Legal / Investigative"
+        elif any(w in lower_title for w in ["dies", "killed", "injured", "accident", "fire", "flood", "cyclone", "quake", "rescue"]):
+            angle = "Disaster / Casualty Report"
+        elif any(w in lower_title for w in ["wins", "beats", "century", "medal", "tournament", "match", "final"]):
+            angle = "Sports Result"
+        elif any(w in lower_title for w in ["film", "actor", "actress", "box office", "trailer", "song", "album"]):
+            angle = "Entertainment"
         else:
-            angle = "General Reporting"
+            # Last-resort fallback: use the leading verb/subject phrase
+            # (first few words) as a descriptive angle instead of the
+            # uninformative generic label, so distinct stories still read
+            # as distinct in the framing comparison UI.
+            words = title.strip().split()
+            angle = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
+            if not angle:
+                angle = "General Reporting"
 
         framing.append({
             "outlet": src,

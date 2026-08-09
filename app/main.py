@@ -1,4 +1,5 @@
 import asyncio
+from datetime import timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
@@ -31,6 +32,19 @@ from app.services.firebase_auth import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Clusters older than this (by first_seen_at — when the story actually first
+# appeared, not last_updated_at) never surface in listings, in either feed.
+# Added after finding stale singleton crypto clusters (some from 2022)
+# ranking as if fresh: their last_updated_at had been bulk-touched to "now"
+# by an out-of-band write unrelated to any real new coverage, which both
+# sorted them above genuinely current stories in category tabs (ordered by
+# last_updated_at) and inflated their headline_score's recency-decay term in
+# the "All" feed. first_seen_at is set once at cluster creation and never
+# rewritten by anything, so it's the one timestamp immune to that class of
+# corruption — filtering on it is a hard backstop regardless of what causes
+# last_updated_at to drift.
+LISTING_MAX_AGE = timedelta(days=4)
 
 # Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
 # Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
@@ -307,7 +321,7 @@ async def list_story_clusters(
 
     query = select(StoryCluster).options(
         selectinload(StoryCluster.articles).selectinload(Article.source)
-    )
+    ).where(StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE)
 
     if is_all:
         # Default "All Stories" feed: ranked by importance (headline_score —
