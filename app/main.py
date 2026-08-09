@@ -1,10 +1,11 @@
 import asyncio
+import logging
 from datetime import timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -15,17 +16,46 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Error tracking — no-op entirely unless SENTRY_DSN is configured (local
+# dev / CI without it behaves exactly as before this was added). Kept as a
+# plain conditional import+init here rather than a separate module since
+# it's genuinely this small and has no other call sites — sentry_sdk's
+# FastAPI integration patches the framework globally at init time, it
+# isn't something route handlers call into directly.
+if settings.SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        integrations=[FastApiIntegration()],
+        # Full error capture, low-volume perf sampling — this app's traffic
+        # doesn't need APM-grade tracing, just "tell me when something
+        # breaks in production" (the actual gap being closed here).
+        traces_sample_rate=0.1,
+    )
+    logger.info("Sentry error tracking enabled.")
+else:
+    logger.info("SENTRY_DSN not set — error tracking disabled.")
+
 from app.database import engine, Base, get_db
-from app.models import Source, Article, StoryCluster, User, DeviceToken, utc_now
+from app.redis_client import get_redis_client
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
+    DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
+    CrosswordRevealRequest, CrosswordRevealResponse,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
@@ -33,6 +63,31 @@ from app.services.firebase_auth import (
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Short-TTL read cache for the hot list endpoints (/clusters, /search).
+# Redis was already provisioned for rate limiting (see `limiter` below) but
+# sat otherwise idle for reads — every request hit Postgres directly even
+# though the underlying data only actually changes once per poll cycle
+# (~15 min). 30s is short enough that a poll-triggered update is visible
+# almost immediately, while still collapsing the realistic case of many
+# concurrent clients requesting the same (category, cursor) page within a
+# few seconds of each other into one DB query. Deliberately fails open on
+# any Redis error (network blip, Redis restart) — caching is a performance
+# optimization, not a correctness dependency, so a cache miss/error just
+# means "hit the DB like before", never a request failure.
+CACHE_TTL_SECONDS = 30
+
+async def _cache_get(key: str) -> Optional[str]:
+    try:
+        return await get_redis_client().get(key)
+    except Exception:
+        return None
+
+async def _cache_set(key: str, value: str, ttl: int = CACHE_TTL_SECONDS):
+    try:
+        await get_redis_client().setex(key, ttl, value)
+    except Exception:
+        pass
 
 # Clusters older than this (by first_seen_at — when the story actually first
 # appeared, not last_updated_at) never surface in listings, in either feed.
@@ -83,6 +138,32 @@ limiter = Limiter(key_func=get_remote_address, storage_uri=settings.REDIS_URL, d
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+@app.middleware("http")
+async def enforce_min_client_version(request: Request, call_next):
+    """
+    API version negotiation: the client sends its own versionCode as
+    X-Client-Version (see NewsApiClient.kt). If it's present and below
+    settings.MIN_SUPPORTED_APP_VERSION_CODE, reject with 426 Upgrade
+    Required and a clear message, rather than letting an old client hit a
+    response shape it can't parse or a removed field it depends on.
+
+    Fails open by design: no header at all (every client shipped before
+    this existed, or a non-app caller like curl/the OpenAPI docs UI) is
+    allowed through unchanged — this only blocks a client that identifies
+    itself AND is confirmed too old, never an unknown one.
+    """
+    client_version = request.headers.get("X-Client-Version")
+    if client_version is not None:
+        try:
+            if int(client_version) < settings.MIN_SUPPORTED_APP_VERSION_CODE:
+                return JSONResponse(
+                    status_code=426,
+                    content={"detail": "Please update the app to continue — this version is no longer supported."},
+                )
+        except ValueError:
+            pass  # malformed header — ignore rather than block on it
+    return await call_next(request)
 
 DEFAULT_PREFERENCES = UserPreferences(
     enabled_categories=["all", "national", "business", "official", "sports", "entertainment", "tech", "politics"]
@@ -209,6 +290,117 @@ async def root(request: Request):
         "version": settings.VERSION
     }
 
+@app.get("/health")
+@limiter.exempt
+async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Real dependency check for uptime monitoring, distinct from "/" — "/"
+    only proves the FastAPI process is up and answering HTTP, which stays
+    green even if Postgres or Redis are unreachable (every DB-touching route
+    would still 500). This actually pings both, so an external monitor
+    (UptimeRobot etc.) pointed here can distinguish "app is fine" from
+    "app is up but its dependencies are down" — see
+    docs/production-readiness-gaps.md gap #6.
+    """
+    checks = {}
+
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+
+    try:
+        await get_redis_client().ping()
+        checks["redis"] = "ok"
+    except Exception as e:
+        checks["redis"] = f"error: {e}"
+
+    healthy = all(v == "ok" for v in checks.values())
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "healthy" if healthy else "unhealthy", "checks": checks},
+    )
+
+
+@app.get(f"{settings.API_V1_STR}/crossword/daily", response_model=DailyCrosswordOut)
+@limiter.limit("30/minute")
+async def daily_crossword(request: Request, db: AsyncSession = Depends(get_db)):
+    puzzle = await get_or_create_puzzle(db, india_today())
+    return {
+        "date": puzzle.puzzle_date,
+        "size": puzzle.size,
+        "rows": puzzle.grid,
+        "clues": puzzle.clues,
+    }
+
+
+@app.post(f"{settings.API_V1_STR}/crossword/daily/check", response_model=CrosswordCheckResponse)
+@limiter.limit("30/minute")
+async def check_daily_crossword(
+    request: Request,
+    payload: CrosswordCheckRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == payload.date))
+    puzzle = result.scalar_one_or_none()
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+
+    entered = {(cell.row, cell.col): cell.letter.upper() for cell in payload.cells}
+    target: set[tuple[int, int]] = set()
+    if payload.scope == "word":
+        direction = (payload.clue_direction or "").lower()
+        clue = next(
+            (item for item in puzzle.clues if item["number"] == payload.clue_number and item["direction"] == direction),
+            None,
+        )
+        if clue is None:
+            raise HTTPException(status_code=400, detail="A valid clue is required for word checking")
+        dr, dc = (0, 1) if direction == "across" else (1, 0)
+        target = {(clue["row"] + i * dr, clue["col"] + i * dc) for i in range(clue["length"])}
+    elif payload.scope == "grid":
+        target = {
+            (row, col)
+            for row in range(puzzle.size)
+            for col in range(puzzle.size)
+            if puzzle.solution[row][col] != "#"
+        }
+    else:
+        raise HTTPException(status_code=400, detail="scope must be 'word' or 'grid'")
+
+    incorrect = [
+        [row, col]
+        for row, col in sorted(target)
+        if (row, col) in entered and entered[(row, col)] != puzzle.solution[row][col]
+    ]
+    all_open = {
+        (row, col)
+        for row in range(puzzle.size)
+        for col in range(puzzle.size)
+        if puzzle.solution[row][col] != "#"
+    }
+    complete = all(entered.get(cell) == puzzle.solution[cell[0]][cell[1]] for cell in all_open)
+    return {"incorrect_cells": incorrect, "complete": complete}
+
+
+@app.post(f"{settings.API_V1_STR}/crossword/daily/reveal", response_model=CrosswordRevealResponse)
+@limiter.limit("20/minute")
+async def reveal_daily_crossword(
+    request: Request,
+    payload: CrosswordRevealRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == payload.date))
+    puzzle = result.scalar_one_or_none()
+    if puzzle is None:
+        raise HTTPException(status_code=404, detail="Puzzle not found")
+    letter = puzzle.solution[payload.row][payload.col]
+    if letter == "#":
+        raise HTTPException(status_code=400, detail="Blocked cells cannot be revealed")
+    return {"row": payload.row, "col": payload.col, "letter": letter}
+
 @app.get("/privacy", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def privacy_policy(request: Request):
@@ -281,6 +473,11 @@ async def search_story_clusters(
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
+    cache_key = f"cache:search:{q}:{limit}:{cursor or ''}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
+
     pattern = f"%{q}%"
     query = (
         select(StoryCluster)
@@ -336,11 +533,13 @@ async def search_story_clusters(
         for cluster in items
     ]
 
-    return PaginatedClustersOut(
+    result_out = PaginatedClustersOut(
         items=formatted_clusters,
         next_cursor=next_cursor,
         has_more=has_more
     )
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
 
 @app.get(f"{settings.API_V1_STR}/clusters", response_model=PaginatedClustersOut)
 @limiter.limit("60/minute")
@@ -351,6 +550,11 @@ async def list_story_clusters(
     cursor: Optional[str] = Query(None, description="Cursor for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
+
     is_all = not category or category.lower() == "all"
 
     query = select(StoryCluster).options(
@@ -462,11 +666,13 @@ async def list_story_clusters(
             )
         )
 
-    return PaginatedClustersOut(
+    result_out = PaginatedClustersOut(
         items=formatted_clusters,
         next_cursor=next_cursor,
         has_more=has_more
     )
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)
 @limiter.limit("60/minute")

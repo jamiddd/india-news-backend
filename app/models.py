@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import (
-    Column, Integer, String, Text, BigInteger, DateTime, ForeignKey, Index, JSON, Boolean, Float
+    Column, Integer, String, Text, BigInteger, Date, DateTime, ForeignKey, Index, JSON, Boolean, Float
 )
 from sqlalchemy.orm import relationship
 from app.database import Base
@@ -76,6 +76,22 @@ class NotificationLog(Base):
         Index("idx_notiflog_user_sent", "user_id", "sent_at"),
         Index("idx_notiflog_user_cluster", "user_id", "cluster_id"),
     )
+
+
+class DailyCrossword(Base):
+    """One validated, shared crossword for an Asia/Kolkata calendar date."""
+    __tablename__ = "daily_crosswords"
+
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    size = Column(Integer, nullable=False, default=11)
+    # Public layout contains only '#' and '.'; the solution remains separate
+    # so GET /crossword/daily never exposes answers.
+    grid = Column(JSON, nullable=False)
+    clues = Column(JSON, nullable=False)
+    solution = Column(JSON, nullable=False)
+    source = Column(String(30), nullable=False, default="ai")
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class Source(Base):

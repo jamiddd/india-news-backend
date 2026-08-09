@@ -13,6 +13,9 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+      # Optional — error tracking is a no-op until this is actually set in
+      # the droplet's .env. See app/main.py.
+      - SENTRY_DSN=${SENTRY_DSN:-}
     volumes:
       # Firebase Admin SDK service-account key — scp'd onto the host once,
       # never committed/baked into the image. FIREBASE_CREDENTIALS_HOST_PATH
@@ -29,6 +32,21 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  crossword_scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_crossword_scheduler_prod
+    restart: always
+    command: ["python3", "scripts/run_crossword_scheduler.py"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://news_user:${POSTGRES_PASSWORD:-news_password}@postgres:5432/news_db
+      - REDIS_URL=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on:
+      postgres:
         condition: service_healthy
 
   postgres:

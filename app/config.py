@@ -19,6 +19,22 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # API version negotiation — the client sends its own versionCode (see
+    # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
+    # X-Client-Version header on every request (see main.py's
+    # enforce_min_client_version middleware). Requests from a client older
+    # than this get a 426 Upgrade Required instead of whatever confusing
+    # downstream error an incompatible response shape would otherwise cause.
+    # Defaults to 1 (the current versionCode) so this is a no-op until a
+    # real breaking change ships and this is deliberately bumped alongside
+    # it — raise via env var, no code change needed for a routine bump.
+    MIN_SUPPORTED_APP_VERSION_CODE: int = 1
+
+    # Error tracking (Sentry). Optional — sentry_sdk.init() is only called
+    # in main.py when this is set, so local dev / CI without a DSN
+    # configured behaves exactly as before (no-op, not a startup failure).
+    SENTRY_DSN: Optional[str] = None
+
     # Deprecated: both email/password and Google Sign-In now go through
     # Firebase Authentication (see FIREBASE_CREDENTIALS_PATH below), which
     # verifies both under one token audience. Left in place, unused, in case

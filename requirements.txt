@@ -19,3 +19,4 @@ slowapi>=0.1.9  # per-IP rate limiting; backed by the redis instance above so
                 # limits are shared correctly across the app's 4 uvicorn workers
 python-dotenv>=1.0.1
 simhash>=2.1.2
+sentry-sdk[fastapi]>=2.0.0  # error tracking — no-op unless SENTRY_DSN is set (see config.py)

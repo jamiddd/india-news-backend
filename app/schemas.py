@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -95,3 +95,50 @@ class UserAuthResponse(BaseModel):
 
 class AccountDeleteRequest(BaseModel):
     uid: str  # Firebase ID token, verified server-side — same convention as UserAuthRequest.uid
+
+
+class CrosswordClueOut(BaseModel):
+    number: int
+    direction: str
+    row: int
+    col: int
+    length: int
+    clue: str
+
+
+class DailyCrosswordOut(BaseModel):
+    date: date
+    size: int
+    rows: List[str]
+    clues: List[CrosswordClueOut]
+
+
+class CrosswordCellInput(BaseModel):
+    row: int = Field(ge=0, le=10)
+    col: int = Field(ge=0, le=10)
+    letter: str = Field(min_length=1, max_length=1)
+
+
+class CrosswordCheckRequest(BaseModel):
+    date: date
+    cells: List[CrosswordCellInput] = Field(default_factory=list)
+    scope: str = "grid"
+    clue_number: Optional[int] = None
+    clue_direction: Optional[str] = None
+
+
+class CrosswordCheckResponse(BaseModel):
+    incorrect_cells: List[List[int]]
+    complete: bool
+
+
+class CrosswordRevealRequest(BaseModel):
+    date: date
+    row: int = Field(ge=0, le=10)
+    col: int = Field(ge=0, le=10)
+
+
+class CrosswordRevealResponse(BaseModel):
+    row: int
+    col: int
+    letter: str
