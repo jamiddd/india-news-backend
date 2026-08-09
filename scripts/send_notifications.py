@@ -78,13 +78,28 @@ def _is_within_daily_window(notification_time_utc: str, now: datetime) -> bool:
 
 async def _send(app, token: str, title: str, body: str, cluster_id: int, channel_id: str) -> bool:
     """Sends one message; returns False (and deletes the token row) if FCM
-    reports it as dead, so future runs stop paying the cost of trying it."""
+    reports it as dead, so future runs stop paying the cost of trying it.
+
+    Deliberately data-only (no top-level `notification` field). Confirmed
+    live against a real device: with a `notification` field present, FCM
+    auto-displays the tray notification itself whenever the app is
+    backgrounded/killed, WITHOUT calling onMessageReceived() at all — our
+    NewsFirebaseMessagingService's custom PendingIntent (carrying cluster_id
+    as a typed Int extra) never gets attached. Instead the OS's own
+    fallback launch intent carries the data map's values as raw Strings,
+    which MainActivity.getIntExtra(..., Int) can't read (crashes to the
+    -1 default, so tapping the notification just opens the app with no
+    deep-link). Data-only messages route through onMessageReceived() in
+    every app state (foreground and background alike), so our own code is
+    always the one building the notification and its PendingIntent."""
     message = messaging.Message(
-        notification=messaging.Notification(title=title, body=body),
-        data={"cluster_id": str(cluster_id), "channel_id": channel_id},
-        android=messaging.AndroidConfig(
-            notification=messaging.AndroidNotification(channel_id=channel_id)
-        ),
+        data={
+            "title": title,
+            "body": body,
+            "cluster_id": str(cluster_id),
+            "channel_id": channel_id,
+        },
+        android=messaging.AndroidConfig(priority="high"),
         token=token,
     )
     try:
