@@ -148,6 +148,26 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         if existing.scalar_one_or_none():
             continue
 
+        # Recurring templated-headline check: some outlets run a standing
+        # daily/rolling "roundup" page under the exact same headline every
+        # time (confirmed e.g. Cointelegraph's "Here's what happened in
+        # crypto today" — verbatim-identical title each day, generic
+        # evergreen snippet, and the article page itself has no scrapable
+        # body content — it's a live-updating landing page, not a story).
+        # A genuine news headline is essentially never repeated word-for-
+        # word by the same outlet on a different day, so if this exact
+        # title has already been ingested from this source before, treat it
+        # as that same template recurring rather than real news.
+        title_key = title.strip().lower()
+        existing_title = await session.execute(
+            select(Article.id).where(
+                Article.source_id == source.id,
+                func.lower(Article.title) == title_key,
+            )
+        )
+        if existing_title.scalar_one_or_none():
+            continue
+
         seen_hashes_this_batch.add(url_hash)
 
         snippet = decode_entities(getattr(entry, "summary", "") or getattr(entry, "description", ""))
