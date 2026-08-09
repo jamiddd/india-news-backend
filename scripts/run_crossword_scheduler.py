@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from app.database import AsyncSessionLocal, Base, engine
 from app.services.crossword import get_or_create_puzzle
+from app.services.sudoku import get_or_create_sudoku
 from sqlalchemy import text
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -14,6 +15,9 @@ async def ensure(day):
     async with AsyncSessionLocal() as session:
         puzzle = await get_or_create_puzzle(session, day)
         print(f"Crossword ready for {day} ({puzzle.source})", flush=True)
+    async with AsyncSessionLocal() as session:
+        await get_or_create_sudoku(session, day)
+        print(f"Sudoku ready for {day}", flush=True)
 
 
 async def main():

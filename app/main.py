@@ -50,12 +50,14 @@ from app.schemas import (
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
     CrosswordRevealRequest, CrosswordRevealResponse,
+    DailySudokuOut,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.crossword import get_or_create_puzzle, india_today
+from app.services.sudoku import get_or_create_sudoku
 from app.services.firebase_auth import (
     verify_firebase_id_token,
     InvalidFirebaseIdToken,
@@ -333,6 +335,17 @@ async def daily_crossword(request: Request, db: AsyncSession = Depends(get_db)):
         "size": puzzle.size,
         "rows": puzzle.grid,
         "clues": puzzle.clues,
+    }
+
+
+@app.get(f"{settings.API_V1_STR}/sudoku/daily", response_model=DailySudokuOut)
+@limiter.limit("30/minute")
+async def daily_sudoku(request: Request, db: AsyncSession = Depends(get_db)):
+    sudoku = await get_or_create_sudoku(db, india_today())
+    return {
+        "date": sudoku.puzzle_date,
+        "puzzle": sudoku.puzzle,
+        "solution": sudoku.solution,
     }
 
 

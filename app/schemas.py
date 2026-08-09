@@ -142,3 +142,9 @@ class CrosswordRevealResponse(BaseModel):
     row: int
     col: int
     letter: str
+
+
+class DailySudokuOut(BaseModel):
+    date: date
+    puzzle: List[int]
+    solution: List[int]

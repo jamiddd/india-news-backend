@@ -94,6 +94,17 @@ class DailyCrossword(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailySudoku(Base):
+    """One canonical Sudoku shared by every client for an India calendar date."""
+    __tablename__ = "daily_sudokus"
+
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    puzzle = Column(JSON, nullable=False)
+    solution = Column(JSON, nullable=False)
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class Source(Base):
     __tablename__ = "sources"
 
