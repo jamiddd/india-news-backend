@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import desc, or_, func, text, tuple_
+from sqlalchemy import desc, or_, func, text, tuple_, case
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -100,6 +100,28 @@ async def _cache_set(key: str, value: str, ttl: int = CACHE_TTL_SECONDS):
         await get_redis_client().setex(key, ttl, value)
     except Exception:
         pass
+
+def _parse_source_weights(raw: Optional[str]) -> dict:
+    """Parses 'id:weight,id:weight' (see UserPreferences.source_weights /
+    GET /clusters's source_weights param) into {source_id: weight}. Silently
+    drops malformed pairs and clamps weight to [0.1, 5.0] rather than
+    rejecting the whole request — a bad/stale entry from a client shouldn't
+    500 the entire feed, and the clamp keeps a typo'd value (e.g. "0" or
+    "999") from zeroing out or drowning out everything else in the feed."""
+    weights: dict = {}
+    if not raw:
+        return weights
+    for pair in raw.split(","):
+        if ":" not in pair:
+            continue
+        sid_str, weight_str = pair.split(":", 1)
+        try:
+            sid = int(sid_str)
+            weight = max(0.1, min(5.0, float(weight_str)))
+        except ValueError:
+            continue
+        weights[sid] = weight
+    return weights
 
 # Clusters older than this (by first_seen_at — when the story actually first
 # appeared, not last_updated_at) never surface in listings, in either feed.
@@ -678,14 +700,24 @@ async def list_story_clusters(
     category: Optional[str] = Query(None, description="Category filter (national, business, official, northeast)"),
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[str] = Query(None, description="Cursor for pagination"),
+    source_weights: Optional[str] = Query(
+        None,
+        description="Comma-separated source_id:weight pairs (e.g. '12:2.0,45:1.5') boosting the All Stories "
+                     "ranking — a cluster's effective score is headline_score * the highest weight among its "
+                     "contributing sources (1.0 if none match). Ignored outside the All Stories tab, which is "
+                     "the only ranked (not chronological) feed. Stateless by design, same as `category` — the "
+                     "client resends the user's UserPreferences.source_weights on every request rather than the "
+                     "server looking them up, since /clusters has no per-request auth to know who's asking.",
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}"
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
 
     is_all = not category or category.lower() == "all"
+    weights = _parse_source_weights(source_weights) if is_all else {}
 
     query = select(StoryCluster).options(
         selectinload(StoryCluster.articles).selectinload(Article.source)
@@ -697,7 +729,25 @@ async def list_story_clusters(
         # per poll cycle in poller.py), not raw recency. This is what keeps
         # a story 6 outlets are covering above a single regional outlet's
         # story that merely updated more recently.
-        query = query.order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
+        if weights:
+            # Per-cluster boost = the highest weight among its contributing
+            # sources (a cluster with a boosted source among 5 others still
+            # gets the boost — not diluted by the unboosted majority). Built
+            # as a correlated subquery rather than joining Article directly
+            # onto the main query, so it can't fan out StoryCluster rows
+            # (one per matching article) the way a plain join would.
+            weight_case = case(weights, value=Article.source_id, else_=1.0)
+            boost_subq = (
+                select(Article.cluster_id.label("cluster_id"), func.max(weight_case).label("boost"))
+                .group_by(Article.cluster_id)
+                .subquery()
+            )
+            boost_expr = func.coalesce(boost_subq.c.boost, 1.0)
+            effective_score = StoryCluster.headline_score * boost_expr
+            query = query.outerjoin(boost_subq, boost_subq.c.cluster_id == StoryCluster.id)
+        else:
+            effective_score = StoryCluster.headline_score
+        query = query.order_by(desc(effective_score), desc(StoryCluster.id))
     else:
         cat = category.lower()
         subquery = (
@@ -732,10 +782,14 @@ async def list_story_clusters(
             # this point in score order". Malformed/stale cursors (e.g. the
             # old bare-int format, from a client mid-scroll across a
             # deploy) are treated as "start over" rather than a 500.
+            # Must compare against the same expression used in ORDER BY
+            # (effective_score, boosted or not) — comparing against raw
+            # headline_score while boosted would skip/duplicate rows once a
+            # boosted story sorts out of its unboosted position.
             try:
                 score_str, id_str = cursor.split(":", 1)
                 query = query.where(
-                    tuple_(StoryCluster.headline_score, StoryCluster.id) < (float(score_str), int(id_str))
+                    tuple_(effective_score, StoryCluster.id) < (float(score_str), int(id_str))
                 )
             except (ValueError, TypeError):
                 pass
@@ -753,7 +807,16 @@ async def list_story_clusters(
     items = clusters[:limit]
     if has_more and items:
         last = items[-1]
-        next_cursor = f"{last.headline_score}:{last.id}" if is_all else str(last.id)
+        if is_all:
+            # Recomputed in Python from the same weights dict rather than
+            # selected as an extra SQL column — `last` is a plain mapped
+            # StoryCluster (from .scalars()), and its already-loaded
+            # .articles (via selectinload) give us everything needed to
+            # reproduce the identical boost the SQL query used to order it.
+            last_boost = max((weights.get(a.source_id, 1.0) for a in last.articles), default=1.0)
+            next_cursor = f"{last.headline_score * last_boost}:{last.id}"
+        else:
+            next_cursor = str(last.id)
     else:
         next_cursor = None
 

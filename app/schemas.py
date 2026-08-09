@@ -71,6 +71,12 @@ class UserPreferences(BaseModel):
     # backend never needs a timezone field or per-user tz math. Only
     # meaningful when notification_frequency == "daily".
     notification_time_utc: Optional[str] = None
+    # Source.id (as a string key, since JSON object keys are always strings)
+    # -> boost multiplier applied to headline_score in the "All Stories" feed
+    # only (see GET /clusters's source_weights query param). A source absent
+    # from this map gets the implicit default multiplier of 1.0 — this map
+    # only needs to hold the sources a user has actually boosted.
+    source_weights: dict[str, float] = Field(default_factory=dict)
 
 
 class DeviceTokenRegisterRequest(BaseModel):
