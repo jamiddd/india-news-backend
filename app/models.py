@@ -32,6 +32,7 @@ class User(Base):
     )
 
     device_tokens = relationship("DeviceToken", cascade="all, delete-orphan")
+    game_sessions = relationship("GameSession", cascade="all, delete-orphan")
 
 
 class DeviceToken(Base):
@@ -75,6 +76,29 @@ class NotificationLog(Base):
     __table_args__ = (
         Index("idx_notiflog_user_sent", "user_id", "sent_at"),
         Index("idx_notiflog_user_cluster", "user_id", "cluster_id"),
+    )
+
+
+class GameSession(Base):
+    """One row per (user, game_type, puzzle_date): tracks whether that day's
+    puzzle was opened ("attempted") and/or finished ("completed"). Upserted
+    on both /start and /complete rather than appended, so replaying the same
+    day's puzzle doesn't inflate the "games played" count. game_type is a
+    free-form string (not an FK) matching one of the Daily* puzzle tables'
+    short names: "crossword" | "sudoku" | "word_search" | "spelling_bee" |
+    "word_ladder" | "daily_quiz"."""
+    __tablename__ = "game_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    game_type = Column(String(32), nullable=False)
+    puzzle_date = Column(Date, nullable=False)
+    completed = Column(Boolean, nullable=False, default=False)
+    started_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_game_sessions_user_game_date", "user_id", "game_type", "puzzle_date", unique=True),
     )
 
 

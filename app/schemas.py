@@ -265,3 +265,23 @@ class DailyPollOut(BaseModel):
 
 class PollVoteRequest(BaseModel):
     option_id: int
+
+
+VALID_GAME_TYPES = {"crossword", "sudoku", "word_search", "spelling_bee", "word_ladder", "daily_quiz"}
+
+
+class GameSessionRequest(BaseModel):
+    puzzle_date: date
+
+
+class GameTypeStatsOut(BaseModel):
+    played: int
+    completed: int
+    attempted_incomplete: int
+
+
+class GameStatsOut(BaseModel):
+    total_played: int
+    total_completed: int
+    most_played_game: Optional[str] = None
+    by_game: dict[str, GameTypeStatsOut]

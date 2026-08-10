@@ -43,7 +43,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -54,6 +54,7 @@ from app.schemas import (
     DailyWordSearchOut,
     DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
     WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
+    GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
 )
 from uuid import uuid4
 from app.services.poller import poll_all_sources
@@ -909,4 +910,103 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
         framing_comparison=cluster.framing_comparison,
         ai_enriched=cluster.ai_enriched,
         articles=articles_out
+    )
+
+
+def _validate_game_type(game_type: str) -> None:
+    if game_type not in VALID_GAME_TYPES:
+        raise HTTPException(status_code=422, detail=f"Unknown game_type '{game_type}'")
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/games/{{game_type}}/start", status_code=200)
+@limiter.limit("60/minute")
+async def start_game_session(
+    request: Request,
+    user_id: str,
+    game_type: str,
+    payload: GameSessionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Record that `user_id` opened `game_type`'s puzzle for `puzzle_date`.
+    Upserted on the (user_id, game_type, puzzle_date) unique index so
+    reopening the same day's puzzle doesn't inflate "games played" — only
+    inserts a fresh row (completed=False) if one doesn't already exist;
+    an existing row (whether or not already completed) is left untouched."""
+    _validate_game_type(game_type)
+    result = await db.execute(select(User).where(User.id == user_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    statement = pg_insert(GameSession).values(
+        user_id=user_id, game_type=game_type, puzzle_date=payload.puzzle_date, completed=False,
+    ).on_conflict_do_nothing(constraint="uq_game_sessions_user_game_date")
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Session started"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/games/{{game_type}}/complete", status_code=200)
+@limiter.limit("60/minute")
+async def complete_game_session(
+    request: Request,
+    user_id: str,
+    game_type: str,
+    payload: GameSessionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark (user_id, game_type, puzzle_date) as completed — upserts so this
+    works even if /start was never called (e.g. app was killed mid-puzzle
+    and only the completion fired on relaunch)."""
+    _validate_game_type(game_type)
+    result = await db.execute(select(User).where(User.id == user_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    now = utc_now()
+    statement = pg_insert(GameSession).values(
+        user_id=user_id, game_type=game_type, puzzle_date=payload.puzzle_date,
+        completed=True, completed_at=now,
+    ).on_conflict_do_update(
+        constraint="uq_game_sessions_user_game_date",
+        set_={"completed": True, "completed_at": now},
+    )
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Session completed"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/games/stats", response_model=GameStatsOut)
+@limiter.limit("60/minute")
+async def get_game_stats(request: Request, user_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.id == user_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows = await db.execute(
+        select(
+            GameSession.game_type,
+            func.count(GameSession.id).label("played"),
+            func.count(GameSession.id).filter(GameSession.completed.is_(True)).label("completed"),
+        )
+        .where(GameSession.user_id == user_id)
+        .group_by(GameSession.game_type)
+    )
+    by_game: dict[str, GameTypeStatsOut] = {}
+    total_played = 0
+    total_completed = 0
+    most_played_game: Optional[str] = None
+    most_played_count = 0
+    for game_type, played, completed in rows.all():
+        by_game[game_type] = GameTypeStatsOut(played=played, completed=completed, attempted_incomplete=played - completed)
+        total_played += played
+        total_completed += completed
+        if played > most_played_count:
+            most_played_count = played
+            most_played_game = game_type
+
+    return GameStatsOut(
+        total_played=total_played,
+        total_completed=total_completed,
+        most_played_game=most_played_game,
+        by_game=by_game,
     )
