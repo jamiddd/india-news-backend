@@ -89,11 +89,34 @@ REGIONAL_EAST_KEYWORDS = [
     "patna", "ranchi", "siliguri", "cuttack", "durgapur", "howrah", "gaya",
 ]
 
+# Added 2026-08-16: the "business" tab is seeded from Livemint/Economic
+# Times/Business Today/Moneycontrol (see scripts/seed_sources.py), but
+# Livemint's and Economic Times' feeds specifically are each publisher's
+# general "top stories" RSS feed, not a business-only section -- so
+# Source.category alone let plainly off-topic stories (e.g. an Indonesia
+# earthquake) into the business tab whenever one of those two outlets
+# happened to also be covering it. Same fix as bug (1) in this module's own
+# doc comment: require the title/snippet to actually mention something
+# business/markets/economy-shaped too.
+BUSINESS_KEYWORDS = [
+    "business", "economy", "economic", "market", "markets", "stock", "stocks",
+    "shares", "share price", "sensex", "nifty", "bse", "nse", "rupee",
+    "inflation", "rbi", "reserve bank", "gdp", "ipo", "earnings", "revenue",
+    "profit", "quarterly results", "q1 results", "q2 results", "q3 results",
+    "q4 results", "investment", "investor", "investors", "trade deficit",
+    "tariff", "tariffs", "budget", "tax", "taxation", "gst", "startup",
+    "startups", "funding round", "merger", "acquisition", "corporate",
+    "ceo", "bank", "banking", "finance", "financial", "sebi", "fii", "dii",
+    "crude oil", "forex", "exports", "imports", "manufacturing", "sensex",
+    "mutual fund", "mutual funds", "stock market", "stock exchange",
+]
+
 CONTENT_GATED_CATEGORIES: Dict[str, List[str]] = {
     "crypto": CRYPTO_KEYWORDS,
     "science": SCIENCE_KEYWORDS,
     "education": EDUCATION_KEYWORDS,
     "health": HEALTH_KEYWORDS,
+    "business": BUSINESS_KEYWORDS,
     "northeast": NORTHEAST_KEYWORDS,
     "regional_south": REGIONAL_SOUTH_KEYWORDS,
     "regional_west": REGIONAL_WEST_KEYWORDS,
