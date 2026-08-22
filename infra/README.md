@@ -21,3 +21,15 @@ production-readiness-gaps.md gap #9 ("lives outside version control").
 This is a backup, not a deploy target: don't wire this file into any
 script that pushes it back to the droplet without deliberately deciding
 to bring Caddy under real config management first.
+
+- `news-poll.service` / `news-poll.timer` — systemd units on `newsapp`
+  (`/etc/systemd/system/`) that call `POST /api/v1/ingest/poll` every 20
+  minutes. There was previously **no automation at all** calling this
+  endpoint — it existed only as a manually-triggered route, discovered
+  2026-08-22 when the feed had gone ~18h without a new cluster. Deliberately
+  installed on `newsapp` only, not `newsapp-2`, to avoid burning the
+  endpoint's 5/hour rate limit twice; `poller.py`'s own advisory lock would
+  make a duplicate trigger harmless anyway, but there's no reason to pay for
+  it. If `newsapp` is ever decommissioned, move these units to whichever
+  droplet becomes primary — same caveat as Caddyfile above, these are a
+  backup for reference, not something a script re-applies automatically.
