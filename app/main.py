@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 from datetime import datetime, time, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -137,6 +138,34 @@ def _parse_source_weights(raw: Optional[str]) -> dict:
 # corruption — filtering on it is a hard backstop regardless of what causes
 # last_updated_at to drift.
 LISTING_MAX_AGE = timedelta(days=4)
+
+# Exponent applied to each cluster's effective_score before it feeds the
+# weighted shuffle below — 1.0 would stay closest to the real ranking (only
+# near-exact ties swap), while lower values compress the effective spread so
+# stories with a moderate (not just tiny) score gap can still shuffle
+# together. 0.5 was chosen as a deliberately "noticeable" rotation, not a
+# subtle one — retune this single constant if it needs to feel stronger or
+# weaker once it's live.
+FEED_SHUFFLE_STRENGTH = 0.5
+
+def _weighted_shuffle(items: list, weight_fn, seed: str, strength: float = FEED_SHUFFLE_STRENGTH) -> list:
+    """Relevance-weighted random permutation (Efraimidis-Spirakis key) so a
+    reload can rotate the feed without ever hiding a genuinely dominant
+    story behind a much weaker one. A cluster with a much higher weight than
+    its neighbors still lands near the top almost every time (its key
+    concentrates near 1); near-equal weights produce a near-uniform random
+    order among themselves. Deterministic for a given (items, seed) pair —
+    same seed always reproduces the same order — but a fresh seed per
+    request is what actually makes the feed feel alive on reload. Does not
+    mutate `items`; used only to decide display order, never to decide which
+    clusters are fetched (see call site: applied after pagination/cursor
+    logic has already picked the fixed set of clusters for this page)."""
+    rng = random.Random(seed)
+    def key(item):
+        w = max(weight_fn(item), 1e-6) ** strength
+        u = rng.random()
+        return u ** (1.0 / w)
+    return sorted(items, key=key, reverse=True)
 
 # Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
 # Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
@@ -729,9 +758,20 @@ async def list_story_clusters(
                      "client resends the user's UserPreferences.source_weights on every request rather than the "
                      "server looking them up, since /clusters has no per-request auth to know who's asking.",
     ),
+    seed: Optional[str] = Query(
+        None,
+        max_length=64,
+        description="Client-generated per-load token for the All Stories tab. When present on a fresh first "
+                     "page (no cursor), this page's results are reordered via a relevance-weighted shuffle "
+                     "(see _weighted_shuffle) so reloading feels fresh without changing which stories appear "
+                     "or breaking pagination — headline_score still decides *which* clusters are on the page, "
+                     "the seed only decides their display order. Ignored once `cursor` is set (mid-pagination) "
+                     "and outside the All Stories tab. Generate a new value on every fresh load (app open, "
+                     "pull-to-refresh); omit or reuse it during infinite scroll.",
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}"
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
@@ -840,9 +880,27 @@ async def list_story_clusters(
     else:
         next_cursor = None
 
+    # Reorder (never refilter/repaginate) a fresh All Stories first page for
+    # display, so reloading rotates the feed instead of returning the exact
+    # same order every time headline_score hasn't recomputed yet (it only
+    # updates once per poll cycle — see poller.py). next_cursor above is
+    # already locked in from the real deterministic order, so this can't
+    # skip or duplicate clusters across pages — it only shuffles what's
+    # already been decided will appear on *this* page.
+    if is_all and seed and cursor is None and items:
+        display_items = _weighted_shuffle(
+            items,
+            weight_fn=lambda c: c.headline_score * max(
+                (weights.get(a.source_id, 1.0) for a in c.articles), default=1.0
+            ),
+            seed=seed,
+        )
+    else:
+        display_items = items
+
     formatted_clusters = []
     seen_ids = set()
-    for cluster in items:
+    for cluster in display_items:
         if cluster.id in seen_ids:
             continue
         seen_ids.add(cluster.id)
