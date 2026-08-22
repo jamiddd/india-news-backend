@@ -9,7 +9,7 @@ services:
     restart: always
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
       - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
@@ -34,9 +34,6 @@ services:
       # be reachable directly from the public internet. Not "8080:8000"
       # (which binds 0.0.0.0) — that would expose plain HTTP publicly.
       - "127.0.0.1:8080:8000"
-    depends_on:
-      redis:
-        condition: service_healthy
 
   crossword_scheduler:
     build:
@@ -47,7 +44,7 @@ services:
     command: ["python3", "scripts/run_crossword_scheduler.py"]
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
 
   poll_scheduler:
@@ -60,18 +57,3 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-
-  redis:
-    image: redis:7-alpine
-    container_name: news_redis_prod
-    restart: always
-    volumes:
-      - redis_data_prod:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-volumes:
-  redis_data_prod:
