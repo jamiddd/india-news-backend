@@ -77,11 +77,17 @@ async def enrich_clusters(
             print("No clusters matched — nothing to do.")
             return 0
 
-        print(f"Enriching {len(clusters)} story cluster(s)...")
-        for cluster in clusters:
+        total = len(clusters)
+        print(f"Enriching {total} story cluster(s)...")
+        for i, cluster in enumerate(clusters, 1):
             await enrich_cluster_with_ai(session, cluster)
-        print(f"✅ Enriched {len(clusters)} story clusters with entity tags & framing angles!")
-        return len(clusters)
+            # Every 10 and on the last one, so `docker logs -f` gives a
+            # live, ETA-able progress readout on long backfills instead of
+            # having to eyeball/count individual "AI Enriched" lines.
+            if i % 10 == 0 or i == total:
+                print(f"[enrich] {i}/{total} clusters done ({i / total:.0%})")
+        print(f"✅ Enriched {total} story clusters with entity tags & framing angles!")
+        return total
 
 
 if __name__ == "__main__":
