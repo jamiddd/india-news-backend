@@ -1,0 +1,13 @@
+[Unit]
+Description=Run story-cluster AI enrichment every 20 minutes
+
+[Timer]
+# Offset from news-poll.timer's OnBootSec so enrichment tends to run a
+# little after a poll cycle has had time to create new clusters, not
+# concurrently with it.
+OnBootSec=5min
+OnUnitActiveSec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

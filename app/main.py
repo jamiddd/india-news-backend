@@ -60,6 +60,7 @@ from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
+from scripts.enrich_all_clusters import enrich_clusters
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
@@ -600,6 +601,24 @@ async def list_sources(request: Request, db: AsyncSession = Depends(get_db)):
 async def trigger_poll(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     background_tasks.add_task(poll_all_sources, db)
     return {"message": "Ingestion polling triggered in background."}
+
+@app.post(f"{settings.API_V1_STR}/ingest/enrich")
+@limiter.limit("5/hour")
+async def trigger_enrich(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    since_days: float = Query(2.0, description="Enrich clusters touched in the last N days"),
+    force_all: bool = Query(False, description="Re-enrich even already-ai_enriched clusters (use for one-off backfills, not the recurring timer)"),
+):
+    # enrich_clusters() opens its own DB session internally rather than
+    # taking the request-scoped `db` (contrast trigger_poll above, which
+    # passes its request-scoped session into the background task) — a
+    # background task must not depend on a session FastAPI may already be
+    # closing once the response is sent.
+    background_tasks.add_task(enrich_clusters, None, force_all, since_days)
+    return {
+        "message": f"Enrichment triggered in background (since_days={since_days}, force_all={force_all})."
+    }
 
 @app.post(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/enrich")
 @limiter.limit("10/hour")

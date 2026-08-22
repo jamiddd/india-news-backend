@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from datetime import timedelta
 
 # Ensure root of repo/backend is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -11,18 +12,42 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import desc, or_, and_
 
 from app.database import AsyncSessionLocal
-from app.models import StoryCluster, Article
+from app.models import StoryCluster, Article, utc_now
 from app.services.enrichment import enrich_cluster_with_ai
 
 # Cap per run so a cron'd invocation can't burn an unbounded amount of API
-# spend if a large backlog of unenriched clusters ever builds up.
+# spend if a large backlog of unenriched clusters ever builds up. Only
+# applies when no --since-days window is given — a windowed run is already
+# bounded by the window itself, so it uses --limit (default None = no cap)
+# instead of this.
 DEFAULT_BATCH_LIMIT = 50
 
-async def main(limit: int = DEFAULT_BATCH_LIMIT, force_all: bool = False):
+
+async def enrich_clusters(
+    limit: int | None = DEFAULT_BATCH_LIMIT,
+    force_all: bool = False,
+    since_days: float | None = None,
+) -> int:
+    """Enrich story clusters, optionally windowed to the last `since_days`
+    days (by last_updated_at) and/or forced to re-enrich regardless of
+    current ai_enriched state. Returns the number of clusters processed.
+
+    Singletons are included in AI enrichment now that it's a premium,
+    customer-facing feature (see enrich_cluster_with_ai) — this script no
+    longer needs to special-case them; the only remaining singleton-specific
+    logic is in the *default* (non-forced, non-windowed) selection query
+    below, which still can't use ai_enriched to detect "needs enrichment"
+    for clusters that permanently fail the paid call.
+    """
     async with AsyncSessionLocal() as session:
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).selectinload(Article.source)
         )
+
+        if since_days is not None:
+            cutoff = utc_now() - timedelta(days=since_days)
+            query = query.where(StoryCluster.last_updated_at >= cutoff)
+
         if not force_all:
             # entities.is_(None) alone isn't a safe "needs enrichment" signal:
             # enrich_cluster_with_ai() always sets entities/topics/framing
@@ -34,36 +59,47 @@ async def main(limit: int = DEFAULT_BATCH_LIMIT, force_all: bool = False):
             # real signal (only set True on an actual successful API call —
             # see enrichment.py). Still also catch entities IS NULL for
             # clusters enrich_cluster_with_ai has never touched at all.
-            #
-            # Singleton clusters (article_count == 1) are excluded from the
-            # ai_enriched retry side on purpose: enrich_cluster_with_ai's own
-            # cost guardrail skips the Anthropic call entirely for them, so
-            # they can never become ai_enriched — including them here would
-            # just have this script re-select the same singletons forever,
-            # crowding out real retries. They still get included the first
-            # time via the entities IS NULL branch.
             query = query.where(
                 or_(
                     StoryCluster.entities.is_(None),
-                    and_(StoryCluster.ai_enriched.is_(False), StoryCluster.article_count >= 2),
+                    StoryCluster.ai_enriched.is_(False),
                 )
             )
-        query = query.order_by(desc(StoryCluster.first_seen_at)).limit(limit)
+
+        query = query.order_by(desc(StoryCluster.first_seen_at))
+        if limit is not None:
+            query = query.limit(limit)
 
         res = await session.execute(query)
         clusters = res.scalars().all()
 
         if not clusters:
-            print("No unenriched clusters found — nothing to do.")
-            return
+            print("No clusters matched — nothing to do.")
+            return 0
 
         print(f"Enriching {len(clusters)} story cluster(s)...")
         for cluster in clusters:
             await enrich_cluster_with_ai(session, cluster)
         print(f"✅ Enriched {len(clusters)} story clusters with entity tags & framing angles!")
+        return len(clusters)
+
 
 if __name__ == "__main__":
     # --all forces re-enrichment of every cluster regardless of current state
     # (e.g. after a prompt change) — normal cron runs should NOT pass this.
     force_all = "--all" in sys.argv
-    asyncio.run(main(force_all=force_all))
+
+    # --since-days N restricts to clusters touched in the last N days (by
+    # last_updated_at). Omit for the full backlog. Since a windowed run is
+    # already bounded by the window, it defaults to no --limit cap; pass
+    # --limit N explicitly to still cap it.
+    since_days = None
+    limit = DEFAULT_BATCH_LIMIT
+    for i, arg in enumerate(sys.argv):
+        if arg == "--since-days" and i + 1 < len(sys.argv):
+            since_days = float(sys.argv[i + 1])
+            limit = None
+        elif arg == "--limit" and i + 1 < len(sys.argv):
+            limit = int(sys.argv[i + 1])
+
+    asyncio.run(enrich_clusters(limit=limit, force_all=force_all, since_days=since_days))

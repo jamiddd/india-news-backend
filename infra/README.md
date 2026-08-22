@@ -36,6 +36,17 @@ to bring Caddy under real config management first.
   droplet becomes primary — same caveat as Caddyfile above, these are a
   backup for reference, not something a script re-applies automatically.
 
+- `news-enrich.service` / `news-enrich.timer` — same pattern, added
+  2026-08-22, calling `POST /api/v1/ingest/enrich?since_days=2` every 20
+  minutes (offset 5min into the cycle so it tends to run after a poll has
+  landed new clusters, not concurrently). Deliberately **no** `force_all`
+  on the recurring timer — it only enriches clusters missing `entities` or
+  never successfully `ai_enriched`, so it doesn't re-bill the same
+  already-enriched clusters every cycle. Also installed on `newsapp` only,
+  same rate-limit reasoning as the poll timer. A one-off forced re-enrich of
+  the 2-day backlog (e.g. right after a prompt/logic change) is a manual
+  call: `curl -X POST ".../api/v1/ingest/enrich?since_days=2&force_all=true"`.
+
 ## Load balancer + TLS (added 2026-08-22)
 
 `openindiannews.com` scaled from a single droplet to `newsapp` +

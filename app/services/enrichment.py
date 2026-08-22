@@ -26,14 +26,22 @@ KNOWN_ENTITIES = {
 
 ENRICHMENT_SYSTEM_PROMPT = """
 You are an expert news synthesis engine for an Indian news aggregation platform.
-Your job is to analyze headline and snippet pairs from multiple news outlets covering the SAME story event.
+Your job is to analyze headline and snippet pairs from one or more news outlets
+covering the SAME story event. Sometimes only a single outlet is provided —
+treat that as a single-source story, not an error.
 
 CRITICAL CONSTRAINTS:
 1. Summarize ONLY from the provided headlines and snippets. Do NOT invent outside facts.
 2. Generate a neutral, objective, matter-of-fact headline (free of clickbait or bias).
-3. Generate a concise 2-3 bullet point summary.
+3. Generate a concise summary of AT MOST 3 bullet points. Each bullet must be
+   ONE grammatically complete sentence of 35 words or fewer — never merge
+   several sentences or facts into a single bullet, and never omit the space
+   after a period between clauses.
 4. Extract key entities (Persons, Organizations, Locations, Bills/Laws).
-5. Compare how different news outlets framed or angled their headlines (descriptive framing comparison).
+5. If multiple outlets are provided, compare how they framed or angled their
+   headlines (descriptive framing comparison). If only one outlet is
+   provided, return an empty framing_comparison list — do not invent a
+   comparison against outlets that aren't there.
 
 OUTPUT FORMAT: Return strictly valid JSON with keys:
 {
@@ -132,6 +140,27 @@ def generate_framing_comparison(articles: List[Article]) -> List[Dict[str, str]]
         })
     return framing
 
+MAX_SUMMARY_BULLETS = 3
+MAX_BULLET_CHARS = 280  # ~35 words at average English word length
+
+def _clamp_bullets(bullets: List[str]) -> List[str]:
+    """Server-side guardrail behind the prompt's bullet-count/length ask:
+    the model (in practice) sometimes ignores "concise 2-3 bullets" for a
+    story with a lot of source detail and returns one giant run-on bullet
+    instead — this is what actually caps what reaches cluster.summary
+    regardless of whether the model complied."""
+    clamped = []
+    for bullet in bullets[:MAX_SUMMARY_BULLETS]:
+        # Missing space after a sentence-ending period is a symptom of the
+        # same "sentences got concatenated" failure mode — cheap to repair
+        # here rather than ship it to the client as "spreads.Benchmark".
+        fixed = re.sub(r'\.(?=[A-Z])', '. ', bullet.strip())
+        if len(fixed) > MAX_BULLET_CHARS:
+            truncated = fixed[:MAX_BULLET_CHARS].rsplit(" ", 1)[0]
+            fixed = truncated.rstrip(".,;:") + "…"
+        clamped.append(fixed)
+    return clamped
+
 async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
     """Enrich a story cluster using Anthropic API or fallback rule-based engine."""
     articles = cluster.articles or []
@@ -155,16 +184,17 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
     cluster.topics = topics
     cluster.framing_comparison = framing
 
-    # Cost guardrail: skip the paid API call entirely for singleton clusters.
-    # Framing comparison and cross-outlet neutral-headline synthesis are
-    # meaningless with only 1 article, so the rule-based baseline above (free)
-    # is just as good as what the model would produce here. Enrichment volume
-    # otherwise tracks *article* volume almost 1:1 rather than *distinct
-    # story* volume — confirmed against real production data on 2026-08-09,
-    # where 99.7% of clusters were singletons — so this directly bounds spend
-    # as source count grows, on top of the dedup threshold fix that should
-    # reduce how many clusters are singleton in the first place.
-    if settings.ANTHROPIC_API_KEY and len(articles) >= 2:
+    # Enrichment is the premium tier's core feature, so every cluster —
+    # singletons included — gets the paid AI pass, not just multi-source
+    # ones. This used to be gated at len(articles) >= 2 as a cost guardrail
+    # (99.7% of clusters were singletons per 2026-08-09 production data), but
+    # that made singleton stories — the majority of the feed — permanently
+    # stuck on the free rule-based baseline, which isn't good enough for a
+    # feature customers pay for. Singletons still get a real AI summary and
+    # neutral headline; the prompt is told to return an empty
+    # framing_comparison for them instead of inventing a cross-outlet
+    # comparison that doesn't exist.
+    if settings.ANTHROPIC_API_KEY and len(articles) >= 1:
         try:
             articles_data = [
                 {
@@ -225,7 +255,7 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                 cluster.headline = structured.get("neutral_headline", cluster.headline)
                 bullets = structured.get("summary_bullets", [])
                 if bullets:
-                    cluster.summary = "\n• " + "\n• ".join(bullets)
+                    cluster.summary = "\n• " + "\n• ".join(_clamp_bullets(bullets))
                 if structured.get("entities"):
                     cluster.entities = structured.get("entities")
                 if structured.get("topics"):

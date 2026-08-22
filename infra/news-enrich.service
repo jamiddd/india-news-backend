@@ -1,0 +1,17 @@
+[Unit]
+Description=Trigger AI enrichment of recent story clusters
+After=docker.service
+
+[Service]
+Type=oneshot
+# since_days=2 bounds the selection query to recent clusters (cheap even at
+# scale) without needing an index on ai_enriched. force_all is deliberately
+# NOT set here: this timer fires every 20 min, and force-re-enriching every
+# cluster in the window on every single cycle would re-bill the same
+# clusters ~70x/day for no new information. Default (force_all=false) only
+# enriches clusters that are missing entities or never got a successful AI
+# pass — new singletons/clusters as they appear, plus retries of prior
+# failures — which is what "going forward" actually needs. The one-time
+# force re-enrichment of the initial 2-day backlog (e.g. after a prompt
+# change) is a manual run: curl -X POST ".../ingest/enrich?since_days=2&force_all=true"
+ExecStart=/usr/bin/curl -s -X POST "http://127.0.0.1:8080/api/v1/ingest/enrich?since_days=2"
