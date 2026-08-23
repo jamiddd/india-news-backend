@@ -46,10 +46,24 @@ async def main():
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_read_events_cluster_id ON read_events (cluster_id)"
         ))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_read_events_user_event ON read_events (user_id, event_id)"
-        ))
-        logger.info("read_events table + indexes are present.")
+        # A real named UNIQUE CONSTRAINT, not just a unique index — the app's
+        # upsert uses `ON CONFLICT ON CONSTRAINT uq_read_events_user_event`,
+        # and Postgres only accepts that clause against an actual constraint
+        # (pg_constraint entry), not a plain CREATE UNIQUE INDEX, even though
+        # both enforce the same uniqueness. ADD CONSTRAINT has no IF NOT
+        # EXISTS in Postgres, so guard it with a catalog check instead.
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_read_events_user_event'
+                ) THEN
+                    ALTER TABLE read_events
+                        ADD CONSTRAINT uq_read_events_user_event UNIQUE (user_id, event_id);
+                END IF;
+            END $$;
+        """))
+        logger.info("read_events table + indexes/constraint are present.")
 
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS user_entity_affinity (
