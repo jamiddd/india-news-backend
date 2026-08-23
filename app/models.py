@@ -138,6 +138,7 @@ class DailyWordSearch(Base):
     theme = Column(String(80), nullable=False)
     grid = Column(JSON, nullable=False)
     words = Column(JSON, nullable=False)
+    source = Column(String(30), nullable=False, default="ai")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -148,6 +149,7 @@ class DailySpellingBee(Base):
     letters = Column(JSON, nullable=False)
     center_letter = Column(String(1), nullable=False)
     words = Column(JSON, nullable=False)
+    source = Column(String(30), nullable=False, default="ai")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -159,6 +161,7 @@ class DailyWordLadder(Base):
     target_word = Column(String(20), nullable=False)
     allowed_words = Column(JSON, nullable=False)
     optimal_steps = Column(Integer, nullable=False)
+    source = Column(String(30), nullable=False, default="ai")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
@@ -167,6 +170,7 @@ class DailyQuiz(Base):
     id = Column(Integer, primary_key=True, index=True)
     puzzle_date = Column(Date, nullable=False, unique=True, index=True)
     questions = Column(JSON, nullable=False)
+    source = Column(String(30), nullable=False, default="ai")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

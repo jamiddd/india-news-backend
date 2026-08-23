@@ -1,4 +1,13 @@
-from app.services.daily_games import QUIZ_SETS, SPELLING_BEES, WORD_LADDERS
+import pytest
+
+from app.services.daily_games import (
+    QUIZ_SETS,
+    SPELLING_BEES,
+    WORD_LADDERS,
+    _validate_bee,
+    _validate_ladder,
+    _validate_quiz,
+)
 
 
 def test_spelling_bee_words_use_only_letters_and_center():
@@ -23,3 +32,88 @@ def test_quiz_sets_have_five_valid_questions():
     for questions in QUIZ_SETS:
         assert len(questions) == 5
         assert all(options and 0 <= correct < len(options) and explanation for _, options, correct, explanation in questions)
+
+
+def test_bee_validator_accepts_curated_bank_entries():
+    for letters, center, words in SPELLING_BEES:
+        validated_letters, validated_center, validated_words = _validate_bee(
+            {"letters": letters, "center_letter": center, "words": words}
+        )
+        assert set(validated_letters) == set(letters)
+        assert validated_center == center
+
+
+def test_bee_validator_rejects_missing_pangram():
+    words = ["ALERT", "ALTER", "APPEAL", "APPLE", "LATER", "LASER", "PEAR", "PLATE"]
+    with pytest.raises(ValueError, match="pangram"):
+        _validate_bee({"letters": list("AELPRST"), "center_letter": "A", "words": words})
+
+
+def test_bee_validator_rejects_word_outside_letters():
+    words = ["ALERT", "ALTER", "APPEAL", "APPLE", "LATER", "LASER", "PEAR", "ZEBRA"]
+    with pytest.raises(ValueError, match="outside"):
+        _validate_bee({"letters": list("AELPRST"), "center_letter": "A", "words": words})
+
+
+def test_ladder_validator_accepts_curated_bank_entries():
+    for start, target, allowed, optimal in WORD_LADDERS:
+        validated_start, validated_target, validated_allowed, validated_optimal = _validate_ladder(
+            {"start_word": start, "target_word": target, "allowed_words": allowed, "optimal_steps": optimal}
+        )
+        assert validated_start == start
+        assert validated_target == target
+        assert validated_optimal == optimal
+
+
+def test_ladder_validator_rejects_unreachable_target():
+    with pytest.raises(ValueError, match="No path"):
+        _validate_ladder({
+            "start_word": "COLD", "target_word": "WARM",
+            "allowed_words": ["BOLD", "GOLD", "MOLD", "SOLD", "TOLD", "HOLD"],
+            "optimal_steps": 3,
+        })
+
+
+def test_ladder_validator_rejects_mismatched_lengths():
+    with pytest.raises(ValueError, match="same length"):
+        _validate_ladder({
+            "start_word": "COLD", "target_word": "WARM",
+            "allowed_words": ["COL", "COLT", "CORD", "CARD", "WARD", "WARN"],
+            "optimal_steps": 4,
+        })
+
+
+def _valid_quiz_payload():
+    return {
+        "questions": [
+            {"question": f"Question {i}?", "options": ["A", "B", "C", "D"], "correct_index": 0, "explanation": "Because."}
+            for i in range(5)
+        ]
+    }
+
+
+def test_quiz_validator_accepts_well_formed_payload():
+    questions = _validate_quiz(_valid_quiz_payload())
+    assert len(questions) == 5
+    assert all(q["correct_index"] == 0 for q in questions)
+
+
+def test_quiz_validator_rejects_wrong_question_count():
+    payload = _valid_quiz_payload()
+    payload["questions"] = payload["questions"][:4]
+    with pytest.raises(ValueError, match="5 questions"):
+        _validate_quiz(payload)
+
+
+def test_quiz_validator_rejects_out_of_range_correct_index():
+    payload = _valid_quiz_payload()
+    payload["questions"][0]["correct_index"] = 7
+    with pytest.raises(ValueError, match="correct_index"):
+        _validate_quiz(payload)
+
+
+def test_quiz_validator_rejects_unsafe_question():
+    payload = _valid_quiz_payload()
+    payload["questions"][0]["question"] = "How many people were killed in the crash?"
+    with pytest.raises(ValueError, match="Unsafe"):
+        _validate_quiz(payload)

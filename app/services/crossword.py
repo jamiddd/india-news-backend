@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
 import re
@@ -9,12 +8,11 @@ from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models import DailyCrossword
+from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
@@ -310,47 +308,18 @@ def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
     return validate_and_normalize({"rows": rows, "clues": clues}, require_symmetry=False)
 
 
-def _extract_json(raw: str) -> dict[str, Any]:
-    cleaned = raw.strip()
-    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, re.DOTALL)
-    if fenced:
-        cleaned = fenced.group(1)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if not match:
-            raise
-        return json.loads(match.group(0))
-
-
 async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
-    if settings.ANTHROPIC_API_KEY:
-        prompt = """Create a medium general-knowledge American-style crossword. Return JSON only:
+    prompt = """Create a medium general-knowledge American-style crossword. Return JSON only:
 {"rows":[11 strings of exactly 11 A-Z/# characters],"clues":[{"number":1,"direction":"across","clue":"..."}]}
 The # pattern must have 180-degree rotational symmetry. Every open cell must be connected and part of an Across or Down answer of at least 3 letters. Number cells in standard row-major crossword order and include exactly one clue for every Across and Down entry. Use clear, factual, family-friendly clues."""
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=45) as client:
-                    response = await client.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "x-api-key": settings.ANTHROPIC_API_KEY,
-                            "anthropic-version": "2023-06-01",
-                            "content-type": "application/json",
-                        },
-                        json={
-                            "model": "claude-haiku-4-5",
-                            "max_tokens": 5000,
-                            "temperature": 0.8,
-                            "messages": [{"role": "user", "content": prompt}],
-                        },
-                    )
-                    response.raise_for_status()
-                    raw = response.json()["content"][0]["text"]
-                    return validate_and_normalize(_extract_json(raw)), "ai"
-            except Exception as exc:
-                logger.warning("Crossword generation attempt %s failed: %s", attempt + 1, exc)
+    for attempt in range(3):
+        data = await call_claude_json(system="", user_content=prompt, max_tokens=5000, attempts=1)
+        if data is None:
+            break  # no API key configured / transport failure — retrying won't help
+        try:
+            return validate_and_normalize(data), "ai"
+        except Exception as exc:
+            logger.warning("Crossword generation attempt %s failed validation: %s", attempt + 1, exc)
     return algorithmic_fallback_puzzle(puzzle_date), "algorithmic"
 
 
