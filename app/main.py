@@ -59,6 +59,7 @@ from app.schemas import (
     ReadEventRequest,
 )
 from app.services.affinity import record_engagement, score_clusters_for_user
+from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
@@ -807,15 +808,31 @@ async def list_story_clusters(
                      "and outside the All Stories tab. Generate a new value on every fresh load (app open, "
                      "pull-to-refresh); omit or reuse it during infinite scroll.",
     ),
+    user_id: Optional[str] = Query(
+        None,
+        description="Feed ranking redesign, piece 3 (explore-slot bandit): when present on a "
+                     "fresh All Stories first page (no cursor), a low-source-count candidate "
+                     "story may be spliced into a fixed slot (see EXPLORE_SLOT_POSITION) and "
+                     "logged as an exposure for this user, feeding the promotion decision in "
+                     "app.services.explore_bandit. Optional and otherwise inert — /clusters "
+                     "remains usable anonymously; omit to opt out of the experiment.",
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}"
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
 
     is_all = not category or category.lower() == "all"
     weights = _parse_source_weights(source_weights) if is_all else {}
+    # Feed ranking redesign, piece 3: a promoted explore candidate gets a
+    # real, live multiplier here — not a shadow signal like piece 1's
+    # entity_boost, this is the actual mechanism that rescues a buried
+    # story for everyone once it's earned it. See app.services.explore_bandit.
+    explore_boost_expr = case(
+        (StoryCluster.explore_status == "promoted", EXPLORE_PROMOTED_BOOST), else_=1.0
+    )
 
     query = select(StoryCluster).options(
         selectinload(StoryCluster.articles).selectinload(Article.source)
@@ -841,10 +858,10 @@ async def list_story_clusters(
                 .subquery()
             )
             boost_expr = func.coalesce(boost_subq.c.boost, 1.0)
-            effective_score = StoryCluster.headline_score * boost_expr
+            effective_score = StoryCluster.headline_score * boost_expr * explore_boost_expr
             query = query.outerjoin(boost_subq, boost_subq.c.cluster_id == StoryCluster.id)
         else:
-            effective_score = StoryCluster.headline_score
+            effective_score = StoryCluster.headline_score * explore_boost_expr
         query = query.order_by(desc(effective_score), desc(StoryCluster.id))
     else:
         cat = category.lower()
@@ -912,7 +929,8 @@ async def list_story_clusters(
             # .articles (via selectinload) give us everything needed to
             # reproduce the identical boost the SQL query used to order it.
             last_boost = max((weights.get(a.source_id, 1.0) for a in last.articles), default=1.0)
-            next_cursor = f"{last.headline_score * last_boost}:{last.id}"
+            last_explore_boost = EXPLORE_PROMOTED_BOOST if last.explore_status == "promoted" else 1.0
+            next_cursor = f"{last.headline_score * last_boost * last_explore_boost}:{last.id}"
         else:
             next_cursor = str(last.id)
     else:
@@ -930,11 +948,33 @@ async def list_story_clusters(
             items,
             weight_fn=lambda c: c.headline_score * max(
                 (weights.get(a.source_id, 1.0) for a in c.articles), default=1.0
-            ),
+            ) * (EXPLORE_PROMOTED_BOOST if c.explore_status == "promoted" else 1.0),
             seed=seed,
         )
     else:
         display_items = items
+
+    # Feed ranking redesign, piece 3: explore-slot bandit. Only on a fresh,
+    # logged-in All Stories first page — see EXPLORE_SLOT_POSITION and the
+    # user_id param's docstring above. Silently skipped (never a 500/404)
+    # if user_id doesn't match a real user — this endpoint stays usable
+    # anonymously/defensively regardless of what's passed here.
+    if is_all and cursor is None and user_id and display_items:
+        user_exists = (await db.execute(select(User.id).where(User.id == user_id))).scalar_one_or_none()
+        if user_exists:
+            candidate = await pick_candidate(db)
+            if candidate is not None and candidate.id not in {c.id for c in display_items}:
+                candidate_result = await db.execute(
+                    select(StoryCluster)
+                    .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+                    .where(StoryCluster.id == candidate.id)
+                )
+                candidate = candidate_result.scalar_one_or_none()
+                if candidate is not None:
+                    insert_at = min(EXPLORE_SLOT_POSITION - 1, len(display_items))
+                    display_items = display_items[:insert_at] + [candidate] + display_items[insert_at:]
+                    await record_exposure(db, candidate.id, user_id)
+                    await db.commit()
 
     formatted_clusters = []
     seen_ids = set()

@@ -14,6 +14,7 @@ from app.config import settings
 from app.models import Source, Article, StoryCluster, EntityStat, utc_now
 from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
+from app.services.explore_bandit import recompute_explore_promotions
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, is_placeholder_image
@@ -502,6 +503,12 @@ async def poll_all_sources(session: AsyncSession) -> int:
         # as the headline_score update above, so both are consistent as of
         # this commit. Shadow signal only — see _recompute_entity_stats.
         await _recompute_entity_stats(session)
+
+        # Feed ranking redesign, piece 3: explore-slot bandit promotion
+        # decisions. Same transaction as the two recomputes above, same
+        # cadence. Shadow no more than piece 1 is — a promotion here takes
+        # live effect in /clusters (see EXPLORE_PROMOTED_BOOST there).
+        await recompute_explore_promotions(session)
 
         await session.commit()
 

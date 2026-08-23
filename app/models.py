@@ -298,6 +298,17 @@ class StoryCluster(Base):
     # only. See the "Feed ranking redesign" design memory.
     entity_boost = Column(Float, default=0.0, nullable=False)
 
+    # Feed ranking redesign, piece 3 (explore-slot bandit): lifecycle of
+    # this cluster as an explore candidate. "pending" = not yet decided
+    # (still collecting exposures, or not a candidate at all — most
+    # clusters stay "pending" forever); "promoted" = cleared the engagement
+    # bar and gets a real, live ranking boost (see EXPLORE_PROMOTED_BOOST in
+    # app.services.explore_bandit and its use in /clusters' effective_score);
+    # "rejected" = collected enough exposures without clearing the bar,
+    # excluded from future candidate selection so the pool keeps moving.
+    # Recomputed in poller.py alongside entity_stats/headline_score.
+    explore_status = Column(String(16), default="pending", nullable=False)
+
     # True only when the Anthropic API call in enrich_cluster_with_ai()
     # actually succeeded — NOT when entities/topics/framing_comparison are
     # merely non-null. Those three are always populated by the free
@@ -383,6 +394,27 @@ class UserEntityAffinity(Base):
     entity_key = Column(String(255), primary_key=True)
     affinity_decayed = Column(Float, default=0.0, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class ExploreExposure(Base):
+    """
+    Feed ranking redesign, piece 3 (explore-slot bandit): one row logged
+    every time a candidate cluster is spliced into a logged-in user's "All
+    Stories" first page (see GET /clusters' optional user_id param and
+    app.services.explore_bandit.pick_candidate). Later joined against
+    ReadEvent (same user_id + cluster_id, opened after exposed_at) to score
+    engagement — a user who never opened it scores 0 engagement for that
+    exposure, not "no data". position is always 2 for v1 (fixed slot, per
+    the design memory) but recorded rather than assumed, in case that
+    changes later.
+    """
+    __tablename__ = "explore_exposures"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    position = Column(Integer, default=2, nullable=False)
+    exposed_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
 
 class EntityStat(Base):
