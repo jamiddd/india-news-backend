@@ -169,6 +169,42 @@ def _weighted_shuffle(items: list, weight_fn, seed: str, strength: float = FEED_
         return u ** (1.0 / w)
     return sorted(items, key=key, reverse=True)
 
+
+def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
+    """Builds a StoryClusterOut from an ORM StoryCluster, filling
+    ArticleOut.source_name (not a plain column — comes from art.source.name)
+    by hand. NOT a plain StoryClusterOut.model_validate(cluster): that fails
+    on the missing source_name field. Requires cluster.articles' .source to
+    already be loaded (selectinload), same as every existing call site."""
+    articles_out = [
+        ArticleOut(
+            id=art.id,
+            source_id=art.source_id,
+            source_name=art.source.name if art.source else "Unknown",
+            url=art.url,
+            title=art.title,
+            snippet=art.snippet,
+            content=art.content,
+            author=art.author,
+            published_at=art.published_at,
+            image_url=art.image_url,
+        )
+        for art in cluster.articles
+    ]
+    return StoryClusterOut(
+        id=cluster.id,
+        headline=cluster.headline,
+        summary=cluster.summary,
+        article_count=cluster.article_count,
+        first_seen_at=cluster.first_seen_at,
+        last_updated_at=cluster.last_updated_at,
+        entities=cluster.entities,
+        topics=cluster.topics,
+        framing_comparison=cluster.framing_comparison,
+        ai_enriched=cluster.ai_enriched,
+        articles=articles_out,
+    )
+
 # Arbitrary fixed key for a Postgres advisory lock guarding schema creation.
 # Uvicorn runs 4 worker processes (see Dockerfile CMD), each independently
 # executing this lifespan on startup — without a lock, they can race to
@@ -1003,7 +1039,7 @@ async def list_for_you_clusters(
     items = ranked[:limit]
 
     return PaginatedClustersOut(
-        items=[StoryClusterOut.model_validate(c) for c in items],
+        items=[_cluster_to_out(c) for c in items],
         next_cursor=None,
         has_more=False,
     )
