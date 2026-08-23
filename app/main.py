@@ -947,6 +947,68 @@ async def list_story_clusters(
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 
+@app.get(f"{settings.API_V1_STR}/clusters/for-you", response_model=PaginatedClustersOut)
+@limiter.limit("60/minute")
+async def list_for_you_clusters(
+    request: Request,
+    user_id: str = Query(...),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Feed ranking redesign, piece 2: ranks a candidate window of recent
+    clusters by the requesting user's own affinity_score (see
+    app.services.affinity.score_clusters_for_user) — deliberately
+    independent of "All Stories"'s headline_score/entity_boost, so
+    personalization can never distort what counts as globally important.
+    See the "Feed ranking redesign" design memory.
+
+    A user with no read history yet gets affinity_score=0 for every
+    candidate, so the ranking falls back to the candidate query's own order
+    (headline_score, same as "All Stories") — deliberately no separate
+    empty state for cold start.
+
+    v1: no real pagination yet — returns the top `limit` of a bounded
+    candidate window (most recent, highest headline_score clusters with
+    entities). Real cursor-based pagination is a follow-up once there's
+    enough usage to justify it.
+
+    Registered ABOVE /clusters/{cluster_id} deliberately — FastAPI/Starlette
+    matches routes in registration order, so a literal path segment like
+    "for-you" must be declared before a path-parameter route that would
+    otherwise capture it as cluster_id (this broke once already in prod;
+    see git history).
+    """
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Bounded candidate window so scoring stays cheap — affinity is scored
+    # in Python (score_clusters_for_user), not SQL, since it has to unpack
+    # each cluster's entities JSON and canonicalize them.
+    candidates_result = await db.execute(
+        select(StoryCluster)
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        .where(
+            StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE,
+            StoryCluster.entities.isnot(None),
+        )
+        .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
+        .limit(200)
+    )
+    candidates = candidates_result.scalars().all()
+
+    scores = await score_clusters_for_user(db, user_id, candidates)
+    ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score), reverse=True)
+    items = ranked[:limit]
+
+    return PaginatedClustersOut(
+        items=[StoryClusterOut.model_validate(c) for c in items],
+        next_cursor=None,
+        has_more=False,
+    )
+
+
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)
 @limiter.limit("60/minute")
 async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
@@ -1135,59 +1197,3 @@ async def record_read_event(
 
     await db.commit()
     return {"message": "Recorded"}
-
-
-@app.get(f"{settings.API_V1_STR}/clusters/for-you", response_model=PaginatedClustersOut)
-@limiter.limit("60/minute")
-async def list_for_you_clusters(
-    request: Request,
-    user_id: str = Query(...),
-    limit: int = Query(20, ge=1, le=50),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Feed ranking redesign, piece 2: ranks a candidate window of recent
-    clusters by the requesting user's own affinity_score (see
-    app.services.affinity.score_clusters_for_user) — deliberately
-    independent of "All Stories"'s headline_score/entity_boost, so
-    personalization can never distort what counts as globally important.
-    See the "Feed ranking redesign" design memory.
-
-    A user with no read history yet gets affinity_score=0 for every
-    candidate, so the ranking falls back to the candidate query's own order
-    (headline_score, same as "All Stories") — deliberately no separate
-    empty state for cold start.
-
-    v1: no real pagination yet — returns the top `limit` of a bounded
-    candidate window (most recent, highest headline_score clusters with
-    entities). Real cursor-based pagination is a follow-up once there's
-    enough usage to justify it.
-    """
-    user_result = await db.execute(select(User).where(User.id == user_id))
-    if user_result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Bounded candidate window so scoring stays cheap — affinity is scored
-    # in Python (score_clusters_for_user), not SQL, since it has to unpack
-    # each cluster's entities JSON and canonicalize them.
-    candidates_result = await db.execute(
-        select(StoryCluster)
-        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .where(
-            StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE,
-            StoryCluster.entities.isnot(None),
-        )
-        .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
-        .limit(200)
-    )
-    candidates = candidates_result.scalars().all()
-
-    scores = await score_clusters_for_user(db, user_id, candidates)
-    ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score), reverse=True)
-    items = ranked[:limit]
-
-    return PaginatedClustersOut(
-        items=[StoryClusterOut.model_validate(c) for c in items],
-        next_cursor=None,
-        has_more=False,
-    )
