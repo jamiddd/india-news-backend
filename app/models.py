@@ -290,6 +290,14 @@ class StoryCluster(Base):
     topics = Column(JSON, nullable=True)    # ["politics", "economy"]
     framing_comparison = Column(JSON, nullable=True) # Outlet headline angle comparison
 
+    # Shadow signal for the feed ranking redesign (piece 1: global
+    # importance) — the reactivation ratio of this cluster's single most
+    # "spiking" entity, per app.services.entity_graph / recomputed
+    # alongside headline_score in app.services.poller.poll_all_sources().
+    # NOT wired into /clusters ordering yet; written for offline validation
+    # only. See the "Feed ranking redesign" design memory.
+    entity_boost = Column(Float, default=0.0, nullable=False)
+
     # True only when the Anthropic API call in enrich_cluster_with_ai()
     # actually succeeded — NOT when entities/topics/framing_comparison are
     # merely non-null. Those three are always populated by the free
@@ -329,6 +337,28 @@ class Article(Base):
 
     source = relationship("Source", back_populates="articles")
     cluster = relationship("StoryCluster", back_populates="articles", foreign_keys=[cluster_id])
+
+
+class EntityStat(Base):
+    """
+    Feed ranking redesign, piece 1 (global importance): one row per
+    canonicalized entity (see app.services.entity_graph.canonicalize_entity),
+    tracking how often it's mentioned across recently-updated clusters and
+    whether that rate is a spike relative to its own history. Recomputed
+    incrementally each poll cycle in app.services.poller.poll_all_sources() —
+    see that function for the decay/reactivation math. Feeds
+    StoryCluster.entity_boost; not read anywhere else yet.
+    """
+    __tablename__ = "entity_stats"
+
+    entity_key = Column(String(255), primary_key=True)
+    # Best/most common original casing seen for this key, for admin/debug
+    # inspection only — entity_key (not this) is what's actually matched on.
+    display_name = Column(String(255), nullable=False)
+    mention_count_decayed = Column(Float, default=0.0, nullable=False)
+    baseline_rate = Column(Float, default=0.0, nullable=False)
+    last_mentioned_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 
 # Indexes as defined in handoff doc

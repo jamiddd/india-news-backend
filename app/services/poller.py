@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, desc, func, text
 
 from app.config import settings
-from app.models import Source, Article, StoryCluster, utc_now
+from app.models import Source, Article, StoryCluster, EntityStat, utc_now
+from app.services.entity_graph import canonicalize_entity
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, is_placeholder_image
@@ -346,6 +347,114 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
 # no stale-lock cleanup to worry about.
 POLL_LOCK_KEY = 872459123
 
+# --- Feed ranking redesign, piece 1: global importance (entity_stats) ---
+# See app/services/entity_graph.py for canonicalization and the "Feed
+# ranking redesign" design memory for the full reasoning. Both half-lives
+# below are design-target approximations, not backtested constants — worth
+# re-tuning once there's a few weeks of real entity_stats data to look at.
+#
+# mention_count_decayed tracks short-term "is this being talked about right
+# now"; baseline_rate tracks the long-run normal rate for this entity. Both
+# are normalized EMAs (rate_new = rate_old * decay + input * (1 - decay)),
+# NOT raw decayed sums — that normalization is what keeps them on the same
+# scale so an entity mentioned at a perfectly steady rate always settles to
+# a ratio of ~1 regardless of its half-life; only their *responsiveness* to
+# a recent change in rate differs; short reacts fast, baseline reacts slow,
+# and it's that lag that makes a post-dormancy reappearance show up as a
+# ratio > 1 rather than a rescaled duplicate of the same number.
+ENTITY_MENTION_HALF_LIFE = timedelta(days=3)
+ENTITY_BASELINE_HALF_LIFE = timedelta(days=75)
+# A bit wider than the ~20min poll cadence (see infra/news-poll.timer) so a
+# slightly late cycle doesn't miss a cluster that updated near the boundary.
+ENTITY_STATS_LOOKBACK = timedelta(minutes=30)
+# Floor under baseline_rate when computing the ratio, so a brand-new entity
+# with a near-zero baseline can't produce a wildly inflated/undefined ratio
+# off a single mention.
+ENTITY_BASELINE_FLOOR = 0.05
+
+
+def _ema_update(old_value: float, elapsed: timedelta, half_life: timedelta, new_input: float) -> float:
+    decay = 0.5 ** (elapsed.total_seconds() / half_life.total_seconds()) if elapsed.total_seconds() > 0 else 1.0
+    return old_value * decay + new_input * (1.0 - decay)
+
+
+async def _recompute_entity_stats(session: AsyncSession) -> None:
+    """
+    Tallies entity mentions from clusters updated within ENTITY_STATS_LOOKBACK,
+    updates each canonical entity's mention_count_decayed/baseline_rate, and
+    derives each touched cluster's entity_boost as the reactivation ratio
+    (mention_count_decayed / baseline_rate) of its single most "spiking"
+    entity — max, not average, so one important entity isn't diluted by
+    otherwise-routine co-mentions. Shadow signal only: entity_boost is not
+    read by /clusters yet (see StoryCluster.entity_boost's docstring).
+    """
+    now = utc_now()
+    res = await session.execute(
+        select(StoryCluster).where(
+            StoryCluster.last_updated_at >= now - ENTITY_STATS_LOOKBACK,
+            StoryCluster.entities.isnot(None),
+        )
+    )
+    touched_clusters = res.scalars().all()
+    if not touched_clusters:
+        return
+
+    mentions_this_cycle: Dict[str, int] = defaultdict(int)
+    display_names: Dict[str, str] = {}
+    cluster_entity_keys: Dict[int, Set[str]] = {}
+
+    for cluster in touched_clusters:
+        keys_for_cluster: Set[str] = set()
+        entities = cluster.entities or {}
+        for field, entity_type in (("persons", "person"), ("organizations", "organization"), ("locations", "location")):
+            for raw_name in entities.get(field) or []:
+                key = canonicalize_entity(raw_name, entity_type)
+                if not key:
+                    continue
+                mentions_this_cycle[key] += 1
+                display_names.setdefault(key, raw_name.strip())
+                keys_for_cluster.add(key)
+        cluster_entity_keys[cluster.id] = keys_for_cluster
+
+    if not mentions_this_cycle:
+        return
+
+    res = await session.execute(
+        select(EntityStat).where(EntityStat.entity_key.in_(mentions_this_cycle.keys()))
+    )
+    existing = {row.entity_key: row for row in res.scalars().all()}
+
+    reactivation_ratio: Dict[str, float] = {}
+    for key, new_mentions in mentions_this_cycle.items():
+        row = existing.get(key)
+        elapsed = (now - row.updated_at) if (row is not None and row.updated_at is not None) else timedelta(days=9999)
+        prev_mentions = row.mention_count_decayed if row is not None else 0.0
+        prev_baseline = row.baseline_rate if row is not None else 0.0
+
+        new_mention_rate = _ema_update(prev_mentions, elapsed, ENTITY_MENTION_HALF_LIFE, float(new_mentions))
+        new_baseline_rate = _ema_update(prev_baseline, elapsed, ENTITY_BASELINE_HALF_LIFE, float(new_mentions))
+        reactivation_ratio[key] = new_mention_rate / max(new_baseline_rate, ENTITY_BASELINE_FLOOR)
+
+        if row is None:
+            session.add(EntityStat(
+                entity_key=key,
+                display_name=display_names[key],
+                mention_count_decayed=new_mention_rate,
+                baseline_rate=new_baseline_rate,
+                last_mentioned_at=now,
+                updated_at=now,
+            ))
+        else:
+            row.mention_count_decayed = new_mention_rate
+            row.baseline_rate = new_baseline_rate
+            row.last_mentioned_at = now
+            row.updated_at = now
+
+    for cluster in touched_clusters:
+        keys = cluster_entity_keys.get(cluster.id) or set()
+        cluster.entity_boost = max((reactivation_ratio[k] for k in keys), default=0.0)
+
+
 async def poll_all_sources(session: AsyncSession) -> int:
     got_lock = (await session.execute(select(func.pg_try_advisory_lock(POLL_LOCK_KEY)))).scalar()
     if not got_lock:
@@ -392,6 +501,12 @@ async def poll_all_sources(session: AsyncSession) -> int:
                     1.5
                 )
         """))
+
+        # Feed ranking redesign, piece 1: global importance. Same transaction
+        # as the headline_score update above, so both are consistent as of
+        # this commit. Shadow signal only — see _recompute_entity_stats.
+        await _recompute_entity_stats(session)
+
         await session.commit()
 
         return total_new
