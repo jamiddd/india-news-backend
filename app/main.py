@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import random
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
@@ -429,10 +429,35 @@ async def health_check(request: Request, db: AsyncSession = Depends(get_db)):
     )
 
 
+# Games keep a rolling 30-day archive (today + the 29 days before it) that a
+# client can request by passing ?date=YYYY-MM-DD on any /daily route below.
+# Puzzles are never deleted (see app/models.py's Daily* tables), so this is
+# purely a request-time policy limiting how far back a client can ask —
+# not a storage limit. Bump GAME_HISTORY_WINDOW_DAYS to widen it later
+# without touching stored data.
+GAME_HISTORY_WINDOW_DAYS = 30
+
+
+def resolve_puzzle_date(date_str: str | None) -> date:
+    if date_str is None:
+        return india_today()
+    try:
+        requested = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be in YYYY-MM-DD format")
+    today = india_today()
+    earliest = today - timedelta(days=GAME_HISTORY_WINDOW_DAYS - 1)
+    if requested > today:
+        raise HTTPException(status_code=400, detail="date cannot be in the future")
+    if requested < earliest:
+        raise HTTPException(status_code=400, detail=f"date must be within the last {GAME_HISTORY_WINDOW_DAYS} days")
+    return requested
+
+
 @app.get(f"{settings.API_V1_STR}/crossword/daily", response_model=DailyCrosswordOut)
 @limiter.limit("30/minute")
-async def daily_crossword(request: Request, db: AsyncSession = Depends(get_db)):
-    puzzle = await get_or_create_puzzle(db, india_today())
+async def daily_crossword(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    puzzle = await get_or_create_puzzle(db, resolve_puzzle_date(date))
     return {
         "date": puzzle.puzzle_date,
         "size": puzzle.size,
@@ -443,8 +468,8 @@ async def daily_crossword(request: Request, db: AsyncSession = Depends(get_db)):
 
 @app.get(f"{settings.API_V1_STR}/sudoku/daily", response_model=DailySudokuOut)
 @limiter.limit("30/minute")
-async def daily_sudoku(request: Request, db: AsyncSession = Depends(get_db)):
-    sudoku = await get_or_create_sudoku(db, india_today())
+async def daily_sudoku(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    sudoku = await get_or_create_sudoku(db, resolve_puzzle_date(date))
     return {
         "date": sudoku.puzzle_date,
         "puzzle": sudoku.puzzle,
@@ -454,8 +479,8 @@ async def daily_sudoku(request: Request, db: AsyncSession = Depends(get_db)):
 
 @app.get(f"{settings.API_V1_STR}/word-search/daily", response_model=DailyWordSearchOut)
 @limiter.limit("30/minute")
-async def daily_word_search(request: Request, db: AsyncSession = Depends(get_db)):
-    puzzle = await get_or_create_word_search(db, india_today())
+async def daily_word_search(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    puzzle = await get_or_create_word_search(db, resolve_puzzle_date(date))
     return {
         "date": puzzle.puzzle_date,
         "theme": puzzle.theme,
@@ -467,15 +492,15 @@ async def daily_word_search(request: Request, db: AsyncSession = Depends(get_db)
 
 @app.get(f"{settings.API_V1_STR}/spelling-bee/daily", response_model=DailySpellingBeeOut)
 @limiter.limit("30/minute")
-async def daily_spelling_bee(request: Request, db: AsyncSession = Depends(get_db)):
-    bee, _, _ = await get_or_create_daily_games(db, india_today())
+async def daily_spelling_bee(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    bee, _, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {"date": bee.puzzle_date, "letters": bee.letters, "center_letter": bee.center_letter, "words": bee.words}
 
 
 @app.get(f"{settings.API_V1_STR}/word-ladder/daily", response_model=DailyWordLadderOut)
 @limiter.limit("30/minute")
-async def daily_word_ladder(request: Request, db: AsyncSession = Depends(get_db)):
-    _, ladder, _ = await get_or_create_daily_games(db, india_today())
+async def daily_word_ladder(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    _, ladder, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {
         "date": ladder.puzzle_date,
         "start_word": ladder.start_word,
@@ -487,8 +512,8 @@ async def daily_word_ladder(request: Request, db: AsyncSession = Depends(get_db)
 
 @app.get(f"{settings.API_V1_STR}/quiz/daily", response_model=DailyQuizOut)
 @limiter.limit("30/minute")
-async def daily_quiz(request: Request, db: AsyncSession = Depends(get_db)):
-    _, _, quiz = await get_or_create_daily_games(db, india_today())
+async def daily_quiz(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    _, _, quiz = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {"date": quiz.puzzle_date, "questions": quiz.questions}
 
 
