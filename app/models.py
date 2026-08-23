@@ -339,6 +339,52 @@ class Article(Base):
     cluster = relationship("StoryCluster", back_populates="articles", foreign_keys=[cluster_id])
 
 
+class ReadEvent(Base):
+    """
+    Feed ranking redesign, piece 2 (per-user affinity / "For You" tab): one
+    row per (user, cluster) story view. The client sends an `event_id` it
+    generates once per view; the first call (on open) inserts this row with
+    dwell_ms/scroll_depth_pct null, and a later call from the same view (on
+    close) updates those two columns in place — see
+    POST /users/{user_id}/read-events in app/main.py. dwell_ms/scroll_depth
+    together (not raw opens) drive app.services.affinity's engagement
+    weighting; also the source data for piece 3's explore-slot engagement
+    scoring once that's built.
+    """
+    __tablename__ = "read_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_id = Column(String(64), nullable=False)
+    opened_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    dwell_ms = Column(Integer, nullable=True)
+    scroll_depth_pct = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    __table_args__ = (
+        Index("uq_read_events_user_event", "user_id", "event_id", unique=True),
+    )
+
+
+class UserEntityAffinity(Base):
+    """
+    Feed ranking redesign, piece 2: per-user mirror of EntityStat — how much
+    a given user's own reads have engaged with a canonical entity (see
+    app.services.entity_graph.canonicalize_entity), decayed on a much
+    shorter half-life than the global entity_stats (personal interest drifts
+    faster than global newsworthiness). Updated in
+    app.services.affinity.record_engagement() when a read_events row gets
+    its dwell/scroll close-out. Powers GET /clusters/for-you's ranking.
+    """
+    __tablename__ = "user_entity_affinity"
+
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    entity_key = Column(String(255), primary_key=True)
+    affinity_decayed = Column(Float, default=0.0, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class EntityStat(Base):
     """
     Feed ranking redesign, piece 1 (global importance): one row per

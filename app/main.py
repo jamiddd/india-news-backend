@@ -44,7 +44,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -56,7 +56,9 @@ from app.schemas import (
     DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
     WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
+    ReadEventRequest,
 )
+from app.services.affinity import record_engagement, score_clusters_for_user
 from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
@@ -1086,4 +1088,106 @@ async def get_game_stats(request: Request, user_id: str, db: AsyncSession = Depe
         total_completed=total_completed,
         most_played_game=most_played_game,
         by_game=by_game,
+    )
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/read-events", status_code=200)
+@limiter.limit("120/minute")
+async def record_read_event(
+    request: Request,
+    user_id: str,
+    payload: ReadEventRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Feed ranking redesign, piece 2 instrumentation. Upserts one row per
+    (user_id, event_id) — see ReadEvent's docstring. The client calls this
+    twice per story view: once on open (dwell_ms/scroll_depth_pct omitted)
+    to record opened_at, and once on close (both populated) to record
+    engagement. Only the close call (dwell_ms present) updates
+    user_entity_affinity — see app.services.affinity.record_engagement.
+    """
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cluster_result = await db.execute(select(StoryCluster).where(StoryCluster.id == payload.cluster_id))
+    cluster = cluster_result.scalar_one_or_none()
+    if cluster is None:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    statement = pg_insert(ReadEvent).values(
+        user_id=user_id, cluster_id=payload.cluster_id, event_id=payload.event_id,
+        dwell_ms=payload.dwell_ms, scroll_depth_pct=payload.scroll_depth_pct,
+    ).on_conflict_do_update(
+        constraint="uq_read_events_user_event",
+        set_={"dwell_ms": payload.dwell_ms, "scroll_depth_pct": payload.scroll_depth_pct, "updated_at": utc_now()},
+    )
+    await db.execute(statement)
+
+    # Placeholder engagement weight (v1): a completed close call counts as
+    # 1.0 regardless of actual dwell/scroll magnitude. Piece 3's
+    # dwell-relative-to-article-length formula isn't built yet — that's the
+    # explore-slot bandit's job, not this endpoint's. See the "Feed ranking
+    # redesign" design memory and app.services.affinity.
+    if payload.dwell_ms is not None:
+        await record_engagement(db, user_id, cluster, engagement_weight=1.0)
+
+    await db.commit()
+    return {"message": "Recorded"}
+
+
+@app.get(f"{settings.API_V1_STR}/clusters/for-you", response_model=PaginatedClustersOut)
+@limiter.limit("60/minute")
+async def list_for_you_clusters(
+    request: Request,
+    user_id: str = Query(...),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Feed ranking redesign, piece 2: ranks a candidate window of recent
+    clusters by the requesting user's own affinity_score (see
+    app.services.affinity.score_clusters_for_user) — deliberately
+    independent of "All Stories"'s headline_score/entity_boost, so
+    personalization can never distort what counts as globally important.
+    See the "Feed ranking redesign" design memory.
+
+    A user with no read history yet gets affinity_score=0 for every
+    candidate, so the ranking falls back to the candidate query's own order
+    (headline_score, same as "All Stories") — deliberately no separate
+    empty state for cold start.
+
+    v1: no real pagination yet — returns the top `limit` of a bounded
+    candidate window (most recent, highest headline_score clusters with
+    entities). Real cursor-based pagination is a follow-up once there's
+    enough usage to justify it.
+    """
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Bounded candidate window so scoring stays cheap — affinity is scored
+    # in Python (score_clusters_for_user), not SQL, since it has to unpack
+    # each cluster's entities JSON and canonicalize them.
+    candidates_result = await db.execute(
+        select(StoryCluster)
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        .where(
+            StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE,
+            StoryCluster.entities.isnot(None),
+        )
+        .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
+        .limit(200)
+    )
+    candidates = candidates_result.scalars().all()
+
+    scores = await score_clusters_for_user(db, user_id, candidates)
+    ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score), reverse=True)
+    items = ranked[:limit]
+
+    return PaginatedClustersOut(
+        items=[StoryClusterOut.model_validate(c) for c in items],
+        next_cursor=None,
+        has_more=False,
     )

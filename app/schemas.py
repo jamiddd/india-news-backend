@@ -280,6 +280,18 @@ class GameTypeStatsOut(BaseModel):
     attempted_incomplete: int
 
 
+class ReadEventRequest(BaseModel):
+    # Client-generated once per story view, reused across the "open" call
+    # (fired on entry, dwell_ms/scroll_depth_pct omitted) and the "close"
+    # call (fired on exit, both populated) so the server can upsert one row
+    # per view instead of the two calls creating two rows. See
+    # POST /users/{user_id}/read-events and app.models.ReadEvent.
+    event_id: str = Field(max_length=64)
+    cluster_id: int
+    dwell_ms: Optional[int] = Field(default=None, ge=0)
+    scroll_depth_pct: Optional[int] = Field(default=None, ge=0, le=100)
+
+
 class GameStatsOut(BaseModel):
     total_played: int
     total_completed: int

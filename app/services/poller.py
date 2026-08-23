@@ -13,6 +13,7 @@ from sqlalchemy import update, desc, func, text
 from app.config import settings
 from app.models import Source, Article, StoryCluster, EntityStat, utc_now
 from app.services.entity_graph import canonicalize_entity
+from app.services.decay import ema_update
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, is_placeholder_image
@@ -373,11 +374,6 @@ ENTITY_STATS_LOOKBACK = timedelta(minutes=30)
 ENTITY_BASELINE_FLOOR = 0.05
 
 
-def _ema_update(old_value: float, elapsed: timedelta, half_life: timedelta, new_input: float) -> float:
-    decay = 0.5 ** (elapsed.total_seconds() / half_life.total_seconds()) if elapsed.total_seconds() > 0 else 1.0
-    return old_value * decay + new_input * (1.0 - decay)
-
-
 async def _recompute_entity_stats(session: AsyncSession) -> None:
     """
     Tallies entity mentions from clusters updated within ENTITY_STATS_LOOKBACK,
@@ -431,8 +427,8 @@ async def _recompute_entity_stats(session: AsyncSession) -> None:
         prev_mentions = row.mention_count_decayed if row is not None else 0.0
         prev_baseline = row.baseline_rate if row is not None else 0.0
 
-        new_mention_rate = _ema_update(prev_mentions, elapsed, ENTITY_MENTION_HALF_LIFE, float(new_mentions))
-        new_baseline_rate = _ema_update(prev_baseline, elapsed, ENTITY_BASELINE_HALF_LIFE, float(new_mentions))
+        new_mention_rate = ema_update(prev_mentions, elapsed, ENTITY_MENTION_HALF_LIFE, float(new_mentions))
+        new_baseline_rate = ema_update(prev_baseline, elapsed, ENTITY_BASELINE_HALF_LIFE, float(new_mentions))
         reactivation_ratio[key] = new_mention_rate / max(new_baseline_rate, ENTITY_BASELINE_FLOOR)
 
         if row is None:
