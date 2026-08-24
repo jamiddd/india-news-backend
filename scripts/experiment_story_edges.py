@@ -42,6 +42,13 @@ plausible via a shared location entity but the chain as a whole not one
 story) because each hop only had to agree with its neighbor, not with what
 the story was originally about.
 
+Generic entities (--max-df-ratio, default 0.015) are pruned before matching
+entirely, not just down-weighted — IDF alone doesn't stop e.g. "india" +
+"government_of_india" or "tamil_nadu" + "tamil_nadu_government" from
+satisfying --min-shared and chaining together dozens of unrelated stories
+that just happen to share the same country/party/state, since --min-shared
+counts entities, not weight. Same idea as dropping stopwords before TF-IDF.
+
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
     python3 scripts/experiment_story_edges.py --days 60 --threshold 0.15 --limit 100
@@ -131,6 +138,29 @@ def compute_idf_weights(clusters: List[Cluster]) -> Dict[str, float]:
     n = len(clusters)
     # +1 smoothing keeps weight positive and finite even if df == n.
     return {key: math.log(n / df) + 1.0 for key, df in doc_freq.items()}
+
+
+def prune_generic_entities(clusters: List[Cluster], max_df_ratio: float) -> None:
+    """
+    Drop entity keys that appear in more than max_df_ratio of all loaded
+    clusters, in place. IDF weighting alone doesn't stop generic
+    country/party/state entities (india, bjp, congress, tamil_nadu,
+    tamil_nadu_government) from chaining unrelated stories together — two
+    such entities together still clear --min-shared even at low individual
+    weight, since min-shared counts entities, not weight. This is the same
+    fix as dropping stopwords before TF-IDF: entities this common carry no
+    story-identifying signal, so they're removed from matching entirely
+    rather than merely down-weighted.
+    """
+    doc_freq: Dict[str, int] = defaultdict(int)
+    for cluster in clusters:
+        for key in cluster.entity_keys:
+            doc_freq[key] += 1
+    n = len(clusters)
+    max_df = max_df_ratio * n
+    generic = {key for key, df in doc_freq.items() if df > max_df}
+    for cluster in clusters:
+        cluster.entity_keys -= generic
 
 
 def score_pairs(
@@ -296,10 +326,13 @@ def write_csv(pairs: List[CandidatePair], path: str) -> None:
 
 async def main(
     days: int, threshold: float, limit: int, csv_path: Optional[str], min_shared: int,
-    min_gap_hours: float, chains: bool,
+    min_gap_hours: float, chains: bool, max_df_ratio: float,
 ) -> None:
     async with engine.begin() as conn:
         clusters = await load_clusters(conn, days)
+
+    if max_df_ratio < 1.0:
+        prune_generic_entities(clusters, max_df_ratio)
 
     weights = compute_idf_weights(clusters)
     print(f"Loaded {len(clusters)} clusters from the last {days} days "
@@ -328,6 +361,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-shared", type=int, default=2, help="Minimum shared entities to count as a candidate pair (default: 2)")
     parser.add_argument("--min-gap-hours", type=float, default=0.0, help="Minimum time gap between clusters to count as a candidate pair (default: 0, no filter)")
     parser.add_argument("--chains", action="store_true", help="Group candidate pairs into connected-component chains (one predecessor per cluster) instead of printing a flat pair list")
+    parser.add_argument("--max-df-ratio", type=float, default=0.015, help="Drop entities appearing in more than this fraction of loaded clusters before matching (default: 0.015, i.e. ~1.5%%); pass 1.0 to disable")
     args = parser.parse_args()
 
-    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared, args.min_gap_hours, args.chains))
+    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared, args.min_gap_hours, args.chains, args.max_df_ratio))
