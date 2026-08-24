@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 import httpx
@@ -5,6 +6,9 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyEditorial
+from app.services.llm_gen import call_claude_json
+
+logger = logging.getLogger(__name__)
 
 WORDS = [
     {"word":"SERENDIPITY","pronunciation":"seh-ruhn-DIP-uh-tee","part_of_speech":"noun","definition":"The fortunate discovery of something valuable or interesting by chance.","example":"Finding the quiet bookshop was a moment of pure serendipity.","origin":"Coined by Horace Walpole in 1754 from the tale The Three Princes of Serendip."},
@@ -47,6 +51,50 @@ async def _fetch_events(day: date) -> list[dict]:
     return events
 
 
+def _validate_word_and_quote(payload: dict) -> tuple[dict, dict]:
+    word = payload.get("word") or {}
+    quote = payload.get("quote") or {}
+    word_fields = ("word", "pronunciation", "part_of_speech", "definition", "example", "origin")
+    quote_fields = ("quote", "author")
+    if any(not str(word.get(f) or "").strip() for f in word_fields):
+        raise ValueError("Incomplete word fields")
+    if any(not str(quote.get(f) or "").strip() for f in quote_fields):
+        raise ValueError("Incomplete quote fields")
+    if not str(word["word"]).strip().replace(" ", "").isalpha():
+        raise ValueError("Word must be alphabetic")
+    word_out = {f: str(word[f]).strip() for f in word_fields}
+    word_out["word"] = word_out["word"].upper()
+    quote_out = {f: str(quote[f]).strip() for f in quote_fields}
+    return word_out, quote_out
+
+
+async def generate_word_and_quote(feature_date: date) -> tuple[dict, dict, str]:
+    """Ask Claude for a fresh word-of-the-day + quote-of-the-day pair. Falls
+    back to the curated WORDS/QUOTES banks, deterministically picked by
+    date, on failure — same resilience pattern as
+    word_search.generate_theme_and_words."""
+    system = (
+        "You generate content for a daily 'Word of the Day' and 'Quote of the Day' "
+        "feature in a general-audience news app. Pick an interesting, moderately "
+        "advanced English word (not obscure or offensive) and a real, attributable "
+        "inspirational or thought-provoking quote from a known historical or public "
+        "figure. Return JSON only: "
+        '{"word": {"word": "...", "pronunciation": "phonetic spelling", '
+        '"part_of_speech": "noun/verb/adjective/etc", "definition": "...", '
+        '"example": "a sentence using the word", "origin": "brief etymology"}, '
+        '"quote": {"quote": "the quote text", "author": "who said it"}}'
+    )
+    data = await call_claude_json(system=system, user_content=f"Generate the word and quote of the day for {feature_date.isoformat()}.", max_tokens=800)
+    if data is not None:
+        try:
+            return (*_validate_word_and_quote(data), "ai")
+        except Exception as exc:
+            logger.warning("Word/quote AI output failed validation: %s", exc)
+    ordinal = feature_date.toordinal()
+    quote, author = QUOTES[ordinal % len(QUOTES)]
+    return WORDS[ordinal % len(WORDS)], {"quote": quote, "author": author}, "curated"
+
+
 async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> DailyEditorial:
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
@@ -58,12 +106,11 @@ async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> 
     existing = result.scalar_one_or_none()
     if existing:
         return existing
-    ordinal = feature_date.toordinal()
-    quote, author = QUOTES[ordinal % len(QUOTES)]
+    word, quote, _ = await generate_word_and_quote(feature_date)
     row = DailyEditorial(
         feature_date=feature_date,
-        word=WORDS[ordinal % len(WORDS)],
-        quote={"quote": quote, "author": author},
+        word=word,
+        quote=quote,
         historical_events=await _fetch_events(feature_date),
     )
     session.add(row)

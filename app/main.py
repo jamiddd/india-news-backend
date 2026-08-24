@@ -519,22 +519,22 @@ async def daily_quiz(request: Request, date: str | None = Query(None), db: Async
 
 @app.get(f"{settings.API_V1_STR}/word-of-the-day", response_model=WordOfTheDayOut)
 @limiter.limit("30/minute")
-async def word_of_the_day(request: Request, db: AsyncSession = Depends(get_db)):
-    feature = await get_or_create_editorial(db, india_today())
+async def word_of_the_day(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    feature = await get_or_create_editorial(db, resolve_puzzle_date(date))
     return {"date": feature.feature_date, **feature.word}
 
 
 @app.get(f"{settings.API_V1_STR}/quote-of-the-day", response_model=QuoteOfTheDayOut)
 @limiter.limit("30/minute")
-async def quote_of_the_day(request: Request, db: AsyncSession = Depends(get_db)):
-    feature = await get_or_create_editorial(db, india_today())
+async def quote_of_the_day(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    feature = await get_or_create_editorial(db, resolve_puzzle_date(date))
     return {"date": feature.feature_date, **feature.quote}
 
 
 @app.get(f"{settings.API_V1_STR}/on-this-day", response_model=OnThisDayOut)
 @limiter.limit("30/minute")
-async def on_this_day(request: Request, db: AsyncSession = Depends(get_db)):
-    feature = await get_or_create_editorial(db, india_today())
+async def on_this_day(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    feature = await get_or_create_editorial(db, resolve_puzzle_date(date))
     return {"date": feature.feature_date, "events": feature.historical_events, "attribution": "Wikipedia contributors (CC BY-SA)"}
 
 
