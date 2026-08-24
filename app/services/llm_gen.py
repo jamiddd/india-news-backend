@@ -27,6 +27,7 @@ async def call_claude_json(
     system: str,
     user_content: str,
     *,
+    model: str = MODEL,
     max_tokens: int = 2000,
     temperature: float = 0.8,
     attempts: int = 3,
@@ -36,7 +37,12 @@ async def call_claude_json(
     attempts are exhausted. Callers are expected to validate the shape of the
     returned dict themselves (this only guarantees "valid JSON", not "valid
     puzzle") and to fall back to a deterministic generator on None or on a
-    validation failure.
+    validation failure. `model` defaults to the cheap/fast MODEL used by every
+    daily game except crossword, which overrides it — crossword's exact
+    11x11-grid-plus-180-degree-symmetry constraint is a harder structured
+    generation task than the other games' looser letter/word-list puzzles,
+    and Haiku was found to fail validation on it consistently (see
+    crossword.py's generate_puzzle).
     """
     if not settings.ANTHROPIC_API_KEY:
         return None
@@ -51,7 +57,7 @@ async def call_claude_json(
                         "content-type": "application/json",
                     },
                     json={
-                        "model": MODEL,
+                        "model": model,
                         "max_tokens": max_tokens,
                         "temperature": temperature,
                         "system": system,
