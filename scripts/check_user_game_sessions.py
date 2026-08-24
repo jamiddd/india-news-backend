@@ -1,10 +1,12 @@
 """
-One-off diagnostic: lists a user's recent game_sessions rows (both start and
-complete events), most recent first. Read-only. Use this to check whether a
+One-off diagnostic: lists a user's recent game_sessions rows, most recently
+started first. Read-only. game_sessions is one upserted row per (user,
+game_type, puzzle_date) — not an event log — with `completed` +
+`completed_at` set once the game finishes. Use this to check whether a
 client-side trackComplete() call actually reached the backend — the Android
 client's completeGameSession call is fire-and-forget with no error surfacing
-(see GameStatsTracker.kt), so a missing "complete" row here means the POST
-either failed silently or never landed.
+(see GameStatsTracker.kt), so a row still showing completed=false after the
+user finished a game means the POST either failed silently or never landed.
 
 Usage (inside the app container):
     python3 scripts/check_user_game_sessions.py <user_id> [limit]
@@ -26,9 +28,9 @@ async def main(user_id: str, limit: int):
     async with engine.begin() as conn:
         result = await conn.execute(
             text(
-                "SELECT game_type, puzzle_date, event, score, completion_time_seconds, "
-                "difficulty, created_at FROM game_sessions WHERE user_id = :user_id "
-                "ORDER BY created_at DESC LIMIT :limit"
+                "SELECT game_type, puzzle_date, completed, score, completion_time_seconds, "
+                "difficulty, started_at, completed_at FROM game_sessions WHERE user_id = :user_id "
+                "ORDER BY started_at DESC LIMIT :limit"
             ),
             {"user_id": user_id, "limit": limit},
         )
@@ -38,8 +40,9 @@ async def main(user_id: str, limit: int):
             return
         for row in rows:
             print(
-                f"{row.created_at}\t{row.game_type}\t{row.puzzle_date}\t{row.event}\t"
-                f"score={row.score}\ttime={row.completion_time_seconds}\tdifficulty={row.difficulty}"
+                f"{row.puzzle_date}\t{row.game_type}\tcompleted={row.completed}\t"
+                f"score={row.score}\ttime={row.completion_time_seconds}\tdifficulty={row.difficulty}\t"
+                f"started_at={row.started_at}\tcompleted_at={row.completed_at}"
             )
 
 
