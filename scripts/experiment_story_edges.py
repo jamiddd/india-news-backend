@@ -7,13 +7,25 @@ LLM confirmation pass is needed on top of it.
 
 No writes, no new tables, no LLM calls. Scores candidate (earlier, later)
 cluster pairs within a time window using canonicalized shared entities
-(app.services.entity_graph.canonicalize_entity), weighted by rarity via
-entity_stats.baseline_rate, and prints them for manual review.
+(app.services.entity_graph.canonicalize_entity), weighted by rarity, and
+prints them for manual review.
+
+Rarity is computed as inverse document frequency over the loaded cluster
+set itself (log(N / df) for each entity_key), not from entity_stats —
+entity_stats only holds ~700 rows (populated from a 30-min recompute
+lookback, see poller.py) and is far too sparse to weight ~10k clusters'
+worth of distinct entities; nearly everything fell back to a default
+weight and the "rarity" signal was flat. In-set IDF has no such gap.
+
+A minimum shared-entity count (--min-shared, default 2) also applies:
+a single shared entity (e.g. both stories merely mention "Apple") produced
+massive false-positive fan-out in the first pass — two clusters need to
+agree on at least 2 entities to be considered a candidate pair at all.
 
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
     python3 scripts/experiment_story_edges.py --days 60 --threshold 0.15 --limit 100
-    python3 scripts/experiment_story_edges.py --csv /tmp/story_edges.csv
+    python3 scripts/experiment_story_edges.py --min-shared 3 --csv /tmp/story_edges.csv
 """
 import argparse
 import asyncio
@@ -32,11 +44,6 @@ from sqlalchemy import text
 
 from app.database import engine
 from app.services.entity_graph import canonicalize_entity
-
-# Fallback weight for entity keys with no entity_stats row yet (treat as
-# moderately common rather than crashing or over-weighting brand-new entities).
-DEFAULT_BASELINE_RATE = 0.5
-EPSILON = 0.05
 
 
 @dataclass
@@ -94,13 +101,19 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
     return clusters
 
 
-async def load_baseline_rates(conn) -> Dict[str, float]:
-    result = await conn.execute(text("SELECT entity_key, baseline_rate FROM entity_stats"))
-    return {row.entity_key: row.baseline_rate for row in result}
+def compute_idf_weights(clusters: List[Cluster]) -> Dict[str, float]:
+    """log(N / df) per entity_key, df = number of loaded clusters mentioning it."""
+    doc_freq: Dict[str, int] = defaultdict(int)
+    for cluster in clusters:
+        for key in cluster.entity_keys:
+            doc_freq[key] += 1
+    n = len(clusters)
+    # +1 smoothing keeps weight positive and finite even if df == n.
+    return {key: math.log(n / df) + 1.0 for key, df in doc_freq.items()}
 
 
 def score_pairs(
-    clusters: List[Cluster], baseline_rates: Dict[str, float], days: int
+    clusters: List[Cluster], weights: Dict[str, float], days: int, min_shared: int
 ) -> List[CandidatePair]:
     # Inverted index: entity_key -> cluster ids that mention it, so we only
     # ever compare clusters that share at least one entity.
@@ -130,11 +143,13 @@ def score_pairs(
                 seen_pairs.add(pair_key)
 
                 shared_keys = earlier.entity_keys & later.entity_keys
+                if len(shared_keys) < min_shared:
+                    continue
+
                 shared_weighted = []
                 total_weight = 0.0
                 for shared_key in shared_keys:
-                    rate = baseline_rates.get(shared_key, DEFAULT_BASELINE_RATE)
-                    weight = 1.0 / (rate + EPSILON)
+                    weight = weights.get(shared_key, 1.0)
                     shared_weighted.append((shared_key, weight))
                     total_weight += weight
 
@@ -177,15 +192,15 @@ def write_csv(pairs: List[CandidatePair], path: str) -> None:
     print(f"Wrote {len(pairs)} candidate pairs to {path}")
 
 
-async def main(days: int, threshold: float, limit: int, csv_path: Optional[str]) -> None:
+async def main(days: int, threshold: float, limit: int, csv_path: Optional[str], min_shared: int) -> None:
     async with engine.begin() as conn:
         clusters = await load_clusters(conn, days)
-        baseline_rates = await load_baseline_rates(conn)
 
+    weights = compute_idf_weights(clusters)
     print(f"Loaded {len(clusters)} clusters from the last {days} days "
-          f"and {len(baseline_rates)} entity_stats rows.")
+          f"and {len(weights)} distinct entity keys (in-set IDF weighting).")
 
-    pairs = score_pairs(clusters, baseline_rates, days)
+    pairs = score_pairs(clusters, weights, days, min_shared)
     pairs = [p for p in pairs if p.score >= threshold]
 
     if csv_path:
@@ -200,6 +215,7 @@ if __name__ == "__main__":
     parser.add_argument("--threshold", type=float, default=0.1, help="Minimum score to print (default: 0.1)")
     parser.add_argument("--limit", type=int, default=100, help="Max pairs to print to stdout (default: 100)")
     parser.add_argument("--csv", type=str, default=None, help="Write all pairs above threshold to this CSV path instead of stdout")
+    parser.add_argument("--min-shared", type=int, default=2, help="Minimum shared entities to count as a candidate pair (default: 2)")
     args = parser.parse_args()
 
-    asyncio.run(main(args.days, args.threshold, args.limit, args.csv))
+    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared))
