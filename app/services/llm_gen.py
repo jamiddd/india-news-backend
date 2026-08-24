@@ -29,7 +29,7 @@ async def call_claude_json(
     *,
     model: str = MODEL,
     max_tokens: int = 2000,
-    temperature: float = 0.8,
+    temperature: float | None = 0.8,
     attempts: int = 3,
     timeout: float = 45,
 ) -> dict[str, Any] | None:
@@ -48,6 +48,17 @@ async def call_claude_json(
         return None
     for attempt in range(attempts):
         try:
+            payload: dict[str, Any] = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [{"role": "user", "content": user_content}],
+            }
+            if temperature is not None:
+                # Claude Sonnet 5 (and other current-gen models) reject a
+                # non-default temperature with 400 invalid_request_error.
+                # Only send it for models that accept it (e.g. Haiku).
+                payload["temperature"] = temperature
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     API_URL,
@@ -56,13 +67,7 @@ async def call_claude_json(
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
-                    json={
-                        "model": model,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "system": system,
-                        "messages": [{"role": "user", "content": user_content}],
-                    },
+                    json=payload,
                 )
                 response.raise_for_status()
                 raw = response.json().get("content") or []

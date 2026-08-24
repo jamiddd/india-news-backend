@@ -329,7 +329,10 @@ Before returning your final answer, count the characters in each of the 11 "rows
     for attempt in range(3):
         # Sonnet, not the other daily games' Haiku default — see call_claude_json's
         # docstring in llm_gen.py for why crossword needs the stronger model.
-        data = await call_claude_json(system="", user_content=prompt, model="claude-sonnet-5", max_tokens=5000, attempts=1)
+        data = await call_claude_json(
+            system="", user_content=prompt, model="claude-sonnet-5", max_tokens=5000,
+            temperature=None, attempts=1,
+        )
         if data is None:
             break  # no API key configured / transport failure — retrying won't help
         try:
