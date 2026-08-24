@@ -1207,7 +1207,7 @@ async def start_game_session(
 
     statement = pg_insert(GameSession).values(
         user_id=user_id, game_type=game_type, puzzle_date=payload.puzzle_date, completed=False,
-    ).on_conflict_do_nothing(constraint="uq_game_sessions_user_game_date")
+    ).on_conflict_do_nothing(index_elements=["user_id", "game_type", "puzzle_date"])
     await db.execute(statement)
     await db.commit()
     return {"message": "Session started"}
@@ -1237,7 +1237,7 @@ async def complete_game_session(
         score=payload.score, completion_time_seconds=payload.completion_time_seconds,
         difficulty=payload.difficulty,
     ).on_conflict_do_update(
-        constraint="uq_game_sessions_user_game_date",
+        index_elements=["user_id", "game_type", "puzzle_date"],
         set_={
             "completed": True, "completed_at": now,
             "score": payload.score, "completion_time_seconds": payload.completion_time_seconds,
