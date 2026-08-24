@@ -326,7 +326,7 @@ The # pattern must have 180-degree rotational symmetry. Every open cell must be 
 async def get_or_create_puzzle(session: AsyncSession, puzzle_date: date) -> DailyCrossword:
     result = await session.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
-    if existing and existing.source != "fallback":
+    if existing and existing.source != "algorithmic":
         return existing
 
     # Serializes first-request generation across all four Uvicorn workers.
@@ -334,7 +334,7 @@ async def get_or_create_puzzle(session: AsyncSession, puzzle_date: date) -> Dail
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
     result = await session.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
-    if existing and existing.source != "fallback":
+    if existing and existing.source != "algorithmic":
         return existing
 
     generated, source = await generate_puzzle(puzzle_date)
