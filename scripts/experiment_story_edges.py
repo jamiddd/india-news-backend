@@ -20,7 +20,12 @@ bursty splits). This version follows an explicit decision process instead:
   Node 6b: subsumption — a topic group that's near-entirely contained in an
       already-kept larger group (e.g. "Sunita Ahuja" vs "Govinda" — nearly
       every Sunita Ahuja story also mentions Govinda, not vice versa) is
-      dropped rather than kept as a near-duplicate second group.
+      dropped rather than kept as a near-duplicate second group. Run a
+      SECOND time after Node 7 (dedup_sub_clusters) — two actors' full
+      groups can be mostly disjoint overall (e.g. Dhanush's group has many
+      stories with no Kareena Kapoor) while the specific sub-cluster each
+      narrows down to is identical, which Node 6b alone can't see since it
+      only compares pre-split groups.
   Node 7: within a topic group, sub-cluster IGNORING time, scored on
       entities OTHER than the group's own actor (the actor is shared by
       construction and so is uninformative for telling sub-stories apart —
@@ -347,6 +352,43 @@ def score_importance(
     return ema
 
 
+# --------------------------------------------------- sub-cluster dedup --
+
+def dedup_sub_clusters(sub_clusters: List[SubCluster], subsumption_ratio: float) -> List[SubCluster]:
+    """
+    Second subsumption pass, run AFTER Node 7's split, not just at Node 6b.
+    Node 6b dedupes at the topic-group level (before Node 7), but two
+    different actors' FULL groups can be mostly disjoint overall (Dhanush's
+    group includes many stories with no Kareena Kapoor in them) while the
+    specific SUB-CLUSTER produced once both narrow down to just their
+    shared story is identical or near-identical (e.g. dhanush, kareena_kapoor,
+    and bollywood all independently anchoring the exact same 2-cluster
+    Bhansali-film-casting story). Node 6b can't see that redundancy since it
+    only compares full groups; this pass compares the final sub-clusters
+    (trunk + branches) instead, keeping the largest of each near-duplicate
+    set.
+    """
+    scored = [(len(sc.trunk) + len(sc.branches), sc) for sc in sub_clusters]
+    scored.sort(key=lambda t: t[0], reverse=True)
+
+    kept: List[SubCluster] = []
+    kept_id_sets: List[Set[int]] = []
+    for _, sc in scored:
+        member_ids = {c.id for c in sc.trunk + sc.branches}
+        if not member_ids:
+            continue
+        subsumed = any(
+            len(member_ids & kept_ids) / len(member_ids) >= subsumption_ratio
+            for kept_ids in kept_id_sets
+        )
+        if subsumed:
+            continue
+        kept.append(sc)
+        kept_id_sets.append(member_ids)
+
+    return kept
+
+
 # --------------------------------------------------------------- printing --
 
 def print_chains(
@@ -404,6 +446,10 @@ async def main(
                 ratio = decayed / max(baseline, 0.05)
             importance = score_importance(trunk, ratio, half_life)
             sub_clusters.append(SubCluster(topic_group=group, trunk=trunk, branches=branches, importance=importance))
+
+    before = len(sub_clusters)
+    sub_clusters = dedup_sub_clusters(sub_clusters, subsumption_ratio)
+    print(f"{len(sub_clusters)} sub-clusters survived cross-actor dedup (of {before} raw).")
 
     print_chains(sub_clusters, limit, entity_stats)
 
