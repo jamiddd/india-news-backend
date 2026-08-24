@@ -239,7 +239,7 @@ class AnchoredThread:
 
 def build_anchored_chains(
     clusters: List[Cluster], weights: Dict[str, float], min_shared: int,
-    min_gap_hours: float, days: int, threshold: float,
+    days: int, threshold: float,
 ) -> List[AnchoredThread]:
     """
     Streaming, root-anchored chain assignment — same shape as poller.py's
@@ -254,10 +254,20 @@ def build_anchored_chains(
     step). Here every candidate is scored against the thread's ROOT entity
     set, not its last member, so a chain can only grow as long as it keeps
     overlapping with what the story was originally about.
+
+    Deliberately no --min-gap-hours gate here (unlike score_pairs): an
+    earlier version rejected a candidate for landing too soon after the
+    thread's last addition, which split single bursts of same-story
+    coverage (several outlets within an hour) into orphaned parallel
+    chains — the first burst article joined fine, the second got rejected
+    for being "too soon" and spun off its own thread, which then attracted
+    later real follow-ups that should have stayed on the original chain.
+    Membership is purely score-based; min_gap_hours is applied only for
+    display (see print_anchored_chains), tagging bursty hops rather than
+    excluding them.
     """
     clusters_sorted = sorted(clusters, key=lambda c: c.first_seen_at)
     max_gap = timedelta(days=days)
-    min_gap = timedelta(hours=min_gap_hours)
     threads: List[AnchoredThread] = []
 
     for cluster in clusters_sorted:
@@ -267,8 +277,6 @@ def build_anchored_chains(
 
         for thread in threads:
             if cluster.first_seen_at - thread.root.first_seen_at > max_gap:
-                continue
-            if cluster.first_seen_at - thread.last_seen < min_gap:
                 continue
             shared = cluster.entity_keys & thread.root_entities
             if len(shared) < min_shared:
@@ -290,7 +298,8 @@ def build_anchored_chains(
     return threads
 
 
-def print_anchored_chains(threads: List[AnchoredThread], limit: int) -> None:
+def print_anchored_chains(threads: List[AnchoredThread], limit: int, min_gap_hours: float) -> None:
+    min_gap = timedelta(hours=min_gap_hours)
     multi = [t for t in threads if t.members]
     multi.sort(key=lambda t: len(t.members), reverse=True)
     print(f"\n{len(multi)} root-anchored chains (of {len(threads)} total roots), "
@@ -299,11 +308,14 @@ def print_anchored_chains(threads: List[AnchoredThread], limit: int) -> None:
         print(f"=== chain of {len(thread.members) + 1} clusters, root #{thread.root.id} ===")
         when = thread.root.first_seen_at.strftime("%Y-%m-%d %H:%M")
         print(f"  [{when}] #{thread.root.id:6d} {thread.root.headline[:90]}")
-        for cluster, score, shared in thread.members:
+        previous_seen = thread.root.first_seen_at
+        for cluster, score, shared in sorted(thread.members, key=lambda m: m[0].first_seen_at):
             when = cluster.first_seen_at.strftime("%Y-%m-%d %H:%M")
             shared_names = ", ".join(k.split(":", 1)[1] for k in list(shared)[:4])
-            print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
+            burst_tag = " [same burst]" if cluster.first_seen_at - previous_seen < min_gap else ""
+            print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}{burst_tag}")
             print(f"      └─ vs root, score={score:.2f}, shared: {shared_names}")
+            previous_seen = cluster.first_seen_at
         print()
 
 
@@ -339,8 +351,8 @@ async def main(
           f"and {len(weights)} distinct entity keys (in-set IDF weighting).")
 
     if chains:
-        threads = build_anchored_chains(clusters, weights, min_shared, min_gap_hours, days, threshold)
-        print_anchored_chains(threads, limit)
+        threads = build_anchored_chains(clusters, weights, min_shared, days, threshold)
+        print_anchored_chains(threads, limit, min_gap_hours)
         return
 
     pairs = score_pairs(clusters, weights, days, min_shared, min_gap_hours)
@@ -359,7 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=100, help="Max pairs to print to stdout (default: 100)")
     parser.add_argument("--csv", type=str, default=None, help="Write all pairs above threshold to this CSV path instead of stdout")
     parser.add_argument("--min-shared", type=int, default=2, help="Minimum shared entities to count as a candidate pair (default: 2)")
-    parser.add_argument("--min-gap-hours", type=float, default=0.0, help="Minimum time gap between clusters to count as a candidate pair (default: 0, no filter)")
+    parser.add_argument("--min-gap-hours", type=float, default=0.0, help="Flat-pair mode: minimum gap to count as a candidate pair at all. Chains mode: hops closer together than this are tagged '[same burst]' rather than excluded (default: 0)")
     parser.add_argument("--chains", action="store_true", help="Group candidate pairs into connected-component chains (one predecessor per cluster) instead of printing a flat pair list")
     parser.add_argument("--max-df-ratio", type=float, default=0.015, help="Drop entities appearing in more than this fraction of loaded clusters before matching (default: 0.015, i.e. ~1.5%%); pass 1.0 to disable")
     args = parser.parse_args()
