@@ -2,17 +2,21 @@
 import asyncio
 from datetime import datetime, time, timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.database import AsyncSessionLocal, Base, engine
-from app.services.polls import IST, activate_poll, generate_draft, seed_fallbacks
+from app.models import DailyPoll
+from app.services.polls import IST, activate_poll, generate_draft, notify_admin_draft_ready, seed_fallbacks
 
 
 async def prepare(day):
     async with AsyncSessionLocal() as session:
         try:
-            await generate_draft(session, day)
+            already_existed = await session.scalar(select(DailyPoll).where(DailyPoll.poll_date == day)) is not None
+            poll = await generate_draft(session, day)
             print(f"Poll draft ready for {day}", flush=True)
+            if not already_existed:
+                await notify_admin_draft_ready(session, poll)
         except Exception as exc:
             print(f"Poll draft failed for {day}: {exc}", flush=True)
 

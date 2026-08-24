@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     POLL_SESSION_SECRET: Optional[str] = None
     POLL_VOTER_HASH_SECRET: Optional[str] = None
 
+    # When a fresh AI poll draft is generated (04:30 IST), an FCM push is
+    # sent to every device registered to this account, deep-linking straight
+    # to the admin review page so the 09:00 publish window isn't missed.
+    # Absent email = feature no-ops (no admin account to notify).
+    ADMIN_USER_EMAIL: Optional[str] = None
+    ADMIN_POLL_REVIEW_URL: str = "https://openindiannews.com/admin/polls"
+
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
     # X-Client-Version header on every request (see main.py's

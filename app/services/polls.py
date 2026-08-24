@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.models import Article, DailyPoll, PollFallback, PollOption, PollVote, Source, StoryCluster, utc_now
+from app.models import Article, DailyPoll, DeviceToken, PollFallback, PollOption, PollVote, Source, StoryCluster, User, utc_now
 from app.services.enrichment import parse_json_response
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -122,6 +122,44 @@ async def generate_draft(session: AsyncSession, poll_date: date, replace: bool =
     await session.commit()
     await session.refresh(poll)
     return poll
+
+
+async def notify_admin_draft_ready(session: AsyncSession, poll: DailyPoll) -> None:
+    """Pushes a data-only FCM message to every device registered to
+    ADMIN_USER_EMAIL, deep-linking to the admin review page — see
+    NewsFirebaseMessagingService.onMessageReceived's "url" handling on the
+    client, which opens it in Chrome instead of the app. Best-effort: any
+    failure here must never break draft generation itself."""
+    if not settings.ADMIN_USER_EMAIL:
+        return
+    try:
+        from firebase_admin import messaging
+        from app.services.firebase_auth import _get_firebase_app
+        app = _get_firebase_app()
+    except Exception:
+        return
+
+    admin = await session.scalar(select(User).where(User.email == settings.ADMIN_USER_EMAIL))
+    if not admin:
+        return
+    tokens = (await session.execute(select(DeviceToken).where(DeviceToken.user_id == admin.id))).scalars().all()
+    for device in tokens:
+        try:
+            messaging.send(messaging.Message(
+                data={
+                    "title": "Daily poll draft ready",
+                    "body": poll.question,
+                    "url": settings.ADMIN_POLL_REVIEW_URL,
+                    "channel_id": "admin_alerts",
+                },
+                android=messaging.AndroidConfig(priority="high"),
+                token=device.fcm_token,
+            ), app=app)
+        except Exception:
+            # Same dead-token/permission failures scripts/send_notifications.py
+            # tolerates — one admin device failing to receive this shouldn't
+            # block generation or the other device.
+            continue
 
 
 async def approve_poll(session: AsyncSession, poll_id: int, question: str, context: str, options: list[str]) -> None:
