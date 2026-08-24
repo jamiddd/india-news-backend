@@ -309,9 +309,23 @@ def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
 
 
 async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
-    prompt = """Create a medium general-knowledge American-style crossword. Return JSON only:
-{"rows":[11 strings of exactly 11 A-Z/# characters],"clues":[{"number":1,"direction":"across","clue":"..."}]}
-The # pattern must have 180-degree rotational symmetry. Every open cell must be connected and part of an Across or Down answer of at least 3 letters. Number cells in standard row-major crossword order and include exactly one clue for every Across and Down entry. Use clear, factual, family-friendly clues."""
+    # Tightened 2026-08-24: "rows" being anything other than exactly 11x11
+    # was by far the most common validation failure (see validate_and_normalize's
+    # "Crossword must be exactly 11x11"), so the size requirement and a
+    # self-check are called out repeatedly and up front rather than buried
+    # inside the JSON schema description.
+    prompt = """Create a medium general-knowledge American-style crossword grid that is EXACTLY 11 rows by 11 columns — no more, no fewer. Return JSON only:
+{"rows": [11 strings, each EXACTLY 11 characters of A-Z or "#"], "clues": [{"number": 1, "direction": "across", "clue": "..."}]}
+
+Hard requirements — verify each one before answering:
+1. "rows" has exactly 11 elements.
+2. Every element of "rows" is exactly 11 characters long. Do not pad, truncate, or return more/fewer rows or columns than 11 — this is the single most common mistake, check it carefully.
+3. Symmetry: for every cell (r, c) using 0-indexed rows/cols 0-10, it is "#" if and only if cell (10-r, 10-c) is also "#". This is 180-degree rotational symmetry.
+4. Every open (non-"#") cell is part of an Across or Down answer of at least 3 letters, and the grid is fully connected.
+5. Clues: exactly one clue per Across and Down entry, numbered in standard row-major crossword order (scan left-to-right, top-to-bottom; a cell gets a number if it starts an Across and/or Down entry there).
+6. Clues must be clear, factual, and family-friendly.
+
+Before returning your final answer, count the characters in each of the 11 "rows" strings one more time to confirm each one is exactly 11 characters — this check is required, not optional."""
     for attempt in range(3):
         data = await call_claude_json(system="", user_content=prompt, max_tokens=5000, attempts=1)
         if data is None:
