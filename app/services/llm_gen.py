@@ -69,11 +69,22 @@ async def call_claude_json(
                     },
                     json=payload,
                 )
-                response.raise_for_status()
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    logger.warning(
+                        "Claude JSON generation attempt %s failed: %s %s — body: %s",
+                        attempt + 1, exc.response.status_code, type(exc).__name__,
+                        exc.response.text[:2000],
+                    )
+                    continue
                 raw = response.json().get("content") or []
                 if not raw:
                     raise ValueError("Empty response content")
                 return parse_json_response(raw[0]["text"])
         except Exception as exc:
-            logger.warning("Claude JSON generation attempt %s failed: %s", attempt + 1, exc)
+            logger.warning(
+                "Claude JSON generation attempt %s failed: %s: %s",
+                attempt + 1, type(exc).__name__, exc,
+            )
     return None
