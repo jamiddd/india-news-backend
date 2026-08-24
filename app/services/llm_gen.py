@@ -30,6 +30,7 @@ async def call_claude_json(
     model: str = MODEL,
     max_tokens: int = 2000,
     temperature: float | None = 0.8,
+    disable_thinking: bool = False,
     attempts: int = 3,
     timeout: float = 45,
 ) -> dict[str, Any] | None:
@@ -59,6 +60,11 @@ async def call_claude_json(
                 # non-default temperature with 400 invalid_request_error.
                 # Only send it for models that accept it (e.g. Haiku).
                 payload["temperature"] = temperature
+            if disable_thinking:
+                # Sonnet 5 runs adaptive thinking by default, which eats
+                # into max_tokens for a plain JSON-extraction task and adds
+                # a "thinking" block ahead of "text" in the response.
+                payload["thinking"] = {"type": "disabled"}
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     API_URL,
@@ -79,9 +85,13 @@ async def call_claude_json(
                     )
                     continue
                 raw = response.json().get("content") or []
-                if not raw:
-                    raise ValueError("Empty response content")
-                return parse_json_response(raw[0]["text"])
+                # Sonnet 5 (and any model run with thinking on) can put a
+                # "thinking" block before the "text" block, so don't assume
+                # raw[0] is text — find the first text block explicitly.
+                text_block = next((block for block in raw if block.get("type") == "text"), None)
+                if text_block is None:
+                    raise ValueError(f"No text block in response content: {raw!r}")
+                return parse_json_response(text_block["text"])
         except Exception as exc:
             logger.warning(
                 "Claude JSON generation attempt %s failed: %s: %s",

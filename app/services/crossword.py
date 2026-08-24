@@ -331,7 +331,7 @@ Before returning your final answer, count the characters in each of the 11 "rows
         # docstring in llm_gen.py for why crossword needs the stronger model.
         data = await call_claude_json(
             system="", user_content=prompt, model="claude-sonnet-5", max_tokens=5000,
-            temperature=None, attempts=1,
+            temperature=None, disable_thinking=True, attempts=1,
         )
         if data is None:
             break  # no API key configured / transport failure — retrying won't help
