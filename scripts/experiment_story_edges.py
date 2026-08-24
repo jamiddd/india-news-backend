@@ -29,13 +29,18 @@ missed dedup, not a "story so far" edge) vs. genuine multi-day narrative
 development (a legal case, a public feud, a follow-up report days later).
 Raise it to focus on the latter.
 
-Chain building: candidate pairs above --threshold form edges; connected
-components (union-find) group clusters that are plausibly "the same story."
-Within each component, each cluster keeps only its single highest-scoring
-earlier predecessor, collapsing what would otherwise be a dense blob (e.g.
-every Apple story linked to every other Apple story) into an actual
-chronological chain/tree per component — this is what a "story so far"
-timeline would walk.
+Chain building (--chains): streaming, root-anchored assignment, one level
+up from poller.py's "assign article to existing cluster, else start a new
+one" pattern. Clusters are walked in time order; each is scored against
+every active thread's ROOT entity set (not its most recent member) and
+joins the best-scoring thread above --threshold, or starts a new thread of
+its own. Anchoring to the root (rather than the previous hop) guards
+against topic drift — an earlier connected-components + best-predecessor
+version let chains wander (e.g. "Nilgiris water stress" -> "elephant
+deaths" -> "man-eating tiger" -> "leopard poaching", each hop locally
+plausible via a shared location entity but the chain as a whole not one
+story) because each hop only had to agree with its neighbor, not with what
+the story was originally about.
 
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
@@ -194,73 +199,81 @@ def print_pairs(pairs: List[CandidatePair], limit: int) -> None:
         print()
 
 
-class UnionFind:
-    def __init__(self) -> None:
-        self.parent: Dict[int, int] = {}
-
-    def find(self, x: int) -> int:
-        self.parent.setdefault(x, x)
-        while self.parent[x] != x:
-            self.parent[x] = self.parent[self.parent[x]]
-            x = self.parent[x]
-        return x
-
-    def union(self, a: int, b: int) -> None:
-        ra, rb = self.find(a), self.find(b)
-        if ra != rb:
-            self.parent[ra] = rb
+@dataclass
+class AnchoredThread:
+    root: Cluster
+    root_entities: Set[str]
+    members: List[Tuple[Cluster, float, Set[str]]] = field(default_factory=list)  # (cluster, score, shared)
+    last_seen: Optional[datetime] = None
 
 
-def build_chains(pairs: List[CandidatePair]) -> Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]]:
+def build_anchored_chains(
+    clusters: List[Cluster], weights: Dict[str, float], min_shared: int,
+    min_gap_hours: float, days: int, threshold: float,
+) -> List[AnchoredThread]:
     """
-    Group clusters into connected components (union-find over candidate
-    pairs), then within each component keep only each cluster's single
-    highest-scoring earlier predecessor edge — collapsing a dense blob of
-    pairwise links into an actual chronological chain/tree.
+    Streaming, root-anchored chain assignment — same shape as poller.py's
+    "assign article to existing cluster, else start a new one" pattern, one
+    level up (story-to-story instead of article-to-story).
 
-    Returns component_root_id -> [(cluster, edge_from_predecessor_or_None), ...]
-    sorted by first_seen_at, for printing as a timeline.
+    build_chains()'s connected-component approach let chains drift: each
+    hop only had to match its immediate predecessor, so a long chain could
+    wander away from its original topic one locally-plausible link at a
+    time (e.g. Nilgiris water stress -> elephant deaths -> man-eating tiger
+    -> leopard poaching, "linked" only by a shared location entity at each
+    step). Here every candidate is scored against the thread's ROOT entity
+    set, not its last member, so a chain can only grow as long as it keeps
+    overlapping with what the story was originally about.
     """
-    uf = UnionFind()
-    clusters_by_id: Dict[int, Cluster] = {}
-    for pair in pairs:
-        clusters_by_id[pair.earlier.id] = pair.earlier
-        clusters_by_id[pair.later.id] = pair.later
-        uf.union(pair.earlier.id, pair.later.id)
+    clusters_sorted = sorted(clusters, key=lambda c: c.first_seen_at)
+    max_gap = timedelta(days=days)
+    min_gap = timedelta(hours=min_gap_hours)
+    threads: List[AnchoredThread] = []
 
-    best_predecessor: Dict[int, CandidatePair] = {}
-    for pair in pairs:
-        existing = best_predecessor.get(pair.later.id)
-        if existing is None or pair.score > existing.score:
-            best_predecessor[pair.later.id] = pair
+    for cluster in clusters_sorted:
+        best_thread = None
+        best_score = 0.0
+        best_shared: Set[str] = set()
 
-    components: Dict[int, List[int]] = defaultdict(list)
-    for cluster_id in clusters_by_id:
-        components[uf.find(cluster_id)].append(cluster_id)
+        for thread in threads:
+            if cluster.first_seen_at - thread.root.first_seen_at > max_gap:
+                continue
+            if cluster.first_seen_at - thread.last_seen < min_gap:
+                continue
+            shared = cluster.entity_keys & thread.root_entities
+            if len(shared) < min_shared:
+                continue
+            total_weight = sum(weights.get(k, 1.0) for k in shared)
+            norm = math.sqrt(len(cluster.entity_keys) * len(thread.root_entities))
+            score = total_weight / norm if norm > 0 else 0.0
+            if score >= threshold and score > best_score:
+                best_score, best_thread, best_shared = score, thread, shared
 
-    chains: Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]] = {}
-    for root, member_ids in components.items():
-        members = sorted(
-            (clusters_by_id[cid] for cid in member_ids), key=lambda c: c.first_seen_at
-        )
-        chains[root] = [(c, best_predecessor.get(c.id)) for c in members]
-    return chains
+        if best_thread is not None:
+            best_thread.members.append((cluster, best_score, best_shared))
+            best_thread.last_seen = cluster.first_seen_at
+        else:
+            threads.append(AnchoredThread(
+                root=cluster, root_entities=cluster.entity_keys, last_seen=cluster.first_seen_at,
+            ))
+
+    return threads
 
 
-def print_chains(chains: Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]], limit: int) -> None:
-    ordered = sorted(chains.values(), key=len, reverse=True)
-    print(f"\n{len(ordered)} story chains (connected components), largest first "
-          f"— showing up to {limit}:\n")
-    for chain in ordered[:limit]:
-        print(f"=== chain of {len(chain)} clusters ===")
-        for cluster, edge in chain:
+def print_anchored_chains(threads: List[AnchoredThread], limit: int) -> None:
+    multi = [t for t in threads if t.members]
+    multi.sort(key=lambda t: len(t.members), reverse=True)
+    print(f"\n{len(multi)} root-anchored chains (of {len(threads)} total roots), "
+          f"largest first — showing up to {limit}:\n")
+    for thread in multi[:limit]:
+        print(f"=== chain of {len(thread.members) + 1} clusters, root #{thread.root.id} ===")
+        when = thread.root.first_seen_at.strftime("%Y-%m-%d %H:%M")
+        print(f"  [{when}] #{thread.root.id:6d} {thread.root.headline[:90]}")
+        for cluster, score, shared in thread.members:
             when = cluster.first_seen_at.strftime("%Y-%m-%d %H:%M")
-            if edge is None:
-                print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
-            else:
-                shared_names = ", ".join(k.split(":", 1)[1] for k, _ in edge.shared[:4])
-                print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
-                print(f"      └─ from #{edge.earlier.id} (score={edge.score:.2f}, shared: {shared_names})")
+            shared_names = ", ".join(k.split(":", 1)[1] for k in list(shared)[:4])
+            print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
+            print(f"      └─ vs root, score={score:.2f}, shared: {shared_names}")
         print()
 
 
@@ -292,12 +305,15 @@ async def main(
     print(f"Loaded {len(clusters)} clusters from the last {days} days "
           f"and {len(weights)} distinct entity keys (in-set IDF weighting).")
 
+    if chains:
+        threads = build_anchored_chains(clusters, weights, min_shared, min_gap_hours, days, threshold)
+        print_anchored_chains(threads, limit)
+        return
+
     pairs = score_pairs(clusters, weights, days, min_shared, min_gap_hours)
     pairs = [p for p in pairs if p.score >= threshold]
 
-    if chains:
-        print_chains(build_chains(pairs), limit)
-    elif csv_path:
+    if csv_path:
         write_csv(pairs, csv_path)
     else:
         print_pairs(pairs, limit)
