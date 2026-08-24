@@ -326,19 +326,23 @@ Hard requirements — verify each one before answering:
 6. Clues must be clear, factual, and family-friendly.
 
 Before returning your final answer, count the characters in each of the 11 "rows" strings one more time to confirm each one is exactly 11 characters — this check is required, not optional."""
-    # Thinking left ON (adaptive, undisabled) consumed the entire max_tokens
-    # budget on reasoning and returned zero text — observed 2026-08-24, the
-    # response was a single "thinking" block with no "text" block at all.
-    # Disabling thinking avoids that, but on its own it made the model leak
-    # raw "<think>" reasoning as plain text instead of real JSON — so disable
-    # thinking AND explicitly forbid emitting any tags.
+    # Symmetry checking genuinely benefits from step-by-step reasoning, so
+    # thinking stays ON here (unlike the other daily games) — but two prior
+    # failure modes had to be fixed together:
+    #   - unbounded adaptive thinking (2026-08-24) burned the entire
+    #     max_tokens budget on reasoning, leaving zero text output
+    #   - disabling thinking entirely (2026-08-24) made the model leak raw
+    #     "<think>" reasoning as plain text instead of real JSON
+    # Fix: bound thinking with effort="low" instead of disabling it outright,
+    # keep the anti-tag-leak instruction as a belt-and-suspenders guard, and
+    # give a generous max_tokens so bounded thinking + full output both fit.
     system = "Do not include internal or system XML tags (such as <think>) in your response. Respond with the final JSON only, nothing else."
     for attempt in range(3):
         # Sonnet, not the other daily games' Haiku default — see call_claude_json's
         # docstring in llm_gen.py for why crossword needs the stronger model.
         data = await call_claude_json(
-            system=system, user_content=prompt, model="claude-sonnet-5", max_tokens=5000,
-            temperature=None, disable_thinking=True, attempts=1, timeout=90,
+            system=system, user_content=prompt, model="claude-sonnet-5", max_tokens=10000,
+            temperature=None, effort="low", attempts=1, timeout=120,
         )
         if data is None:
             break  # no API key configured / transport failure — retrying won't help

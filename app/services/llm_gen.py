@@ -31,6 +31,7 @@ async def call_claude_json(
     max_tokens: int = 2000,
     temperature: float | None = 0.8,
     disable_thinking: bool = False,
+    effort: str | None = None,
     attempts: int = 3,
     timeout: float = 45,
 ) -> dict[str, Any] | None:
@@ -65,6 +66,12 @@ async def call_claude_json(
                 # into max_tokens for a plain JSON-extraction task and adds
                 # a "thinking" block ahead of "text" in the response.
                 payload["thinking"] = {"type": "disabled"}
+            if effort is not None:
+                # Bounds adaptive thinking depth (low/medium/high/xhigh/max)
+                # so a task that benefits from reasoning (e.g. crossword's
+                # symmetry check) doesn't burn the whole max_tokens budget
+                # on unbounded thinking with nothing left for output.
+                payload["output_config"] = {"effort": effort}
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     API_URL,
