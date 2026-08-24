@@ -1,63 +1,56 @@
 """
-Read-only experiment for "story graph mode" (see the "Feed ranking redesign"
-design doc/memory): tests whether a cheap entity-overlap heuristic alone is
-strong enough to detect story-to-story continuation ("this cluster is a
-follow-up/development of that earlier cluster"), before deciding whether an
-LLM confirmation pass is needed on top of it.
+Read-only experiment for "story graph mode" — rewrite against the decision
+tree worked out with the user (see the "Feed ranking redesign" design
+memory for background). Earlier versions of this script scored ALL
+candidate pairs/chains uniformly and patched failure modes one at a time as
+they showed up in manual review (generic-entity buckets, topic drift,
+bursty splits). This version follows an explicit decision process instead:
 
-No writes, no new tables, no LLM calls. Scores candidate (earlier, later)
-cluster pairs within a time window using canonicalized shared entities
-(app.services.entity_graph.canonicalize_entity), weighted by rarity, and
-prints them for manual review.
+  Node 1: collect candidate stories sharing >=1 entity (inverted index).
+  Node 2/3/4: rank shared entities by how common they are WITHIN a match,
+      and reject any entity whose entity_stats.baseline_rate (slow 75-day
+      EMA — a genuinely generic entity like BJP/Supreme Court/India stays
+      persistently common) is too high, falling back to the next-most
+      supported entity. Entities entity_stats hasn't seen yet fall back to
+      in-set document frequency (--max-df-ratio) as an interim stand-in,
+      since entity_stats is still young (deployed 2026-08-23) and sparse.
+  Node 5: one confirmed-specific entity ("actor") is enough to link stories
+      — no min-shared-count hack needed once genericness is checked directly.
+  Node 6: every cluster mentioning that actor forms a "topic group".
+  Node 6b: subsumption — a topic group that's near-entirely contained in an
+      already-kept larger group (e.g. "Sunita Ahuja" vs "Govinda" — nearly
+      every Sunita Ahuja story also mentions Govinda, not vice versa) is
+      dropped rather than kept as a near-duplicate second group.
+  Node 7: within a topic group, sub-cluster IGNORING time, scored on
+      entities OTHER than the group's own actor (the actor is shared by
+      construction and so is uninformative for telling sub-stories apart —
+      e.g. "Govinda's movie news" vs "Govinda's divorce news" need their
+      OWN shared entities, not just "Govinda", to stay separate).
+  Node 8: within each sub-cluster, flag members whose nearest-neighbor time
+      gap is a large multiple of the sub-cluster's typical gap.
+  Node 9: those outliers are shown as branches off the main chronological
+      trunk, not dropped and not merged in as if they were normal hops.
+  Node 10/11: rank chains by importance instead of hand-listing "junk"
+      categories (routine content like a daily lottery result never
+      naturally ranks high, no dedicated rule needed) — each trunk hop's
+      "hotness" is distinct_source_count (how many outlets covered that
+      specific development) times the actor's reactivation ratio
+      (entity_stats.mention_count_decayed / baseline_rate — is this entity
+      spiking above its own norm right now), rolled up across the trunk as
+      an EMA (app.services.decay.ema_update, the same function poller.py
+      uses for entity_stats) so recent, well-covered, spiking hops
+      dominate a chain's rank and old/quiet ones fade — the same
+      recency-weighting idea as an EMA in trading.
 
-Rarity is computed as inverse document frequency over the loaded cluster
-set itself (log(N / df) for each entity_key), not from entity_stats —
-entity_stats only holds ~700 rows (populated from a 30-min recompute
-lookback, see poller.py) and is far too sparse to weight ~10k clusters'
-worth of distinct entities; nearly everything fell back to a default
-weight and the "rarity" signal was flat. In-set IDF has no such gap.
-
-A minimum shared-entity count (--min-shared, default 2) also applies:
-a single shared entity (e.g. both stories merely mention "Apple") produced
-massive false-positive fan-out in the first pass — two clusters need to
-agree on at least 2 entities to be considered a candidate pair at all.
-
-A minimum time gap (--min-gap-hours, default 0) is available to separate two
-different populations that both show up in the scored pairs: same-day
-near-duplicate coverage of one event (minutes-to-hours apart — arguably a
-missed dedup, not a "story so far" edge) vs. genuine multi-day narrative
-development (a legal case, a public feud, a follow-up report days later).
-Raise it to focus on the latter.
-
-Chain building (--chains): streaming, root-anchored assignment, one level
-up from poller.py's "assign article to existing cluster, else start a new
-one" pattern. Clusters are walked in time order; each is scored against
-every active thread's ROOT entity set (not its most recent member) and
-joins the best-scoring thread above --threshold, or starts a new thread of
-its own. Anchoring to the root (rather than the previous hop) guards
-against topic drift — an earlier connected-components + best-predecessor
-version let chains wander (e.g. "Nilgiris water stress" -> "elephant
-deaths" -> "man-eating tiger" -> "leopard poaching", each hop locally
-plausible via a shared location entity but the chain as a whole not one
-story) because each hop only had to agree with its neighbor, not with what
-the story was originally about.
-
-Generic entities (--max-df-ratio, default 0.015) are pruned before matching
-entirely, not just down-weighted — IDF alone doesn't stop e.g. "india" +
-"government_of_india" or "tamil_nadu" + "tamil_nadu_government" from
-satisfying --min-shared and chaining together dozens of unrelated stories
-that just happen to share the same country/party/state, since --min-shared
-counts entities, not weight. Same idea as dropping stopwords before TF-IDF.
+No writes, no new tables, no LLM calls.
 
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
-    python3 scripts/experiment_story_edges.py --days 60 --threshold 0.15 --limit 100
-    python3 scripts/experiment_story_edges.py --min-shared 3 --csv /tmp/story_edges.csv
-    python3 scripts/experiment_story_edges.py --min-gap-hours 12 --chains
+    python3 scripts/experiment_story_edges.py --days 60 --limit 30
+    python3 scripts/experiment_story_edges.py --generic-percentile 0.9 --subsumption-ratio 0.7
 """
 import argparse
 import asyncio
-import csv
 import math
 import os
 import sys
@@ -71,7 +64,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from sqlalchemy import text
 
 from app.database import engine
+from app.services.decay import ema_update
 from app.services.entity_graph import canonicalize_entity
+
+DEFAULT_HALF_LIFE = timedelta(hours=48)
 
 
 @dataclass
@@ -80,23 +76,34 @@ class Cluster:
     headline: str
     first_seen_at: datetime
     last_updated_at: datetime
+    distinct_source_count: int
     entity_keys: Set[str] = field(default_factory=set)
 
 
 @dataclass
-class CandidatePair:
-    earlier: Cluster
-    later: Cluster
-    score: float
-    shared: List[Tuple[str, float]]  # (entity_key, weight)
+class TopicGroup:
+    actor: str
+    actor_display: str
+    members: List[Cluster]
 
+
+@dataclass
+class SubCluster:
+    topic_group: TopicGroup
+    trunk: List[Cluster]     # chronological, non-outlier
+    branches: List[Cluster]  # outliers, shown attached but off the trunk
+    importance: float = 0.0
+
+
+# ---------------------------------------------------------------- loading --
 
 async def load_clusters(conn, days: int) -> List[Cluster]:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await conn.execute(
         text(
             """
-            SELECT id, headline, entities, first_seen_at, last_updated_at
+            SELECT id, headline, entities, first_seen_at, last_updated_at,
+                   distinct_source_count
             FROM story_clusters
             WHERE first_seen_at >= :cutoff
             ORDER BY first_seen_at ASC
@@ -123,257 +130,298 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
                 headline=row.headline or "",
                 first_seen_at=row.first_seen_at,
                 last_updated_at=row.last_updated_at,
+                distinct_source_count=row.distinct_source_count or 1,
                 entity_keys=entity_keys,
             )
         )
     return clusters
 
 
+async def load_entity_stats(conn) -> Dict[str, Tuple[float, float, str]]:
+    """entity_key -> (baseline_rate, mention_count_decayed, display_name)."""
+    result = await conn.execute(
+        text("SELECT entity_key, baseline_rate, mention_count_decayed, display_name FROM entity_stats")
+    )
+    return {row.entity_key: (row.baseline_rate, row.mention_count_decayed, row.display_name) for row in result}
+
+
 def compute_idf_weights(clusters: List[Cluster]) -> Dict[str, float]:
-    """log(N / df) per entity_key, df = number of loaded clusters mentioning it."""
+    """log(N / df) per entity_key — used only for Node 7's secondary-entity scoring."""
     doc_freq: Dict[str, int] = defaultdict(int)
     for cluster in clusters:
         for key in cluster.entity_keys:
             doc_freq[key] += 1
     n = len(clusters)
-    # +1 smoothing keeps weight positive and finite even if df == n.
     return {key: math.log(n / df) + 1.0 for key, df in doc_freq.items()}
 
 
-def prune_generic_entities(clusters: List[Cluster], max_df_ratio: float) -> None:
+# --------------------------------------------- Node 2/3/4: actor selection --
+
+def build_generic_check(
+    clusters: List[Cluster], entity_stats: Dict[str, Tuple[float, float, str]],
+    generic_percentile: float, max_df_ratio: float,
+):
     """
-    Drop entity keys that appear in more than max_df_ratio of all loaded
-    clusters, in place. IDF weighting alone doesn't stop generic
-    country/party/state entities (india, bjp, congress, tamil_nadu,
-    tamil_nadu_government) from chaining unrelated stories together — two
-    such entities together still clear --min-shared even at low individual
-    weight, since min-shared counts entities, not weight. This is the same
-    fix as dropping stopwords before TF-IDF: entities this common carry no
-    story-identifying signal, so they're removed from matching entirely
-    rather than merely down-weighted.
+    Returns a predicate is_generic(entity_key) -> bool.
+
+    Primary signal: entity_stats.baseline_rate (a slow 75-day EMA — real
+    long-run commonness), thresholded at the given percentile among
+    entities we actually have stats for. entity_stats is young (~700 rows
+    as of this script's introduction) so most entities in a given run won't
+    have a row yet — those fall back to in-set document frequency
+    (--max-df-ratio), the same interim heuristic the previous version of
+    this script used as its only signal.
     """
+    baseline_rates = sorted(v[0] for v in entity_stats.values() if v[0] > 0)
+    cutoff = None
+    if baseline_rates:
+        idx = min(int(len(baseline_rates) * generic_percentile), len(baseline_rates) - 1)
+        cutoff = baseline_rates[idx]
+
     doc_freq: Dict[str, int] = defaultdict(int)
     for cluster in clusters:
         for key in cluster.entity_keys:
             doc_freq[key] += 1
     n = len(clusters)
-    max_df = max_df_ratio * n
-    generic = {key for key, df in doc_freq.items() if df > max_df}
-    for cluster in clusters:
-        cluster.entity_keys -= generic
+
+    def is_generic(entity_key: str) -> bool:
+        if entity_key in entity_stats and cutoff is not None:
+            return entity_stats[entity_key][0] >= cutoff
+        return (doc_freq.get(entity_key, 0) / n) > max_df_ratio if n else False
+
+    return is_generic
 
 
-def score_pairs(
-    clusters: List[Cluster], weights: Dict[str, float], days: int, min_shared: int,
-    min_gap_hours: float = 0.0,
-) -> List[CandidatePair]:
-    # Inverted index: entity_key -> cluster ids that mention it, so we only
-    # ever compare clusters that share at least one entity.
-    index: Dict[str, List[Cluster]] = defaultdict(list)
+def select_topic_groups(
+    clusters: List[Cluster], is_generic, subsumption_ratio: float,
+) -> List[TopicGroup]:
+    """
+    Node 1 (inverted index) + Node 2/3/4 (reject generic actors) + Node 5
+    (one specific entity is enough) + Node 6 (gather all members) + Node 6b
+    (subsumption). "Within-match frequency" (Node 2) is realized simply as
+    processing candidate actors in descending order of support (# clusters
+    mentioning them) — the dominant/lead entity in an overlapping pair
+    (e.g. Govinda over Sunita Ahuja) naturally has higher support and gets
+    first claim on the shared members via subsumption, without needing to
+    re-derive "which entity wins" per individual pair.
+    """
+    by_entity: Dict[str, List[Cluster]] = defaultdict(list)
     for cluster in clusters:
         for key in cluster.entity_keys:
+            by_entity[key].append(cluster)
+
+    candidates = [
+        (key, members) for key, members in by_entity.items()
+        if len(members) >= 2 and not is_generic(key)
+    ]
+    candidates.sort(key=lambda kv: len(kv[1]), reverse=True)
+
+    kept: List[TopicGroup] = []
+    kept_id_sets: List[Set[int]] = []
+    for key, members in candidates:
+        member_ids = {c.id for c in members}
+        subsumed = any(
+            len(member_ids & kept_ids) / len(member_ids) >= subsumption_ratio
+            for kept_ids in kept_id_sets
+        )
+        if subsumed:
+            continue
+        display = key.split(":", 1)[1] if ":" in key else key
+        kept.append(TopicGroup(actor=key, actor_display=display, members=members))
+        kept_id_sets.append(member_ids)
+
+    return kept
+
+
+# --------------------------------------- Node 7/8/9: sub-cluster + outliers --
+
+def sub_cluster_topic_group(
+    group: TopicGroup, weights: Dict[str, float], min_shared: int,
+) -> List[List[Cluster]]:
+    """
+    Node 7: union-find over pairwise overlap of entities OTHER than the
+    group's own actor. The actor is shared by every member by construction,
+    so it carries zero information for telling sub-stories apart — only
+    the OTHER entities two members happen to also share (a movie title, a
+    spouse's name, a co-star) can split "Govinda's movie news" from
+    "Govinda's divorce news" within the same topic group.
+    """
+    members = group.members
+    parent: Dict[int, int] = {c.id: c.id for c in members}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    index: Dict[str, List[Cluster]] = defaultdict(list)
+    for cluster in members:
+        for key in cluster.entity_keys:
+            if key == group.actor:
+                continue
             index[key].append(cluster)
 
-    max_gap = timedelta(days=days)
-    min_gap = timedelta(hours=min_gap_hours)
-    seen_pairs: Set[Tuple[int, int]] = set()
-    pairs: List[CandidatePair] = []
-
-    for key, members in index.items():
-        if len(members) < 2:
+    for key, bucket in index.items():
+        if len(bucket) < 2:
             continue
-        for i in range(len(members)):
-            for j in range(i + 1, len(members)):
-                a, b = members[i], members[j]
-                if a.first_seen_at == b.first_seen_at:
-                    continue
-                earlier, later = (a, b) if a.first_seen_at < b.first_seen_at else (b, a)
-                pair_key = (earlier.id, later.id)
-                if pair_key in seen_pairs:
-                    continue
-                gap = later.first_seen_at - earlier.first_seen_at
-                if gap > max_gap or gap < min_gap:
-                    continue
-                seen_pairs.add(pair_key)
+        for i in range(len(bucket)):
+            for j in range(i + 1, len(bucket)):
+                a, b = bucket[i], bucket[j]
+                shared = (a.entity_keys - {group.actor}) & (b.entity_keys - {group.actor})
+                if len(shared) >= min_shared:
+                    union(a.id, b.id)
 
-                shared_keys = earlier.entity_keys & later.entity_keys
-                if len(shared_keys) < min_shared:
-                    continue
+    groups: Dict[int, List[Cluster]] = defaultdict(list)
+    for cluster in members:
+        groups[find(cluster.id)].append(cluster)
 
-                shared_weighted = []
-                total_weight = 0.0
-                for shared_key in shared_keys:
-                    weight = weights.get(shared_key, 1.0)
-                    shared_weighted.append((shared_key, weight))
-                    total_weight += weight
-
-                norm = math.sqrt(len(earlier.entity_keys) * len(later.entity_keys))
-                score = total_weight / norm if norm > 0 else 0.0
-
-                shared_weighted.sort(key=lambda pair: pair[1], reverse=True)
-                pairs.append(CandidatePair(earlier, later, score, shared_weighted))
-
-    pairs.sort(key=lambda p: p.score, reverse=True)
-    return pairs
+    return [sorted(g, key=lambda c: c.first_seen_at) for g in groups.values()]
 
 
-def print_pairs(pairs: List[CandidatePair], limit: int) -> None:
-    print(f"\nTop {min(limit, len(pairs))} of {len(pairs)} candidate pairs above threshold:\n")
-    for pair in pairs[:limit]:
-        gap = pair.later.first_seen_at - pair.earlier.first_seen_at
-        shared_names = ", ".join(k.split(":", 1)[1] for k, _ in pair.shared[:6])
-        print(f"score={pair.score:.3f}  gap={gap}")
-        print(f"  A #{pair.earlier.id:6d} {pair.earlier.headline[:90]}")
-        print(f"  B #{pair.later.id:6d} {pair.later.headline[:90]}")
-        print(f"  shared: {shared_names}")
-        print()
-
-
-@dataclass
-class AnchoredThread:
-    root: Cluster
-    root_entities: Set[str]
-    members: List[Tuple[Cluster, float, Set[str]]] = field(default_factory=list)  # (cluster, score, shared)
-    last_seen: Optional[datetime] = None
-
-
-def build_anchored_chains(
-    clusters: List[Cluster], weights: Dict[str, float], min_shared: int,
-    days: int, threshold: float,
-) -> List[AnchoredThread]:
+def split_outliers(sub_cluster: List[Cluster], outlier_gap_multiplier: float) -> Tuple[List[Cluster], List[Cluster]]:
     """
-    Streaming, root-anchored chain assignment — same shape as poller.py's
-    "assign article to existing cluster, else start a new one" pattern, one
-    level up (story-to-story instead of article-to-story).
-
-    build_chains()'s connected-component approach let chains drift: each
-    hop only had to match its immediate predecessor, so a long chain could
-    wander away from its original topic one locally-plausible link at a
-    time (e.g. Nilgiris water stress -> elephant deaths -> man-eating tiger
-    -> leopard poaching, "linked" only by a shared location entity at each
-    step). Here every candidate is scored against the thread's ROOT entity
-    set, not its last member, so a chain can only grow as long as it keeps
-    overlapping with what the story was originally about.
-
-    Deliberately no --min-gap-hours gate here (unlike score_pairs): an
-    earlier version rejected a candidate for landing too soon after the
-    thread's last addition, which split single bursts of same-story
-    coverage (several outlets within an hour) into orphaned parallel
-    chains — the first burst article joined fine, the second got rejected
-    for being "too soon" and spun off its own thread, which then attracted
-    later real follow-ups that should have stayed on the original chain.
-    Membership is purely score-based; min_gap_hours is applied only for
-    display (see print_anchored_chains), tagging bursty hops rather than
-    excluding them.
+    Node 8/9: nearest-neighbor time-gap outlier detection. A member whose
+    gap to its closest neighbor (in either direction) is a large multiple
+    of the sub-cluster's typical nearest-neighbor gap gets pulled out as a
+    branch rather than counted as part of the main chronological trunk.
+    Needs >=3 members to have a meaningful "typical gap" to compare against.
     """
-    clusters_sorted = sorted(clusters, key=lambda c: c.first_seen_at)
-    max_gap = timedelta(days=days)
-    threads: List[AnchoredThread] = []
+    if len(sub_cluster) < 3:
+        return sub_cluster, []
 
-    for cluster in clusters_sorted:
-        best_thread = None
-        best_score = 0.0
-        best_shared: Set[str] = set()
+    times = [c.first_seen_at for c in sub_cluster]
+    nn_gaps = []
+    for i in range(len(sub_cluster)):
+        candidates = []
+        if i > 0:
+            candidates.append(times[i] - times[i - 1])
+        if i < len(sub_cluster) - 1:
+            candidates.append(times[i + 1] - times[i])
+        nn_gaps.append(min(candidates))
 
-        for thread in threads:
-            if cluster.first_seen_at - thread.root.first_seen_at > max_gap:
-                continue
-            shared = cluster.entity_keys & thread.root_entities
-            if len(shared) < min_shared:
-                continue
-            total_weight = sum(weights.get(k, 1.0) for k in shared)
-            norm = math.sqrt(len(cluster.entity_keys) * len(thread.root_entities))
-            score = total_weight / norm if norm > 0 else 0.0
-            if score >= threshold and score > best_score:
-                best_score, best_thread, best_shared = score, thread, shared
+    sorted_gaps = sorted(g.total_seconds() for g in nn_gaps)
+    median_gap = sorted_gaps[len(sorted_gaps) // 2]
+    if median_gap <= 0:
+        median_gap = 60.0  # 1 minute floor so a burst of near-simultaneous items doesn't flag everything
 
-        if best_thread is not None:
-            best_thread.members.append((cluster, best_score, best_shared))
-            best_thread.last_seen = cluster.first_seen_at
+    trunk, branches = [], []
+    for cluster, gap in zip(sub_cluster, nn_gaps):
+        if gap.total_seconds() > median_gap * outlier_gap_multiplier:
+            branches.append(cluster)
         else:
-            threads.append(AnchoredThread(
-                root=cluster, root_entities=cluster.entity_keys, last_seen=cluster.first_seen_at,
-            ))
-
-    return threads
+            trunk.append(cluster)
+    return trunk, branches
 
 
-def print_anchored_chains(threads: List[AnchoredThread], limit: int, min_gap_hours: float) -> None:
-    min_gap = timedelta(hours=min_gap_hours)
-    multi = [t for t in threads if t.members]
-    multi.sort(key=lambda t: len(t.members), reverse=True)
-    print(f"\n{len(multi)} root-anchored chains (of {len(threads)} total roots), "
-          f"largest first — showing up to {limit}:\n")
-    for thread in multi[:limit]:
-        print(f"=== chain of {len(thread.members) + 1} clusters, root #{thread.root.id} ===")
-        when = thread.root.first_seen_at.strftime("%Y-%m-%d %H:%M")
-        print(f"  [{when}] #{thread.root.id:6d} {thread.root.headline[:90]}")
-        previous_seen = thread.root.first_seen_at
-        for cluster, score, shared in sorted(thread.members, key=lambda m: m[0].first_seen_at):
+# ------------------------------------------------ Node 10/11: importance --
+
+def score_importance(
+    trunk: List[Cluster], reactivation_ratio: float, half_life: timedelta,
+) -> float:
+    """
+    Node 10: per-hop hotness = distinct_source_count (coverage breadth) x
+    reactivation_ratio (is the actor spiking above its own baseline right
+    now — entity_stats.mention_count_decayed / baseline_rate, constant per
+    topic group). Node 11: EMA over trunk hops in time order, same
+    normalized-EMA formula poller.py already uses for entity_stats, so
+    recent/well-covered/spiking hops dominate and old ones fade — routine
+    content (a daily lottery result, a recurring gadget-spec drop) never
+    spikes, so its EMA importance stays low without a dedicated "is this
+    junk" rule.
+    """
+    if not trunk:
+        return 0.0
+    ema = trunk[0].distinct_source_count * reactivation_ratio
+    previous_time = trunk[0].first_seen_at
+    for cluster in trunk[1:]:
+        hotness = cluster.distinct_source_count * reactivation_ratio
+        elapsed = cluster.first_seen_at - previous_time
+        ema = ema_update(ema, elapsed, half_life, hotness)
+        previous_time = cluster.first_seen_at
+    return ema
+
+
+# --------------------------------------------------------------- printing --
+
+def print_chains(
+    sub_clusters: List[SubCluster], limit: int, entity_stats: Dict[str, Tuple[float, float, str]],
+) -> None:
+    sub_clusters = [sc for sc in sub_clusters if len(sc.trunk) >= 2]
+    sub_clusters.sort(key=lambda sc: sc.importance, reverse=True)
+    print(f"\n{len(sub_clusters)} story chains (trunk length >= 2), ranked by EMA importance, "
+          f"showing up to {limit}:\n")
+    for sc in sub_clusters[:limit]:
+        ratio = None
+        if sc.topic_group.actor in entity_stats:
+            decayed, baseline, _ = entity_stats[sc.topic_group.actor]
+            ratio = decayed / max(baseline, 0.05)
+        ratio_str = f", reactivation={ratio:.2f}" if ratio is not None else ""
+        print(f"=== actor: {sc.topic_group.actor_display}  importance={sc.importance:.2f}{ratio_str} "
+              f"(trunk={len(sc.trunk)}, branches={len(sc.branches)}) ===")
+        for cluster in sc.trunk:
             when = cluster.first_seen_at.strftime("%Y-%m-%d %H:%M")
-            shared_names = ", ".join(k.split(":", 1)[1] for k in list(shared)[:4])
-            burst_tag = " [same burst]" if cluster.first_seen_at - previous_seen < min_gap else ""
-            print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}{burst_tag}")
-            print(f"      └─ vs root, score={score:.2f}, shared: {shared_names}")
-            previous_seen = cluster.first_seen_at
+            print(f"  [{when}] #{cluster.id:6d} (sources={cluster.distinct_source_count}) {cluster.headline[:85]}")
+        for cluster in sc.branches:
+            when = cluster.first_seen_at.strftime("%Y-%m-%d %H:%M")
+            print(f"      ↳ branch [{when}] #{cluster.id:6d} {cluster.headline[:80]}")
         print()
 
 
-def write_csv(pairs: List[CandidatePair], path: str) -> None:
-    with open(path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ["score", "gap_days", "cluster_a_id", "cluster_a_headline",
-             "cluster_b_id", "cluster_b_headline", "shared_entities"]
-        )
-        for pair in pairs:
-            gap_days = (pair.later.first_seen_at - pair.earlier.first_seen_at).total_seconds() / 86400
-            shared_names = "; ".join(k.split(":", 1)[1] for k, _ in pair.shared)
-            writer.writerow(
-                [f"{pair.score:.4f}", f"{gap_days:.2f}", pair.earlier.id, pair.earlier.headline,
-                 pair.later.id, pair.later.headline, shared_names]
-            )
-    print(f"Wrote {len(pairs)} candidate pairs to {path}")
-
+# --------------------------------------------------------------------- main --
 
 async def main(
-    days: int, threshold: float, limit: int, csv_path: Optional[str], min_shared: int,
-    min_gap_hours: float, chains: bool, max_df_ratio: float,
+    days: int, limit: int, generic_percentile: float, max_df_ratio: float,
+    subsumption_ratio: float, min_shared: int, outlier_gap_multiplier: float,
+    half_life_hours: float,
 ) -> None:
     async with engine.begin() as conn:
         clusters = await load_clusters(conn, days)
+        entity_stats = await load_entity_stats(conn)
 
-    if max_df_ratio < 1.0:
-        prune_generic_entities(clusters, max_df_ratio)
+    print(f"Loaded {len(clusters)} clusters from the last {days} days "
+          f"and {len(entity_stats)} entity_stats rows.")
+
+    is_generic = build_generic_check(clusters, entity_stats, generic_percentile, max_df_ratio)
+    topic_groups = select_topic_groups(clusters, is_generic, subsumption_ratio)
+    print(f"{len(topic_groups)} topic groups survived generic-entity filtering + subsumption.")
 
     weights = compute_idf_weights(clusters)
-    print(f"Loaded {len(clusters)} clusters from the last {days} days "
-          f"and {len(weights)} distinct entity keys (in-set IDF weighting).")
+    half_life = timedelta(hours=half_life_hours)
 
-    if chains:
-        threads = build_anchored_chains(clusters, weights, min_shared, days, threshold)
-        print_anchored_chains(threads, limit, min_gap_hours)
-        return
+    sub_clusters: List[SubCluster] = []
+    for group in topic_groups:
+        for raw_sub in sub_cluster_topic_group(group, weights, min_shared):
+            trunk, branches = split_outliers(raw_sub, outlier_gap_multiplier)
+            ratio = 1.0
+            if group.actor in entity_stats:
+                decayed, baseline, _ = entity_stats[group.actor]
+                ratio = decayed / max(baseline, 0.05)
+            importance = score_importance(trunk, ratio, half_life)
+            sub_clusters.append(SubCluster(topic_group=group, trunk=trunk, branches=branches, importance=importance))
 
-    pairs = score_pairs(clusters, weights, days, min_shared, min_gap_hours)
-    pairs = [p for p in pairs if p.score >= threshold]
-
-    if csv_path:
-        write_csv(pairs, csv_path)
-    else:
-        print_pairs(pairs, limit)
+    print_chains(sub_clusters, limit, entity_stats)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=60, help="Lookback window in days (default: 60)")
-    parser.add_argument("--threshold", type=float, default=0.1, help="Minimum score to print (default: 0.1)")
-    parser.add_argument("--limit", type=int, default=100, help="Max pairs to print to stdout (default: 100)")
-    parser.add_argument("--csv", type=str, default=None, help="Write all pairs above threshold to this CSV path instead of stdout")
-    parser.add_argument("--min-shared", type=int, default=2, help="Minimum shared entities to count as a candidate pair (default: 2)")
-    parser.add_argument("--min-gap-hours", type=float, default=0.0, help="Flat-pair mode: minimum gap to count as a candidate pair at all. Chains mode: hops closer together than this are tagged '[same burst]' rather than excluded (default: 0)")
-    parser.add_argument("--chains", action="store_true", help="Group candidate pairs into connected-component chains (one predecessor per cluster) instead of printing a flat pair list")
-    parser.add_argument("--max-df-ratio", type=float, default=0.015, help="Drop entities appearing in more than this fraction of loaded clusters before matching (default: 0.015, i.e. ~1.5%%); pass 1.0 to disable")
+    parser.add_argument("--limit", type=int, default=30, help="Max chains to print, ranked by importance (default: 30)")
+    parser.add_argument("--generic-percentile", type=float, default=0.95, help="Entities at/above this percentile of entity_stats.baseline_rate are treated as generic (default: 0.95)")
+    parser.add_argument("--max-df-ratio", type=float, default=0.015, help="Fallback genericness cutoff (in-set doc frequency) for entities with no entity_stats row yet (default: 0.015)")
+    parser.add_argument("--subsumption-ratio", type=float, default=0.8, help="A topic group >= this fraction contained in a larger already-kept group is dropped (default: 0.8)")
+    parser.add_argument("--min-shared", type=int, default=1, help="Node 7: minimum secondary (non-actor) shared entities to sub-cluster two members together (default: 1)")
+    parser.add_argument("--outlier-gap-multiplier", type=float, default=4.0, help="Node 8: a member is an outlier branch if its nearest-neighbor gap exceeds this multiple of the sub-cluster's median gap (default: 4.0)")
+    parser.add_argument("--half-life-hours", type=float, default=48.0, help="Node 11: EMA half-life for chain importance (default: 48)")
     args = parser.parse_args()
 
-    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared, args.min_gap_hours, args.chains, args.max_df_ratio))
+    asyncio.run(main(
+        args.days, args.limit, args.generic_percentile, args.max_df_ratio,
+        args.subsumption_ratio, args.min_shared, args.outlier_gap_multiplier,
+        args.half_life_hours,
+    ))
