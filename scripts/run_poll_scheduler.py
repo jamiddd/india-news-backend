@@ -1,5 +1,17 @@
-"""Prepare the AI poll draft at 04:30 and publish at 09:00 Asia/Kolkata."""
+"""Prepare the AI poll draft at 04:30 and publish at 09:00 Asia/Kolkata.
+
+Usage:
+    python3 scripts/run_poll_scheduler.py               # normal daemon loop
+    python3 scripts/run_poll_scheduler.py --notify-test  # fire the admin FCM
+                                                          # push right now and
+                                                          # exit, using today's
+                                                          # draft/active poll
+                                                          # if one exists or a
+                                                          # throwaway stand-in
+                                                          # question otherwise
+"""
 import asyncio
+import sys
 from datetime import datetime, time, timedelta
 
 from sqlalchemy import select, text
@@ -19,6 +31,19 @@ async def prepare(day):
                 await notify_admin_draft_ready(session, poll)
         except Exception as exc:
             print(f"Poll draft failed for {day}: {exc}", flush=True)
+
+
+async def notify_test():
+    async with AsyncSessionLocal() as session:
+        today = datetime.now(IST).date()
+        poll = await session.scalar(select(DailyPoll).where(DailyPoll.poll_date == today))
+        if poll is None:
+            # Not persisted — notify_admin_draft_ready only reads .question,
+            # so a throwaway in-memory stand-in is enough to test delivery
+            # without touching real poll data.
+            poll = DailyPoll(question="[Test] Is this notification working?")
+        await notify_admin_draft_ready(session, poll)
+        print(f"Sent test notification (poll question: {poll.question!r})", flush=True)
 
 
 async def publish(day):
@@ -50,4 +75,5 @@ async def main():
         else: await publish(next_run.date())
 
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(notify_test() if "--notify-test" in sys.argv else main())
