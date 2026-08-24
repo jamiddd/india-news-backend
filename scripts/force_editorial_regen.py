@@ -21,7 +21,12 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models import DailyEditorial
-from app.services.editorial_features import _recent_words_and_authors, generate_word_and_quote
+from app.services.editorial_features import (
+    BACKGROUND_QUERIES,
+    _fetch_background_image,
+    _recent_words_and_authors,
+    generate_word_and_quote,
+)
 
 
 async def main(target_date: date):
@@ -32,11 +37,16 @@ async def main(target_date: date):
         print(f"word: {word['word']}")
         print(f"quote: {quote['quote']!r} — {quote['author']}")
 
+        background_query = BACKGROUND_QUERIES[target_date.toordinal() % len(BACKGROUND_QUERIES)]
+        background_image = await _fetch_background_image(background_query)
+        print(f"background_image: {background_image}")
+
         result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == target_date))
         existing = result.scalar_one_or_none()
         if existing is not None:
             existing.word = word
             existing.quote = quote
+            existing.background_image = background_image
             await session.commit()
             print(f"Updated existing row for {target_date}.")
         else:

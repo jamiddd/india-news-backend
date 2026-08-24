@@ -5,10 +5,26 @@ import httpx
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import DailyEditorial
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
+
+# Rotated by date ordinal so the Quote of the Day background varies day to
+# day without needing to parse the quote text for a topic. Kept deliberately
+# mood/abstract rather than literal — it's a backdrop behind text, not
+# illustration of the quote's content.
+BACKGROUND_QUERIES = [
+    "moody nature landscape",
+    "dark abstract texture",
+    "night sky stars",
+    "misty mountains",
+    "ocean waves dark",
+    "minimalist shadow",
+    "forest silhouette",
+    "city lights night",
+]
 
 WORDS = [
     {"word":"SERENDIPITY","pronunciation":"seh-ruhn-DIP-uh-tee","part_of_speech":"noun","definition":"The fortunate discovery of something valuable or interesting by chance.","example":"Finding the quiet bookshop was a moment of pure serendipity.","origin":"Coined by Horace Walpole in 1754 from the tale The Three Princes of Serendip."},
@@ -49,6 +65,33 @@ async def _fetch_events(day: date) -> list[dict]:
     if not events:
         raise RuntimeError("Wikimedia returned no historical events")
     return events
+
+
+async def _fetch_background_image(query: str) -> dict | None:
+    """Best-effort — returns None (no key, request failure, no results) and
+    the app falls back to a plain gradient background. Attribution links
+    carry Unsplash's required utm params; on-screen photographer credit is
+    the app's responsibility (Unsplash API guidelines), not this function's."""
+    if not settings.UNSPLASH_ACCESS_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                "https://api.unsplash.com/photos/random",
+                params={"query": query, "orientation": "portrait", "content_filter": "high"},
+                headers={"Authorization": f"Client-ID {settings.UNSPLASH_ACCESS_KEY}", "Accept-Version": "v1"},
+            )
+            response.raise_for_status()
+            data = response.json()
+        return {
+            "url": data["urls"]["regular"],
+            "photographer": data["user"]["name"],
+            "photographer_url": f"{data['user']['links']['html']}?utm_source=openindiannews&utm_medium=referral",
+            "unsplash_url": f"{data['links']['html']}?utm_source=openindiannews&utm_medium=referral",
+        }
+    except Exception as exc:
+        logger.warning("Unsplash background fetch failed: %s", exc)
+        return None
 
 
 def _validate_word_and_quote(payload: dict) -> tuple[dict, dict]:
@@ -140,10 +183,12 @@ async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> 
         return existing
     recent_words, recent_authors = await _recent_words_and_authors(session, feature_date)
     word, quote, _ = await generate_word_and_quote(feature_date, recent_words, recent_authors)
+    background_query = BACKGROUND_QUERIES[feature_date.toordinal() % len(BACKGROUND_QUERIES)]
     row = DailyEditorial(
         feature_date=feature_date,
         word=word,
         quote=quote,
+        background_image=await _fetch_background_image(background_query),
         historical_events=await _fetch_events(feature_date),
     )
     session.add(row)

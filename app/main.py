@@ -222,6 +222,10 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(f"SELECT pg_advisory_lock({SCHEMA_LOCK_KEY})"))
         try:
             await conn.run_sync(Base.metadata.create_all)
+            # create_all only adds missing *tables*, not columns on tables
+            # that already exist — daily_editorial_features predates
+            # background_image, so add it here idempotently on every startup.
+            await conn.execute(text("ALTER TABLE daily_editorial_features ADD COLUMN IF NOT EXISTS background_image JSON"))
         finally:
             await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
@@ -528,7 +532,7 @@ async def word_of_the_day(request: Request, date: str | None = Query(None), db: 
 @limiter.limit("30/minute")
 async def quote_of_the_day(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     feature = await get_or_create_editorial(db, resolve_puzzle_date(date))
-    return {"date": feature.feature_date, **feature.quote}
+    return {"date": feature.feature_date, **feature.quote, "background_image": feature.background_image}
 
 
 @app.get(f"{settings.API_V1_STR}/on-this-day", response_model=OnThisDayOut)

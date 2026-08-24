@@ -202,10 +202,18 @@ class WordOfTheDayOut(BaseModel):
     origin: str
 
 
+class BackgroundImageOut(BaseModel):
+    url: str
+    photographer: str
+    photographer_url: str
+    unsplash_url: str
+
+
 class QuoteOfTheDayOut(BaseModel):
     date: date
     quote: str
     author: str
+    background_image: Optional[BackgroundImageOut] = None
 
 
 class HistoricalEventOut(BaseModel):

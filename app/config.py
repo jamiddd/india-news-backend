@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
+    # Unsplash — background photo for Quote of the Day. Free tier (50
+    # req/hour on the "Demo" access tier), created at unsplash.com/developers.
+    # Absent key = feature no-ops (app falls back to a plain gradient).
+    UNSPLASH_ACCESS_KEY: Optional[str] = None
+
     # Daily sign-level horoscope provider. Kept server-side so the provider
     # can be changed or the feature disabled without releasing a new app.
     ASTROJSON_API_KEY: Optional[str] = None
