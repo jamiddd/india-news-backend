@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 from sqlalchemy import select, text
@@ -68,23 +68,55 @@ def _validate_word_and_quote(payload: dict) -> tuple[dict, dict]:
     return word_out, quote_out
 
 
-async def generate_word_and_quote(feature_date: date) -> tuple[dict, dict, str]:
+async def _recent_words_and_authors(session: AsyncSession, feature_date: date, days: int = 21) -> tuple[list[str], list[str]]:
+    """Look back `days` days (excluding feature_date itself) for words/authors
+    already used, so the prompt can steer Claude away from repeating them —
+    without this, a small/cheap model tends to collapse onto the same
+    "obvious" answer (e.g. SERENDIPITY, a Steve Jobs quote) regardless of
+    the date, since nothing else in the prompt varies the content."""
+    start = feature_date - timedelta(days=days)
+    result = await session.execute(
+        select(DailyEditorial.word, DailyEditorial.quote)
+        .where(DailyEditorial.feature_date >= start, DailyEditorial.feature_date < feature_date)
+    )
+    words, authors = [], []
+    for word, quote in result.all():
+        if word and word.get("word"):
+            words.append(str(word["word"]))
+        if quote and quote.get("author"):
+            authors.append(str(quote["author"]))
+    return words, authors
+
+
+async def generate_word_and_quote(feature_date: date, recent_words: list[str] | None = None, recent_authors: list[str] | None = None) -> tuple[dict, dict, str]:
     """Ask Claude for a fresh word-of-the-day + quote-of-the-day pair. Falls
     back to the curated WORDS/QUOTES banks, deterministically picked by
     date, on failure — same resilience pattern as
     word_search.generate_theme_and_words."""
+    avoid = ""
+    if recent_words:
+        avoid += f" Do not reuse any of these recent words: {', '.join(recent_words)}."
+    if recent_authors:
+        avoid += f" Prefer an author not in this recent list: {', '.join(recent_authors)}."
     system = (
         "You generate content for a daily 'Word of the Day' and 'Quote of the Day' "
         "feature in a general-audience news app. Pick an interesting, moderately "
         "advanced English word (not obscure or offensive) and a real, attributable "
         "inspirational or thought-provoking quote from a known historical or public "
-        "figure. Return JSON only: "
+        "figure. Vary your picks meaningfully day to day — avoid always reaching for "
+        "the single most predictable/cliché answer (e.g. 'serendipity', a generic "
+        f"Steve Jobs quote).{avoid} Return JSON only: "
         '{"word": {"word": "...", "pronunciation": "phonetic spelling", '
         '"part_of_speech": "noun/verb/adjective/etc", "definition": "...", '
         '"example": "a sentence using the word", "origin": "brief etymology"}, '
         '"quote": {"quote": "the quote text", "author": "who said it"}}'
     )
-    data = await call_claude_json(system=system, user_content=f"Generate the word and quote of the day for {feature_date.isoformat()}.", max_tokens=800)
+    data = await call_claude_json(
+        system=system,
+        user_content=f"Generate the word and quote of the day for {feature_date.isoformat()}.",
+        max_tokens=800,
+        temperature=1.0,
+    )
     if data is not None:
         try:
             return (*_validate_word_and_quote(data), "ai")
@@ -106,7 +138,8 @@ async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> 
     existing = result.scalar_one_or_none()
     if existing:
         return existing
-    word, quote, _ = await generate_word_and_quote(feature_date)
+    recent_words, recent_authors = await _recent_words_and_authors(session, feature_date)
+    word, quote, _ = await generate_word_and_quote(feature_date, recent_words, recent_authors)
     row = DailyEditorial(
         feature_date=feature_date,
         word=word,

@@ -21,12 +21,13 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models import DailyEditorial
-from app.services.editorial_features import generate_word_and_quote
+from app.services.editorial_features import _recent_words_and_authors, generate_word_and_quote
 
 
 async def main(target_date: date):
     async with AsyncSessionLocal() as session:
-        word, quote, source = await generate_word_and_quote(target_date)
+        recent_words, recent_authors = await _recent_words_and_authors(session, target_date)
+        word, quote, source = await generate_word_and_quote(target_date, recent_words, recent_authors)
         print(f"source: {source}")
         print(f"word: {word['word']}")
         print(f"quote: {quote['quote']!r} — {quote['author']}")
