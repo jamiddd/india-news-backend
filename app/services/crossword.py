@@ -238,18 +238,22 @@ def _can_place(grid: list[list[str | None]], answer: str, row: int, col: int, di
     return crossings > 0 if require_crossing else True
 
 
-def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
-    base_seed = int(puzzle_date.strftime("%Y%m%d"))
+def _pack_word_bank(word_bank: list[tuple[str, str]], base_seed: int) -> tuple[list[list[str | None]], list[dict[str, Any]]]:
+    """Greedily place (answer, clue) pairs into an SIZExSIZE grid, crossing
+    words where possible. Order-sensitive, so try several deterministic
+    shuffles and keep the densest result. Returns (grid, placed) — placed may
+    have fewer than 8 entries if word_bank doesn't pack well; caller decides
+    what "too few" means for its use case.
+    """
     best_grid: list[list[str | None]] = []
     best_placed: list[dict[str, Any]] = []
+    long_enough = [item for item in word_bank if 6 <= len(item[0]) <= 9]
+    if not long_enough:
+        return [[None for _ in range(SIZE)] for _ in range(SIZE)], []
 
-    # Greedy crossword packing is order-sensitive. Try several deterministic
-    # shuffles and keep the densest result; the date still uniquely determines
-    # the final board, while a poor first shuffle can no longer force the old
-    # word-square fallback.
     for packing_attempt in range(24):
         rng = random.Random(base_seed + packing_attempt * 7919)
-        candidates = list(WORD_BANK)
+        candidates = list(word_bank)
         rng.shuffle(candidates)
         grid: list[list[str | None]] = [[None for _ in range(SIZE)] for _ in range(SIZE)]
         placed: list[dict[str, Any]] = []
@@ -288,12 +292,10 @@ def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
         if len(best_placed) >= 14:
             break
 
-    if len(best_placed) < 8:
-        logger.error("Algorithmic crossword placed only %s entries; using legacy fallback", len(best_placed))
-        return legacy_fallback_puzzle()
+    return best_grid, best_placed
 
-    grid, placed = best_grid, best_placed
 
+def _grid_to_puzzle(grid: list[list[str | None]], placed: list[dict[str, Any]]) -> dict[str, Any]:
     rows = ["".join(cell or "#" for cell in row) for row in grid]
     computed = _entries(rows)
     clue_by_slot = {(item["row"], item["col"], item["direction"]): item["clue"] for item in placed}
@@ -308,48 +310,74 @@ def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
     return validate_and_normalize({"rows": rows, "clues": clues}, require_symmetry=False)
 
 
+def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
+    base_seed = int(puzzle_date.strftime("%Y%m%d"))
+    grid, placed = _pack_word_bank(WORD_BANK, base_seed)
+    if len(placed) < 8:
+        logger.error("Algorithmic crossword placed only %s entries; using legacy fallback", len(placed))
+        return legacy_fallback_puzzle()
+    return _grid_to_puzzle(grid, placed)
+
+
+_WORD_RE = re.compile(r"^[A-Z]{3,9}$")
+
+
+async def _ai_word_bank(puzzle_date: date) -> list[tuple[str, str]] | None:
+    """Ask Claude for a fresh word+clue list only — no grid layout, no
+    symmetry math. 2026-08-24: asking the model to lay out the actual 11x11
+    symmetric grid repeatedly failed (wrong dimensions, broken symmetry, or —
+    even at bounded effort — burning the whole token budget on reasoning
+    with no output at all). The grid math is exactly what
+    _pack_word_bank/algorithmic_fallback_puzzle already does reliably in
+    plain Python, so let the model contribute only what it's actually good
+    at: varied vocabulary and clues.
+    """
+    prompt = """Generate 30 crossword answer words with clues for a medium-difficulty, general-knowledge American-style crossword.
+Return JSON only: {"words": [{"answer": "EXAMPLE", "clue": "A sample or instance"}, ...]}
+
+Requirements:
+1. Exactly 30 entries.
+2. Each "answer" is 3 to 9 uppercase letters A-Z only, no spaces, hyphens, or punctuation.
+3. No duplicate answers.
+4. A good mix of lengths from 3 to 9 letters (include several 6-9 letter words, since those anchor the grid).
+5. Clues are clear, factual, and family-friendly — one sentence, no fill-in-the-blank."""
+    data = await call_claude_json(
+        system="", user_content=prompt, model="claude-sonnet-5", max_tokens=2000,
+        temperature=None, attempts=2, timeout=45,
+    )
+    if data is None:
+        return None
+    raw_words = data.get("words") if isinstance(data, dict) else None
+    if not isinstance(raw_words, list):
+        return None
+    seen: set[str] = set()
+    bank: list[tuple[str, str]] = []
+    for item in raw_words:
+        if not isinstance(item, dict):
+            continue
+        answer = str(item.get("answer", "")).upper().strip()
+        clue = str(item.get("clue", "")).strip()
+        if not _WORD_RE.match(answer) or not clue or answer in seen:
+            continue
+        seen.add(answer)
+        bank.append((answer, clue))
+    return bank if len(bank) >= 12 else None
+
+
 async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
-    # Tightened 2026-08-24: "rows" being anything other than exactly 11x11
-    # was by far the most common validation failure (see validate_and_normalize's
-    # "Crossword must be exactly 11x11"), so the size requirement and a
-    # self-check are called out repeatedly and up front rather than buried
-    # inside the JSON schema description.
-    prompt = """Create a medium general-knowledge American-style crossword grid that is EXACTLY 11 rows by 11 columns — no more, no fewer. Return JSON only:
-{"rows": [11 strings, each EXACTLY 11 characters of A-Z or "#"], "clues": [{"number": 1, "direction": "across", "clue": "..."}]}
-
-Hard requirements — verify each one before answering:
-1. "rows" has exactly 11 elements.
-2. Every element of "rows" is exactly 11 characters long. Do not pad, truncate, or return more/fewer rows or columns than 11 — this is the single most common mistake, check it carefully.
-3. Symmetry: for every cell (r, c) using 0-indexed rows/cols 0-10, it is "#" if and only if cell (10-r, 10-c) is also "#". This is 180-degree rotational symmetry.
-4. Every open (non-"#") cell is part of an Across or Down answer of at least 3 letters, and the grid is fully connected.
-5. Clues: exactly one clue per Across and Down entry, numbered in standard row-major crossword order (scan left-to-right, top-to-bottom; a cell gets a number if it starts an Across and/or Down entry there).
-6. Clues must be clear, factual, and family-friendly.
-
-Before returning your final answer, count the characters in each of the 11 "rows" strings one more time to confirm each one is exactly 11 characters — this check is required, not optional."""
-    # Symmetry checking genuinely benefits from step-by-step reasoning, so
-    # thinking stays ON here (unlike the other daily games) — but two prior
-    # failure modes had to be fixed together:
-    #   - unbounded adaptive thinking (2026-08-24) burned the entire
-    #     max_tokens budget on reasoning, leaving zero text output
-    #   - disabling thinking entirely (2026-08-24) made the model leak raw
-    #     "<think>" reasoning as plain text instead of real JSON
-    # Fix: bound thinking with effort="low" instead of disabling it outright,
-    # keep the anti-tag-leak instruction as a belt-and-suspenders guard, and
-    # give a generous max_tokens so bounded thinking + full output both fit.
-    system = "Do not include internal or system XML tags (such as <think>) in your response. Respond with the final JSON only, nothing else."
-    for attempt in range(3):
-        # Sonnet, not the other daily games' Haiku default — see call_claude_json's
-        # docstring in llm_gen.py for why crossword needs the stronger model.
-        data = await call_claude_json(
-            system=system, user_content=prompt, model="claude-sonnet-5", max_tokens=10000,
-            temperature=None, effort="low", attempts=1, timeout=300,
-        )
-        if data is None:
-            break  # no API key configured / transport failure — retrying won't help
-        try:
-            return validate_and_normalize(data), "ai"
-        except Exception as exc:
-            logger.warning("Crossword generation attempt %s failed validation: %s", attempt + 1, exc)
+    # See _ai_word_bank's docstring for why this only asks the model for
+    # words+clues rather than the full grid.
+    word_bank = await _ai_word_bank(puzzle_date)
+    if word_bank is not None:
+        base_seed = int(puzzle_date.strftime("%Y%m%d"))
+        grid, placed = _pack_word_bank(word_bank, base_seed)
+        if len(placed) >= 8:
+            try:
+                return _grid_to_puzzle(grid, placed), "ai"
+            except Exception as exc:
+                logger.warning("Crossword AI word bank packed but failed validation: %s", exc)
+        else:
+            logger.warning("Crossword AI word bank only packed %s entries", len(placed))
     return algorithmic_fallback_puzzle(puzzle_date), "algorithmic"
 
 
