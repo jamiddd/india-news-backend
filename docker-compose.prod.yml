@@ -58,3 +58,10 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ADMIN_USER_EMAIL=${ADMIN_USER_EMAIL:-}
+      - ADMIN_POLL_REVIEW_URL=${ADMIN_POLL_REVIEW_URL:-https://openindiannews.com/admin/polls}
+      # Needed to send the admin draft-ready FCM push — see
+      # notify_admin_draft_ready() in app/services/polls.py.
+      - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+    volumes:
+      - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
