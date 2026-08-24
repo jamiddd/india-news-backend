@@ -22,10 +22,26 @@ a single shared entity (e.g. both stories merely mention "Apple") produced
 massive false-positive fan-out in the first pass — two clusters need to
 agree on at least 2 entities to be considered a candidate pair at all.
 
+A minimum time gap (--min-gap-hours, default 0) is available to separate two
+different populations that both show up in the scored pairs: same-day
+near-duplicate coverage of one event (minutes-to-hours apart — arguably a
+missed dedup, not a "story so far" edge) vs. genuine multi-day narrative
+development (a legal case, a public feud, a follow-up report days later).
+Raise it to focus on the latter.
+
+Chain building: candidate pairs above --threshold form edges; connected
+components (union-find) group clusters that are plausibly "the same story."
+Within each component, each cluster keeps only its single highest-scoring
+earlier predecessor, collapsing what would otherwise be a dense blob (e.g.
+every Apple story linked to every other Apple story) into an actual
+chronological chain/tree per component — this is what a "story so far"
+timeline would walk.
+
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
     python3 scripts/experiment_story_edges.py --days 60 --threshold 0.15 --limit 100
     python3 scripts/experiment_story_edges.py --min-shared 3 --csv /tmp/story_edges.csv
+    python3 scripts/experiment_story_edges.py --min-gap-hours 12 --chains
 """
 import argparse
 import asyncio
@@ -113,7 +129,8 @@ def compute_idf_weights(clusters: List[Cluster]) -> Dict[str, float]:
 
 
 def score_pairs(
-    clusters: List[Cluster], weights: Dict[str, float], days: int, min_shared: int
+    clusters: List[Cluster], weights: Dict[str, float], days: int, min_shared: int,
+    min_gap_hours: float = 0.0,
 ) -> List[CandidatePair]:
     # Inverted index: entity_key -> cluster ids that mention it, so we only
     # ever compare clusters that share at least one entity.
@@ -123,6 +140,7 @@ def score_pairs(
             index[key].append(cluster)
 
     max_gap = timedelta(days=days)
+    min_gap = timedelta(hours=min_gap_hours)
     seen_pairs: Set[Tuple[int, int]] = set()
     pairs: List[CandidatePair] = []
 
@@ -138,7 +156,8 @@ def score_pairs(
                 pair_key = (earlier.id, later.id)
                 if pair_key in seen_pairs:
                     continue
-                if later.first_seen_at - earlier.first_seen_at > max_gap:
+                gap = later.first_seen_at - earlier.first_seen_at
+                if gap > max_gap or gap < min_gap:
                     continue
                 seen_pairs.add(pair_key)
 
@@ -175,6 +194,76 @@ def print_pairs(pairs: List[CandidatePair], limit: int) -> None:
         print()
 
 
+class UnionFind:
+    def __init__(self) -> None:
+        self.parent: Dict[int, int] = {}
+
+    def find(self, x: int) -> int:
+        self.parent.setdefault(x, x)
+        while self.parent[x] != x:
+            self.parent[x] = self.parent[self.parent[x]]
+            x = self.parent[x]
+        return x
+
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.parent[ra] = rb
+
+
+def build_chains(pairs: List[CandidatePair]) -> Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]]:
+    """
+    Group clusters into connected components (union-find over candidate
+    pairs), then within each component keep only each cluster's single
+    highest-scoring earlier predecessor edge — collapsing a dense blob of
+    pairwise links into an actual chronological chain/tree.
+
+    Returns component_root_id -> [(cluster, edge_from_predecessor_or_None), ...]
+    sorted by first_seen_at, for printing as a timeline.
+    """
+    uf = UnionFind()
+    clusters_by_id: Dict[int, Cluster] = {}
+    for pair in pairs:
+        clusters_by_id[pair.earlier.id] = pair.earlier
+        clusters_by_id[pair.later.id] = pair.later
+        uf.union(pair.earlier.id, pair.later.id)
+
+    best_predecessor: Dict[int, CandidatePair] = {}
+    for pair in pairs:
+        existing = best_predecessor.get(pair.later.id)
+        if existing is None or pair.score > existing.score:
+            best_predecessor[pair.later.id] = pair
+
+    components: Dict[int, List[int]] = defaultdict(list)
+    for cluster_id in clusters_by_id:
+        components[uf.find(cluster_id)].append(cluster_id)
+
+    chains: Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]] = {}
+    for root, member_ids in components.items():
+        members = sorted(
+            (clusters_by_id[cid] for cid in member_ids), key=lambda c: c.first_seen_at
+        )
+        chains[root] = [(c, best_predecessor.get(c.id)) for c in members]
+    return chains
+
+
+def print_chains(chains: Dict[int, List[Tuple[Cluster, Optional[CandidatePair]]]], limit: int) -> None:
+    ordered = sorted(chains.values(), key=len, reverse=True)
+    print(f"\n{len(ordered)} story chains (connected components), largest first "
+          f"— showing up to {limit}:\n")
+    for chain in ordered[:limit]:
+        print(f"=== chain of {len(chain)} clusters ===")
+        for cluster, edge in chain:
+            when = cluster.first_seen_at.strftime("%Y-%m-%d %H:%M")
+            if edge is None:
+                print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
+            else:
+                shared_names = ", ".join(k.split(":", 1)[1] for k, _ in edge.shared[:4])
+                print(f"  [{when}] #{cluster.id:6d} {cluster.headline[:90]}")
+                print(f"      └─ from #{edge.earlier.id} (score={edge.score:.2f}, shared: {shared_names})")
+        print()
+
+
 def write_csv(pairs: List[CandidatePair], path: str) -> None:
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -192,7 +281,10 @@ def write_csv(pairs: List[CandidatePair], path: str) -> None:
     print(f"Wrote {len(pairs)} candidate pairs to {path}")
 
 
-async def main(days: int, threshold: float, limit: int, csv_path: Optional[str], min_shared: int) -> None:
+async def main(
+    days: int, threshold: float, limit: int, csv_path: Optional[str], min_shared: int,
+    min_gap_hours: float, chains: bool,
+) -> None:
     async with engine.begin() as conn:
         clusters = await load_clusters(conn, days)
 
@@ -200,10 +292,12 @@ async def main(days: int, threshold: float, limit: int, csv_path: Optional[str],
     print(f"Loaded {len(clusters)} clusters from the last {days} days "
           f"and {len(weights)} distinct entity keys (in-set IDF weighting).")
 
-    pairs = score_pairs(clusters, weights, days, min_shared)
+    pairs = score_pairs(clusters, weights, days, min_shared, min_gap_hours)
     pairs = [p for p in pairs if p.score >= threshold]
 
-    if csv_path:
+    if chains:
+        print_chains(build_chains(pairs), limit)
+    elif csv_path:
         write_csv(pairs, csv_path)
     else:
         print_pairs(pairs, limit)
@@ -216,6 +310,8 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=100, help="Max pairs to print to stdout (default: 100)")
     parser.add_argument("--csv", type=str, default=None, help="Write all pairs above threshold to this CSV path instead of stdout")
     parser.add_argument("--min-shared", type=int, default=2, help="Minimum shared entities to count as a candidate pair (default: 2)")
+    parser.add_argument("--min-gap-hours", type=float, default=0.0, help="Minimum time gap between clusters to count as a candidate pair (default: 0, no filter)")
+    parser.add_argument("--chains", action="store_true", help="Group candidate pairs into connected-component chains (one predecessor per cluster) instead of printing a flat pair list")
     args = parser.parse_args()
 
-    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared))
+    asyncio.run(main(args.days, args.threshold, args.limit, args.csv, args.min_shared, args.min_gap_hours, args.chains))
