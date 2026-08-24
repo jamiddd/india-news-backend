@@ -272,12 +272,18 @@ VALID_GAME_TYPES = {"crossword", "sudoku", "word_search", "spelling_bee", "word_
 
 class GameSessionRequest(BaseModel):
     puzzle_date: date
+    score: Optional[int] = None
+    completion_time_seconds: Optional[int] = None
+    difficulty: Optional[str] = None
 
 
 class GameTypeStatsOut(BaseModel):
     played: int
     completed: int
     attempted_incomplete: int
+    best_score: Optional[int] = None
+    avg_completion_time_seconds: Optional[int] = None
+    last_played_date: Optional[date] = None
 
 
 class ReadEventRequest(BaseModel):
@@ -296,4 +302,9 @@ class GameStatsOut(BaseModel):
     total_played: int
     total_completed: int
     most_played_game: Optional[str] = None
+    current_streak_days: int = 0
+    longest_streak_days: int = 0
+    level: int = 1
+    xp: int = 0
+    xp_to_next_level: int = 100
     by_game: dict[str, GameTypeStatsOut]

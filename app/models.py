@@ -96,6 +96,9 @@ class GameSession(Base):
     completed = Column(Boolean, nullable=False, default=False)
     started_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    score = Column(Integer, nullable=True)
+    completion_time_seconds = Column(Integer, nullable=True)
+    difficulty = Column(String(32), nullable=True)
 
     __table_args__ = (
         Index("uq_game_sessions_user_game_date", "user_id", "game_type", "puzzle_date", unique=True),

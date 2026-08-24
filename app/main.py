@@ -1160,6 +1160,32 @@ def _validate_game_type(game_type: str) -> None:
         raise HTTPException(status_code=422, detail=f"Unknown game_type '{game_type}'")
 
 
+def _compute_streaks(completed_dates: set) -> tuple[int, int]:
+    """current_streak_days = consecutive calendar days (any game_type) with
+    at least one completed puzzle, ending today or yesterday (one day's
+    grace before a streak is considered broken). longest_streak_days is the
+    longest such run ever, over the same per-day union across all games."""
+    if not completed_dates:
+        return 0, 0
+
+    today = utc_now().date()
+    cursor = today if today in completed_dates else today - timedelta(days=1)
+    current = 0
+    while cursor in completed_dates:
+        current += 1
+        cursor -= timedelta(days=1)
+
+    longest = 0
+    run = 0
+    prev = None
+    for d in sorted(completed_dates):
+        run = run + 1 if prev is not None and d == prev + timedelta(days=1) else 1
+        longest = max(longest, run)
+        prev = d
+
+    return current, longest
+
+
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/games/{{game_type}}/start", status_code=200)
 @limiter.limit("60/minute")
 async def start_game_session(
@@ -1208,9 +1234,15 @@ async def complete_game_session(
     statement = pg_insert(GameSession).values(
         user_id=user_id, game_type=game_type, puzzle_date=payload.puzzle_date,
         completed=True, completed_at=now,
+        score=payload.score, completion_time_seconds=payload.completion_time_seconds,
+        difficulty=payload.difficulty,
     ).on_conflict_do_update(
         constraint="uq_game_sessions_user_game_date",
-        set_={"completed": True, "completed_at": now},
+        set_={
+            "completed": True, "completed_at": now,
+            "score": payload.score, "completion_time_seconds": payload.completion_time_seconds,
+            "difficulty": payload.difficulty,
+        },
     )
     await db.execute(statement)
     await db.commit()
@@ -1229,6 +1261,9 @@ async def get_game_stats(request: Request, user_id: str, db: AsyncSession = Depe
             GameSession.game_type,
             func.count(GameSession.id).label("played"),
             func.count(GameSession.id).filter(GameSession.completed.is_(True)).label("completed"),
+            func.max(GameSession.score).filter(GameSession.completed.is_(True)).label("best_score"),
+            func.avg(GameSession.completion_time_seconds).filter(GameSession.completed.is_(True)).label("avg_time"),
+            func.max(GameSession.puzzle_date).filter(GameSession.completed.is_(True)).label("last_played"),
         )
         .where(GameSession.user_id == user_id)
         .group_by(GameSession.game_type)
@@ -1238,18 +1273,48 @@ async def get_game_stats(request: Request, user_id: str, db: AsyncSession = Depe
     total_completed = 0
     most_played_game: Optional[str] = None
     most_played_count = 0
-    for game_type, played, completed in rows.all():
-        by_game[game_type] = GameTypeStatsOut(played=played, completed=completed, attempted_incomplete=played - completed)
+    for game_type, played, completed, best_score, avg_time, last_played in rows.all():
+        by_game[game_type] = GameTypeStatsOut(
+            played=played,
+            completed=completed,
+            attempted_incomplete=played - completed,
+            best_score=best_score,
+            avg_completion_time_seconds=int(avg_time) if avg_time is not None else None,
+            last_played_date=last_played,
+        )
         total_played += played
         total_completed += completed
         if played > most_played_count:
             most_played_count = played
             most_played_game = game_type
 
+    score_sum_result = await db.execute(
+        select(func.coalesce(func.sum(GameSession.score), 0))
+        .where(GameSession.user_id == user_id, GameSession.completed.is_(True))
+    )
+    score_sum = score_sum_result.scalar_one()
+    xp = total_completed * 10 + score_sum
+    level = 1 + xp // 100
+    xp_to_next_level = 100 - (xp % 100)
+
+    dates_result = await db.execute(
+        select(GameSession.puzzle_date)
+        .where(GameSession.user_id == user_id, GameSession.completed.is_(True))
+        .distinct()
+    )
+    current_streak_days, longest_streak_days = _compute_streaks(
+        {row[0] for row in dates_result.all()}
+    )
+
     return GameStatsOut(
         total_played=total_played,
         total_completed=total_completed,
         most_played_game=most_played_game,
+        current_streak_days=current_streak_days,
+        longest_streak_days=longest_streak_days,
+        level=level,
+        xp=xp,
+        xp_to_next_level=xp_to_next_level,
         by_game=by_game,
     )
 
