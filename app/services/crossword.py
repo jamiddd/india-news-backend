@@ -326,17 +326,19 @@ Hard requirements — verify each one before answering:
 6. Clues must be clear, factual, and family-friendly.
 
 Before returning your final answer, count the characters in each of the 11 "rows" strings one more time to confirm each one is exactly 11 characters — this check is required, not optional."""
-    # Disabling thinking on Sonnet 5 was found to make it leak raw "<think>"
-    # reasoning as plain text into the JSON response instead of a proper
-    # thinking block (undocumented failure mode, observed 2026-08-24) —
-    # leave thinking on (adaptive) and just tell it not to emit any tags.
-    system = "Do not include internal or system XML tags (such as <think>) in your response. Respond with the final JSON only."
+    # Thinking left ON (adaptive, undisabled) consumed the entire max_tokens
+    # budget on reasoning and returned zero text — observed 2026-08-24, the
+    # response was a single "thinking" block with no "text" block at all.
+    # Disabling thinking avoids that, but on its own it made the model leak
+    # raw "<think>" reasoning as plain text instead of real JSON — so disable
+    # thinking AND explicitly forbid emitting any tags.
+    system = "Do not include internal or system XML tags (such as <think>) in your response. Respond with the final JSON only, nothing else."
     for attempt in range(3):
         # Sonnet, not the other daily games' Haiku default — see call_claude_json's
         # docstring in llm_gen.py for why crossword needs the stronger model.
         data = await call_claude_json(
-            system=system, user_content=prompt, model="claude-sonnet-5", max_tokens=8000,
-            temperature=None, attempts=1, timeout=120,
+            system=system, user_content=prompt, model="claude-sonnet-5", max_tokens=5000,
+            temperature=None, disable_thinking=True, attempts=1, timeout=90,
         )
         if data is None:
             break  # no API key configured / transport failure — retrying won't help
