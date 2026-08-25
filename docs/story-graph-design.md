@@ -185,6 +185,51 @@ top of the existing `person`/`organization`/`location` typing already in
 could be non-generic (rare, specific) and still be a bad actor if it's
 fundamentally a backdrop/label rather than a subject.
 
+### Round 5 — actor-type filter, machine-checkable version of the hypothesis
+
+Implemented the "Current hypothesis" above as `build_backdrop_check` in
+`experiment_story_edges.py`, applied alongside `is_generic` in Node 2-4 (an
+entity can be non-generic and still disqualified as an actor). Three
+signals, none of them a hand-typed denylist:
+
+- **Every location-typed entity, unconditionally.** A place is backdrop by
+  definition per the user's own framing ("a story happens near a place, not
+  about it") — this alone fixes the `derby` false-actor case from Round 4
+  without needing any new data.
+- **Entities enrichment's LLM call itself flags as backdrop.** Cheapest
+  possible lever: extended the existing per-cluster Anthropic prompt
+  (`app/services/enrichment.py`'s `ENRICHMENT_SYSTEM_PROMPT`) to also return
+  `entities.backdrop`, a subset of the persons/organizations/locations it
+  already extracts, for collective/industry labels like "Bollywood" — no new
+  API call, just a few more output tokens on a call already being made and
+  paid for. Sanitized on the way in (`_sanitize_entities`) to clamp the
+  model's answer to an actual subset of what it extracted, since nothing
+  stops it from naming something else. Rule-based-only enrichment (no
+  Anthropic key, or the call failed) returns an empty `backdrop` list — no
+  signal, correctly *not* treated as "confirmed not backdrop."
+- **Organization-typed entity matching a real `Source` name.** Structural
+  lookup against the `sources` table, not a hardcoded list of
+  `hindustan_times_entertainment`/`livemint`/`gadgets_360` — stays correct
+  as new sources get added via `seed_sources.py`, catches the publication-
+  name-leaked-in-as-entity failure mode generically.
+
+**Not yet done / explicitly deferred**: the harder Round 4 bug (Node 7/8
+silently dropping a real member — `#10354` never landing in
+`brydon_carse`'s own chain) is a separate root cause from actor selection,
+still untraced. This round only addresses "is the actor the right kind of
+thing," not "did the right members get grouped into that actor's chain."
+Also deferred: replacing the entity-overlap heuristic itself with embedding-
+based semantic similarity, discussed as the heavier alternative fix for
+both the fragmentation and dropped-member bugs — not started, no
+infra/model choice made yet.
+
+**Not yet validated**: this round has had no real-data run yet (needs an
+enrichment re-run or fresh clusters to pick up the new `backdrop` field —
+existing `story_clusters` rows enriched before this change have an empty
+`entities.backdrop`). Next session should re-run
+`scripts/experiment_story_edges.py` against live data and manually check
+whether Brydon Carse/derby-style false actors actually stop surfacing.
+
 ## What's confirmed working vs. still open
 
 **Working / validated by repeated manual review:**
@@ -197,29 +242,42 @@ fundamentally a backdrop/label rather than a subject.
   news near the top without hand-listing junk categories.
 
 **Open / broken:**
-- Multi-actor story fragmentation survives partial dedup — need either a
-  lower subsumption threshold (risks false merges elsewhere, untested),
-  or the actor-type refinement above, or both.
+- Multi-actor story fragmentation survives partial dedup — Round 5's
+  `is_backdrop` may reduce this (fewer wrong entities competing for the
+  actor slot) but hasn't been checked against real data yet; a lower
+  subsumption threshold is still an untested alternative/complement.
 - Node 7/8 can silently drop a real member from the "best" chain while a
   worse fragment picks it up elsewhere and outranks the complete chain —
   root cause not yet traced (why did `#10354` not land in
-  `brydon_carse`'s sub-cluster?).
+  `brydon_carse`'s sub-cluster?). Round 5 does not address this — it's a
+  sub-clustering bug, not an actor-selection one.
 - No quantitative validation at all yet — every judgment so far has been
   "does this look right," on the top-N of one 60-day window. No labeled
   sample, no precision number, no check against a second time period.
 - `entity_stats` is still young (~750 rows as of this doc) — the Node 3
   genericity check is running mostly on the in-set-document-frequency
   fallback for now, not yet on mature `baseline_rate` data.
+- New clusters need a fresh enrichment pass to carry `entities.backdrop` at
+  all — anything enriched before Round 5 has an empty list there, not a
+  confirmed-no-backdrop signal.
 
 ## Next steps (not started)
 
-1. Design and test the actor-type refinement (person/group/collective-
-   affecting-entity vs. place/source/label) — most likely to resolve both
-   open bugs at once per the user's hypothesis, rather than chasing them
-   individually.
-2. Trace why Node 7/8 excluded `#10354` from `brydon_carse`'s own chain,
-   to confirm whether the actor-type fix would also fix this or if it's a
-   separate bug.
+1. Re-run `scripts/experiment_story_edges.py` against live data (after
+   enrichment has produced some `entities.backdrop`-tagged clusters) and
+   manually check whether Round 5 actually reduces false-actor cases like
+   `derby`/Brydon-Carse, and whether it helps the Aston Martin/Hyderabad
+   multi-actor fragmentation case at all.
+2. Trace why Node 7/8 excluded `#10354` from `brydon_carse`'s own chain —
+   Round 5 doesn't touch this path, so it's still open regardless of how
+   step 1 goes.
 3. Build some form of quantitative validation (a hand-labeled sample, or
    a second time-window comparison) before trusting precision claims made
    from eyeballing alone.
+4. If Round 5 doesn't fully resolve fragmentation, the heavier fallback
+   discussed but not started: replace the entity-overlap heuristic (Node 7
+   union-find, subsumption-ratio dedup) with embedding-based semantic
+   similarity between cluster headlines/summaries — a genuine infra
+   addition (model choice, storage, similarity search), not a prompt
+   tweak, so only worth it if the cheap actor-type lever proves
+   insufficient.

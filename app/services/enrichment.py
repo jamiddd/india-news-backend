@@ -38,7 +38,18 @@ CRITICAL CONSTRAINTS:
    several sentences or facts into a single bullet, and never omit the space
    after a period between clauses.
 4. Extract key entities (Persons, Organizations, Locations, Bills/Laws).
-5. If multiple outlets are provided, compare how they framed or angled their
+5. Of the entities you just extracted, list which ones are merely BACKDROP —
+   the setting/context the story happens against — rather than a SUBJECT the
+   story is genuinely ABOUT. Backdrop examples: a place name (a story about a
+   crime "in Mumbai" isn't about Mumbai), a collective/industry label
+   ("Bollywood", "the tech industry"), or a news outlet/publication name that
+   got extracted as if it were an entity. Subject examples: a person, a
+   specific organization/institution that took an action or was acted upon,
+   or a group of people treated as a collective actor (e.g. a political
+   party, a protest movement). When in doubt, ask "is the story ABOUT this,
+   or does it merely MENTION this in passing" — if the latter, it's backdrop.
+   Most stories have zero or one backdrop entities; do not over-flag.
+6. If multiple outlets are provided, compare how they framed or angled their
    headlines (descriptive framing comparison). If only one outlet is
    provided, return an empty framing_comparison list — do not invent a
    comparison against outlets that aren't there.
@@ -50,13 +61,16 @@ OUTPUT FORMAT: Return strictly valid JSON with keys:
   "entities": {
     "persons": ["string"],
     "organizations": ["string"],
-    "locations": ["string"]
+    "locations": ["string"],
+    "backdrop": ["string"]
   },
   "topics": ["string"],
   "framing_comparison": [
     {"outlet": "string", "headline_angle": "string"}
   ]
 }
+"backdrop" must be a subset of the names already listed in persons/
+organizations/locations above — do not introduce new names there.
 """
 
 def parse_json_response(text: str) -> Dict[str, Any]:
@@ -92,7 +106,12 @@ def extract_entities_rule_based(text: str) -> Dict[str, List[str]]:
     return {
         "persons": [],
         "organizations": list(set(found_orgs)),
-        "locations": list(set(found_locs))
+        "locations": list(set(found_locs)),
+        # No backdrop-vs-subject judgment in the free rule-based path — that's
+        # an LLM call away, not a KNOWN_ENTITIES lookup. Left empty rather
+        # than guessed, so a missing key/empty list means "the LLM path
+        # either didn't run or found nothing," never "confirmed no backdrop."
+        "backdrop": []
     }
 
 def generate_framing_comparison(articles: List[Article]) -> List[Dict[str, str]]:
@@ -160,6 +179,22 @@ def _clamp_bullets(bullets: List[str]) -> List[str]:
             fixed = truncated.rstrip(".,;:") + "…"
         clamped.append(fixed)
     return clamped
+
+def _sanitize_entities(entities: Dict[str, Any]) -> Dict[str, Any]:
+    """Defensively clamps "backdrop" to an actual subset of the
+    persons/organizations/locations the model returned in the same response
+    — the prompt asks for this but nothing stops a model from naming an
+    entity that isn't in those lists (or hallucinating "backdrop" as some
+    other shape entirely)."""
+    known = set()
+    for field_name in ("persons", "organizations", "locations"):
+        known.update(entities.get(field_name) or [])
+    backdrop = entities.get("backdrop") or []
+    if not isinstance(backdrop, list):
+        backdrop = []
+    entities["backdrop"] = [b for b in backdrop if b in known]
+    return entities
+
 
 async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
     """Enrich a story cluster using Anthropic API or fallback rule-based engine."""
@@ -257,7 +292,7 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                 if bullets:
                     cluster.summary = "\n• " + "\n• ".join(_clamp_bullets(bullets))
                 if structured.get("entities"):
-                    cluster.entities = structured.get("entities")
+                    cluster.entities = _sanitize_entities(structured.get("entities"))
                 if structured.get("topics"):
                     cluster.topics = structured.get("topics")
                 if structured.get("framing_comparison"):

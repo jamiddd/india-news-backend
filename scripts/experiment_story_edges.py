@@ -47,7 +47,18 @@ bursty splits). This version follows an explicit decision process instead:
       dominate a chain's rank and old/quiet ones fade — the same
       recency-weighting idea as an EMA in trading.
 
-No writes, no new tables, no LLM calls.
+  Round 5 (build_backdrop_check): actor TYPE, not just frequency/genericity
+      — a new is_backdrop(entity_key) predicate, applied alongside is_generic
+      in Node 2-4, rejects entities that describe a story's setting rather
+      than its subject: every location-typed entity unconditionally, any
+      entity enrichment.py's LLM prompt itself flagged "backdrop" (collective
+      labels like "Bollywood"), and any organization-typed entity matching a
+      real Source name (a publication leaking in as an entity). See
+      backend/docs/story-graph-design.md's "Current hypothesis" section for
+      the failure cases this targets (Brydon Carse/"derby").
+
+No writes, no new tables. Enrichment now makes one extra ask of its
+existing per-cluster LLM call (which entities are backdrop) — no new calls.
 
 Usage (inside the app container, so DATABASE_URL is set):
     python3 scripts/experiment_story_edges.py
@@ -83,6 +94,12 @@ class Cluster:
     last_updated_at: datetime
     distinct_source_count: int
     entity_keys: Set[str] = field(default_factory=set)
+    # Entities enrichment flagged as backdrop/context rather than the
+    # story's subject (see enrichment.py's ENRICHMENT_SYSTEM_PROMPT) — a
+    # subset of entity_keys, not a separate namespace. Empty for
+    # rule-based-only enrichment or pre-Round-5 clusters (no signal, not
+    # "confirmed not backdrop").
+    backdrop_keys: Set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -119,7 +136,9 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
     clusters = []
     for row in result:
         entities = row.entities or {}
+        raw_backdrop_names = set(entities.get("backdrop") or [])
         entity_keys: Set[str] = set()
+        backdrop_keys: Set[str] = set()
         for entity_type, field_name in (
             ("person", "persons"),
             ("organization", "organizations"),
@@ -129,6 +148,8 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
                 key = canonicalize_entity(raw_name, entity_type)
                 if key:
                     entity_keys.add(key)
+                    if raw_name in raw_backdrop_names:
+                        backdrop_keys.add(key)
         clusters.append(
             Cluster(
                 id=row.id,
@@ -137,6 +158,7 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
                 last_updated_at=row.last_updated_at,
                 distinct_source_count=row.distinct_source_count or 1,
                 entity_keys=entity_keys,
+                backdrop_keys=backdrop_keys,
             )
         )
     return clusters
@@ -148,6 +170,21 @@ async def load_entity_stats(conn) -> Dict[str, Tuple[float, float, str]]:
         text("SELECT entity_key, baseline_rate, mention_count_decayed, display_name FROM entity_stats")
     )
     return {row.entity_key: (row.baseline_rate, row.mention_count_decayed, row.display_name) for row in result}
+
+
+async def load_source_names(conn) -> Set[str]:
+    """Canonicalized (as organization-type keys) names of every real news
+    source — used to catch publication names that leaked into an
+    "organizations" entity extraction (e.g. "livemint", "gadgets_360") as if
+    they were a story subject. A structural lookup against ground truth,
+    not a hand-maintained denylist — it stays correct as sources.py grows."""
+    result = await conn.execute(text("SELECT name FROM sources"))
+    keys = set()
+    for row in result:
+        key = canonicalize_entity(row.name, "organization")
+        if key:
+            keys.add(key)
+    return keys
 
 
 def compute_idf_weights(clusters: List[Cluster]) -> Dict[str, float]:
@@ -197,8 +234,48 @@ def build_generic_check(
     return is_generic
 
 
+def build_backdrop_check(clusters: List[Cluster], source_name_keys: Set[str]):
+    """
+    Round 5 — actor TYPE, not just frequency/genericity (see
+    backend/docs/story-graph-design.md's "Current hypothesis"). Returns a
+    predicate is_backdrop(entity_key) -> bool for entities that describe a
+    story's setting/context rather than what it's genuinely about, so they
+    never get first claim on an actor slot in select_topic_groups —
+    independent of Node 3's genericity check, since a backdrop entity can be
+    rare/specific (a one-off nightclub name) and still be the wrong kind of
+    thing to anchor a chain on.
+
+    Three signals, each catching a different failure mode observed in
+    Round 4:
+    - Every LOCATION-typed entity, unconditionally — a place is backdrop by
+      definition (the "Brydon Carse nightclub incident" bug: "derby" is a
+      location, not a subject).
+    - Any entity enrichment itself flagged "backdrop" for at least one
+      cluster (organizations/collective labels like "Bollywood") — a global
+      union across the whole window, on the assumption that whether an
+      entity is subject-shaped is a property of the entity, not the
+      specific story it appears in.
+    - Any organization-typed entity matching a real Source name — catches a
+      publication name leaking in as if it were a story subject.
+    """
+    backdrop_keys: Set[str] = set()
+    for cluster in clusters:
+        backdrop_keys.update(cluster.backdrop_keys)
+
+    def is_backdrop(entity_key: str) -> bool:
+        if entity_key.startswith("location:"):
+            return True
+        if entity_key in backdrop_keys:
+            return True
+        if entity_key in source_name_keys:
+            return True
+        return False
+
+    return is_backdrop
+
+
 def select_topic_groups(
-    clusters: List[Cluster], is_generic, subsumption_ratio: float,
+    clusters: List[Cluster], is_generic, is_backdrop, subsumption_ratio: float,
 ) -> List[TopicGroup]:
     """
     Node 1 (inverted index) + Node 2/3/4 (reject generic actors) + Node 5
@@ -217,7 +294,7 @@ def select_topic_groups(
 
     candidates = [
         (key, members) for key, members in by_entity.items()
-        if len(members) >= 2 and not is_generic(key)
+        if len(members) >= 2 and not is_generic(key) and not is_backdrop(key)
     ]
     candidates.sort(key=lambda kv: len(kv[1]), reverse=True)
 
@@ -425,13 +502,15 @@ async def main(
     async with engine.begin() as conn:
         clusters = await load_clusters(conn, days)
         entity_stats = await load_entity_stats(conn)
+        source_name_keys = await load_source_names(conn)
 
     print(f"Loaded {len(clusters)} clusters from the last {days} days "
           f"and {len(entity_stats)} entity_stats rows.")
 
     is_generic = build_generic_check(clusters, entity_stats, generic_percentile, max_df_ratio)
-    topic_groups = select_topic_groups(clusters, is_generic, subsumption_ratio)
-    print(f"{len(topic_groups)} topic groups survived generic-entity filtering + subsumption.")
+    is_backdrop = build_backdrop_check(clusters, source_name_keys)
+    topic_groups = select_topic_groups(clusters, is_generic, is_backdrop, subsumption_ratio)
+    print(f"{len(topic_groups)} topic groups survived generic-entity/backdrop filtering + subsumption.")
 
     weights = compute_idf_weights(clusters)
     half_life = timedelta(hours=half_life_hours)
