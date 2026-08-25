@@ -89,17 +89,34 @@ async def generate_draft(session: AsyncSession, poll_date: date, replace: bool =
         "articles": [{"outlet": a.source.name if a.source else "Source", "headline": a.title, "snippet": (a.snippet or "")[:220]} for a in cluster.articles[:5]],
     } for cluster in safe]
     system = """You draft a neutral daily public-opinion poll for an Indian news app. Use only supplied reporting. Choose one suitable policy, civic, economic, science, technology, education, environment or public-service issue. Never poll on a person's guilt, tragedy, death, communal identity, religion, caste, active crime, or unverifiable claim. Return only JSON: {\"source_cluster_id\": integer, \"question\": string ending ?, \"context\": one neutral factual sentence, \"options\": 2-4 mutually exclusive balanced strings}. Avoid loaded premises and include nuance when a binary choice is misleading."""
-    async with httpx.AsyncClient(timeout=25) as client:
-        response = await client.post("https://api.anthropic.com/v1/messages", headers={
-            "x-api-key": settings.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"
-        }, json={"model": "claude-haiku-4-5", "max_tokens": 700, "system": system, "messages": [{"role": "user", "content": json.dumps(payload)}]})
-        response.raise_for_status()
-    raw = response.json().get("content") or []
-    data = parse_json_response(raw[0]["text"] if raw else "")
-    question, context, options = validate_draft(data)
-    cluster = next((item for item in safe if item.id == int(data.get("source_cluster_id", 0))), None)
-    if cluster is None:
-        raise ValueError("AI selected an unknown source cluster")
+
+    # LLM output is non-deterministic and occasionally fails validate_draft
+    # (e.g. a borderline-length question, or a stray unsafe word) — retry a
+    # few times before giving up, rather than failing the whole run on one
+    # bad generation.
+    last_error: Exception | None = None
+    question = context = None
+    options: list[str] = []
+    cluster = None
+    for _ in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=25) as client:
+                response = await client.post("https://api.anthropic.com/v1/messages", headers={
+                    "x-api-key": settings.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"
+                }, json={"model": "claude-haiku-4-5", "max_tokens": 700, "system": system, "messages": [{"role": "user", "content": json.dumps(payload)}]})
+                response.raise_for_status()
+            raw = response.json().get("content") or []
+            data = parse_json_response(raw[0]["text"] if raw else "")
+            question, context, options = validate_draft(data)
+            cluster = next((item for item in safe if item.id == int(data.get("source_cluster_id", 0))), None)
+            if cluster is None:
+                raise ValueError("AI selected an unknown source cluster")
+            last_error = None
+            break
+        except (ValueError, KeyError, httpx.HTTPStatusError, httpx.TimeoutException) as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
     publish, closes = poll_times(poll_date)
     if existing:
         existing.question, existing.context = question, context

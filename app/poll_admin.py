@@ -92,10 +92,19 @@ def _verify(request: Request, fields: dict[str, str]) -> None:
         raise HTTPException(status_code=403, detail="Invalid session or CSRF token")
 
 
+def _error_page(csrf: str, message: str) -> HTMLResponse:
+    return _layout(f"<h1>Daily Poll</h1><p class=danger>Draft generation failed: {html.escape(message)}</p><form method=post action='/admin/polls/generate'><input type=hidden name=csrf value='{csrf}'><button>Try again</button></form>")
+
+
 @router.post("/generate")
 async def generate(request: Request, db: AsyncSession = Depends(get_db)):
     fields = await _fields(request); _verify(request, fields)
-    await generate_draft(db, datetime.now(IST).date())
+    try:
+        await generate_draft(db, datetime.now(IST).date())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _error_page(fields.get("csrf", ""), str(exc))
     return RedirectResponse("/admin/polls", status_code=303)
 
 
@@ -105,7 +114,12 @@ async def update(request: Request, db: AsyncSession = Depends(get_db)):
     poll_id = int(fields["poll_id"])
     action = fields.get("action")
     if action == "regenerate":
-        await generate_draft(db, datetime.now(IST).date(), replace=True)
+        try:
+            await generate_draft(db, datetime.now(IST).date(), replace=True)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return _error_page(fields.get("csrf", ""), str(exc))
     elif action == "reject":
         poll = await db.get(DailyPoll, poll_id)
         if not poll or poll.status != "draft": raise HTTPException(status_code=409, detail="Draft cannot be rejected")
