@@ -902,6 +902,32 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://decrypt.co",
         "category": "crypto",
         "region": "national"
+    },
+
+    # --- Added 2026-08-25: second pass on Madhya Pradesh / Chhattisgarh
+    # after the first pass came up empty. ABP Live's per-state Hindi feeds
+    # are live and genuinely state-specific (verified by inspecting article
+    # links/titles, not just HTTP 200). Rejected this pass: News18 Hindi
+    # (400 — no such feed path), Zee Hindi (403), ABP CG/MP English
+    # equivalents don't exist (Hindi-only), ETV Bharat (410 gone),
+    # Navbharat Times, Patrika, Jagran (404 — no working RSS path found),
+    # Free Press Journal MP/Bhopal (200 but 0 items).
+
+    {
+        "name": "ABP Live (Madhya Pradesh)",
+        "slug": "abp-live-mp",
+        "feed_url": "https://www.abplive.com/states/madhya-pradesh/feed",
+        "homepage_url": "https://www.abplive.com/states/madhya-pradesh",
+        "category": "regional_central",
+        "region": "central"
+    },
+    {
+        "name": "ABP Live (Chhattisgarh)",
+        "slug": "abp-live-cg",
+        "feed_url": "https://www.abplive.com/states/chhattisgarh/feed",
+        "homepage_url": "https://www.abplive.com/states/chhattisgarh",
+        "category": "regional_central",
+        "region": "central"
     }
 ]
 
