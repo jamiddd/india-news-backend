@@ -21,6 +21,18 @@ logger = logging.getLogger(__name__)
 # puzzle after a single miss, with no second attempt at getting the LLM to
 # produce something valid.
 VALIDATION_RETRY_ATTEMPTS = 3
+
+
+def _with_feedback(base_content: str, last_error: str | None) -> str:
+    """Appends the previous attempt's validation error to the prompt so a
+    retry isn't just "ask the exact same thing again and hope" — the model
+    gets told specifically what was wrong last time and can correct for it."""
+    if last_error is None:
+        return base_content
+    return (
+        f"{base_content}\n\nYour previous attempt failed validation with this "
+        f"error: {last_error}\nFix that specific problem and try again."
+    )
 IST = ZoneInfo("Asia/Kolkata")
 
 # Same content filter used for the daily poll (app/services/polls.py) — keep
@@ -129,8 +141,10 @@ async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list
     # JSON that doesn't satisfy the puzzle's own rules" (e.g. no pangram, a
     # word using a letter outside the chosen 7), which used to fall back to
     # `curated` on the very first such miss with no second attempt.
+    base_content = "Generate today's Spelling Bee puzzle."
+    last_error: str | None = None
     for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-        data = await call_claude_json(system=system, user_content="Generate today's Spelling Bee puzzle.", max_tokens=800)
+        data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=800)
         if data is None:
             break
         try:
@@ -138,6 +152,7 @@ async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list
             return letters, center, words, "ai"
         except Exception as exc:
             logger.warning("Spelling Bee AI output failed validation (attempt %s): %s", attempt + 1, exc)
+            last_error = str(exc)
     letters, center, words = _fallback_bee(puzzle_date)
     return letters, center, words, "curated"
 
@@ -222,8 +237,10 @@ async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], 
         '"target_word": "...", "allowed_words": [pool of words, not including start/target], '
         '"optimal_steps": integer length of the shortest such path}'
     )
+    base_content = "Generate today's Word Ladder puzzle."
+    last_error: str | None = None
     for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-        data = await call_claude_json(system=system, user_content="Generate today's Word Ladder puzzle.", max_tokens=500)
+        data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=500)
         if data is None:
             break
         try:
@@ -231,6 +248,7 @@ async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], 
             return start, target, allowed, optimal, "ai"
         except Exception as exc:
             logger.warning("Word Ladder AI output failed validation (attempt %s): %s", attempt + 1, exc)
+            last_error = str(exc)
     start, target, allowed, optimal = _fallback_ladder(puzzle_date)
     return start, target, allowed, optimal, "curated"
 
@@ -295,14 +313,17 @@ async def generate_quiz(session: AsyncSession, puzzle_date: date) -> tuple[list[
             '[4 strings], "correct_index": 0-3, "explanation": "one sentence, cites the fact"}, '
             "... exactly 5 items]}"
         )
+        base_content = str(stories)
+        last_error: str | None = None
         for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-            data = await call_claude_json(system=system, user_content=str(stories), max_tokens=1500)
+            data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=1500)
             if data is None:
                 break
             try:
                 return _validate_quiz(data), "ai"
             except Exception as exc:
                 logger.warning("Quiz AI output failed validation (attempt %s): %s", attempt + 1, exc)
+                last_error = str(exc)
     return _fallback_quiz_questions(puzzle_date), "curated"
 
 
