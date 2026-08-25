@@ -846,9 +846,18 @@ async def list_story_clusters(
                      "app.services.explore_bandit. Optional and otherwise inert — /clusters "
                      "remains usable anonymously; omit to opt out of the experiment.",
     ),
+    min_sources: Optional[int] = Query(
+        None,
+        ge=1,
+        description="Only return clusters corroborated by at least this many distinct outlets "
+                     "(StoryCluster.distinct_source_count). Applies to any category, not just "
+                     "All Stories — e.g. the app's 'Top Headlines' tab passes 2 here so a "
+                     "single-outlet story (regional wire pickup, local-only coverage) never "
+                     "counts as a headline regardless of its headline_score.",
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}"
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}:{min_sources or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
@@ -866,6 +875,9 @@ async def list_story_clusters(
     query = select(StoryCluster).options(
         selectinload(StoryCluster.articles).selectinload(Article.source)
     ).where(StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE)
+
+    if min_sources:
+        query = query.where(StoryCluster.distinct_source_count >= min_sources)
 
     if is_all:
         # Default "All Stories" feed: ranked by importance (headline_score —
