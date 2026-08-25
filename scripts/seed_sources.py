@@ -580,6 +580,328 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://timesofindia.indiatimes.com/life-style",
         "category": "lifestyle",
         "region": "national"
+    },
+
+    # --- Added 2026-08-25: expansion pass for national, business,
+    # entertainment, tech, world. Every feed below was verified live
+    # (HTTP 200 + real XML + non-zero <item> count + fresh pubDate on
+    # 2026-08-25) before being added. Rejected during this pass: The Quint
+    # (302/near-empty), Firstpost, Scroll.in, Deccan Herald, Outlook,
+    # Financial Express, Business Standard, Bollywood Hungama, Filmibeat,
+    # 91mobiles (all 403/404 — WAF-blocked or dead), Zee News business/tech/
+    # entertainment (200 but 0 items), Analytics India Mag (200 but 0
+    # items), CNN World and Reuters World (blocked/unreachable). India
+    # Today's Nation/Economy section feeds are stale magazine-era content
+    # (Economy last updated March 2025) — skipped; only India Today World
+    # was fresh.
+
+    {
+        "name": "DNA India",
+        "slug": "dna-india",
+        "feed_url": "https://www.dnaindia.com/feeds/india.xml",
+        "homepage_url": "https://www.dnaindia.com/india",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "CNBC-TV18 India",
+        "slug": "cnbctv18-india",
+        "feed_url": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/india.xml",
+        "homepage_url": "https://www.cnbctv18.com/india/",
+        "category": "national",
+        "region": "national"
+    },
+
+    {
+        "name": "CNBC-TV18 Business",
+        "slug": "cnbctv18-business",
+        "feed_url": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/business.xml",
+        "homepage_url": "https://www.cnbctv18.com/business/",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "DNA Business",
+        "slug": "dna-business",
+        "feed_url": "https://www.dnaindia.com/feeds/business.xml",
+        "homepage_url": "https://www.dnaindia.com/business",
+        "category": "business",
+        "region": "national"
+    },
+
+    {
+        "name": "Pinkvilla",
+        "slug": "pinkvilla",
+        "feed_url": "https://www.pinkvilla.com/rss.xml",
+        "homepage_url": "https://www.pinkvilla.com",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        "name": "DNA Entertainment",
+        "slug": "dna-entertainment",
+        "feed_url": "https://www.dnaindia.com/feeds/entertainment.xml",
+        "homepage_url": "https://www.dnaindia.com/entertainment",
+        "category": "entertainment",
+        "region": "national"
+    },
+
+    {
+        "name": "MediaNama",
+        "slug": "medianama",
+        "feed_url": "https://www.medianama.com/feed/",
+        "homepage_url": "https://www.medianama.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "CNBC-TV18 Technology",
+        "slug": "cnbctv18-tech",
+        "feed_url": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/technology.xml",
+        "homepage_url": "https://www.cnbctv18.com/technology/",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "DNA Technology",
+        "slug": "dna-tech",
+        "feed_url": "https://www.dnaindia.com/feeds/technology.xml",
+        "homepage_url": "https://www.dnaindia.com/technology",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "TechRadar",
+        "slug": "techradar",
+        "feed_url": "https://www.techradar.com/rss",
+        "homepage_url": "https://www.techradar.com",
+        "category": "tech",
+        "region": "national"
+    },
+
+    {
+        "name": "India Today World",
+        "slug": "india-today-world",
+        "feed_url": "https://www.indiatoday.in/rss/1206577",
+        "homepage_url": "https://www.indiatoday.in/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "CNBC-TV18 World",
+        "slug": "cnbctv18-world",
+        "feed_url": "https://www.cnbctv18.com/commonfeeds/v1/cne/rss/world.xml",
+        "homepage_url": "https://www.cnbctv18.com/world/",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "DNA World",
+        "slug": "dna-world",
+        "feed_url": "https://www.dnaindia.com/feeds/world.xml",
+        "homepage_url": "https://www.dnaindia.com/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Al Jazeera",
+        "slug": "al-jazeera",
+        "feed_url": "https://www.aljazeera.com/xml/rss/all.xml",
+        "homepage_url": "https://www.aljazeera.com",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "The Guardian World",
+        "slug": "guardian-world",
+        "feed_url": "https://www.theguardian.com/world/rss",
+        "homepage_url": "https://www.theguardian.com/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "WSJ World",
+        "slug": "wsj-world",
+        "feed_url": "https://feeds.a.dj.com/rss/RSSWorldNews.xml",
+        "homepage_url": "https://www.wsj.com/news/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Sky News World",
+        "slug": "sky-news-world",
+        "feed_url": "https://feeds.skynews.com/feeds/rss/world.xml",
+        "homepage_url": "https://news.sky.com/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "NPR World",
+        "slug": "npr-world",
+        "feed_url": "https://feeds.npr.org/1004/rss.xml",
+        "homepage_url": "https://www.npr.org/sections/world/",
+        "category": "world",
+        "region": "national"
+    },
+
+    # --- Added 2026-08-25: state-gap fill pass. Prior handoff doc flagged
+    # Gujarat, Rajasthan, Goa, Bihar, Jharkhand, Madhya Pradesh, and
+    # Chhattisgarh as having no viable publisher-sanctioned English RSS.
+    # Re-checked using TOI's own /rss.cms directory (rather than guessing
+    # city feed IDs, which is what failed the first two times) and found
+    # real, live, fresh feeds for 5 of the 7. Madhya Pradesh and
+    # Chhattisgarh remain uncovered: tried Patrika, Jagran, Naidunia (all
+    # 404), Free Press Journal Bhopal/Indore (200 but 0 items), and Dainik
+    # Bhaskar's guessed Bhopal category feed (200 but content was generic
+    # national news mislabeled under a Bhopal-looking category ID, not
+    # real local coverage) — no working feed found, English or vernacular.
+
+    {
+        "name": "TOI Ahmedabad (Gujarat)",
+        "slug": "toi-ahmedabad",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/-2128821153.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/ahmedabad",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "TOI Surat (Gujarat)",
+        "slug": "toi-surat",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3942660.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/surat",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "TOI Vadodara (Gujarat)",
+        "slug": "toi-vadodara",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3942666.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/vadodara",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "TOI Rajkot (Gujarat)",
+        "slug": "toi-rajkot",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3942663.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/rajkot",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "TOI Goa",
+        "slug": "toi-goa",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3012535.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/goa",
+        "category": "regional_west",
+        "region": "west"
+    },
+    {
+        "name": "TOI Jaipur (Rajasthan)",
+        "slug": "toi-jaipur",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/3012544.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/jaipur",
+        "category": "regional_north",
+        "region": "north"
+    },
+    {
+        "name": "TOI Patna (Bihar)",
+        "slug": "toi-patna",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/-2128817995.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/patna",
+        "category": "regional_east",
+        "region": "east"
+    },
+    {
+        "name": "TOI Ranchi (Jharkhand)",
+        "slug": "toi-ranchi",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/4118245.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/ranchi",
+        "category": "regional_east",
+        "region": "east"
+    },
+
+    # --- Added 2026-08-25: international business/finance/crypto pass,
+    # from a user-supplied outlet list, verified live before adding.
+    # Skipped: Kitco Metals (404, dead endpoint) and the coindesk.com
+    # ?outputType=xml URL (duplicate content of the coindesk.com feed
+    # already seeded above). Reuters/Bloomberg have no native public RSS
+    # anymore, so they're wrapped via Google News RSS search — note their
+    # <link> is a news.google.com redirect, not a direct reuters.com/
+    # bloomberg.com URL, so anything downstream that expects a direct
+    # article link needs to resolve that redirect.
+
+    {
+        "name": "CNBC Top News",
+        "slug": "cnbc-top-news",
+        "feed_url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+        "homepage_url": "https://www.cnbc.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "CNBC Finance",
+        "slug": "cnbc-finance",
+        "feed_url": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
+        "homepage_url": "https://www.cnbc.com/finance/",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Yahoo Finance",
+        "slug": "yahoo-finance",
+        "feed_url": "https://finance.yahoo.com/news/rssindex",
+        "homepage_url": "https://finance.yahoo.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "MarketWatch Top Stories",
+        "slug": "marketwatch-top",
+        "feed_url": "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+        "homepage_url": "https://www.marketwatch.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "MarketWatch Breaking News",
+        "slug": "marketwatch-bulletins",
+        "feed_url": "https://feeds.content.dowjones.io/public/rss/mw_bulletins",
+        "homepage_url": "https://www.marketwatch.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "OilPrice.com",
+        "slug": "oilprice",
+        "feed_url": "https://oilprice.com/rss/main",
+        "homepage_url": "https://oilprice.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Reuters (via Google News)",
+        "slug": "reuters-gnews",
+        "feed_url": "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "homepage_url": "https://www.reuters.com",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Bloomberg (via Google News)",
+        "slug": "bloomberg-gnews",
+        "feed_url": "https://news.google.com/rss/search?q=site:bloomberg.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+        "homepage_url": "https://www.bloomberg.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Decrypt",
+        "slug": "decrypt",
+        "feed_url": "https://decrypt.co/feed",
+        "homepage_url": "https://decrypt.co",
+        "category": "crypto",
+        "region": "national"
     }
 ]
 
