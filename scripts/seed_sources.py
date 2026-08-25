@@ -928,6 +928,88 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://www.abplive.com/states/chhattisgarh",
         "category": "regional_central",
         "region": "central"
+    },
+
+    # --- Added 2026-08-25: northeast expansion pass. Prior northeast
+    # coverage was only 3 sources (EastMojo, Assam Tribune, Northeast
+    # Today), all Assam-centric. Filled in Nagaland, Meghalaya, Manipur,
+    # Arunachal Pradesh — verified live with genuinely local article
+    # content, not just HTTP 200. Nagaland Post is real and updates
+    # frequently (500 items) but its feed interleaves generic wire/
+    # entertainment content with local Nagaland news — kept in since the
+    # local content is real, but it's noisier than the others. Tripura,
+    # Mizoram, and Sikkim remain uncovered after two search passes: tried
+    # Tripura Infoway/Chronicle/Star, Eastern Herald (403/404/0 items),
+    # The Zozam Times, Zonet, Mizzima (403/unreachable), Summit Times,
+    # Sikkim Chronicle/Express, NowTSikkim (all unreachable/DNS failures).
+
+    {
+        "name": "TOI Guwahati (Assam)",
+        "slug": "toi-guwahati",
+        "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/4118215.cms",
+        "homepage_url": "https://timesofindia.indiatimes.com/city/guwahati",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        "name": "Northeast Now",
+        "slug": "northeast-now",
+        "feed_url": "https://nenow.in/feed",
+        "homepage_url": "https://nenow.in",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        "name": "Morung Express (Nagaland)",
+        "slug": "morung-express",
+        "feed_url": "https://morungexpress.com/feed",
+        "homepage_url": "https://morungexpress.com",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        # Real and frequently updated, but the feed interleaves generic
+        # wire/entertainment items with genuine Nagaland-local news.
+        "name": "Nagaland Post",
+        "slug": "nagaland-post",
+        "feed_url": "https://www.nagalandpost.com/feed",
+        "homepage_url": "https://www.nagalandpost.com",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        "name": "The Shillong Times (Meghalaya)",
+        "slug": "shillong-times",
+        "feed_url": "https://www.theshillongtimes.com/feed",
+        "homepage_url": "https://www.theshillongtimes.com",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        "name": "Imphal Times (Manipur)",
+        "slug": "imphal-times",
+        "feed_url": "https://www.imphaltimes.com/feed",
+        "homepage_url": "https://www.imphaltimes.com",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        "name": "Arunachal24",
+        "slug": "arunachal24",
+        "feed_url": "https://arunachal24.in/feed",
+        "homepage_url": "https://arunachal24.in",
+        "category": "northeast",
+        "region": "northeast"
+    },
+    {
+        # Verified 2026-08-25: robots.txt allows all (Disallow: empty),
+        # feed is live with genuinely local Guwahati/Assam content.
+        "name": "Guwahati Plus",
+        "slug": "guwahati-plus",
+        "feed_url": "https://guwahatiplus.com/feed",
+        "homepage_url": "https://guwahatiplus.com",
+        "category": "northeast",
+        "region": "northeast"
     }
 ]
 
