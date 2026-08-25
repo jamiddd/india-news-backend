@@ -130,28 +130,45 @@ async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list
 # Word Ladder
 # ---------------------------------------------------------------------------
 
-def _reachable_in_steps(start: str, target: str, pool: set[str], max_steps: int) -> bool:
-    """Mirrors the client's play logic (see WordLadderViewModel.submit in
-    DailyGamesViewModels.kt): allowed_words is a pool of legal intermediate
-    words the player picks from — not a prescribed order — and each step must
-    change exactly one letter from the previous word. Confirms a path from
-    start to target exists within max_steps using only pool words."""
-    reached = {start}
-    for _ in range(max_steps):
-        if target in reached:
-            return True
-        reached |= {
-            word for word in pool
-            if any(len(word) == len(prev) and sum(a != b for a, b in zip(word, prev)) == 1 for prev in reached)
-        }
-    return target in reached
+def _shortest_ladder_steps(start: str, target: str, pool: set[str]) -> Optional[int]:
+    """BFS over the one-letter-change graph induced by `pool` (which must
+    already include start/target) — returns the TRUE minimum number of steps
+    from start to target, or None if no path exists at all.
+
+    Deliberately does not take a max_steps cap and stop early: an earlier
+    version (_reachable_in_steps) only checked "is target reachable within
+    the LLM's claimed optimal_steps," which a shorter real path still
+    satisfies — e.g. a claimed optimal_steps=5 passed validation even though
+    COLD -> CORD -> CARD -> WARD -> WARM is a real 4-step solution in the
+    same pool, silently mislabeling the puzzle's difficulty. Since a real
+    shortest path can't exceed the pool size + 1, BFS naturally terminates
+    well before that regardless."""
+    if start == target:
+        return 0
+    visited = {start}
+    frontier = {start}
+    steps = 0
+    while frontier:
+        steps += 1
+        next_frontier = set()
+        for prev in frontier:
+            for word in pool:
+                if word in visited:
+                    continue
+                if len(word) == len(prev) and sum(a != b for a, b in zip(word, prev)) == 1:
+                    if word == target:
+                        return steps
+                    next_frontier.add(word)
+        visited |= next_frontier
+        frontier = next_frontier
+    return None
 
 
 def _validate_ladder(payload: dict) -> tuple[str, str, list[str], int]:
     start = str(payload.get("start_word") or "").strip().upper()
     target = str(payload.get("target_word") or "").strip().upper()
     allowed = [str(word).strip().upper() for word in payload.get("allowed_words") or []]
-    optimal = payload.get("optimal_steps")
+    claimed_optimal = payload.get("optimal_steps")
     length = len(start)
     if length < 3 or len(target) != length:
         raise ValueError("Start/target must be same-length words of at least 3 letters")
@@ -161,11 +178,22 @@ def _validate_ladder(payload: dict) -> tuple[str, str, list[str], int]:
         raise ValueError("Need 6-15 unique allowed words")
     if any(len(word) != length or not word.isalpha() for word in allowed):
         raise ValueError("Allowed words must all be alphabetic and same length as start/target")
-    if not isinstance(optimal, int) or not (1 <= optimal <= len(allowed) + 1):
+    if not isinstance(claimed_optimal, int) or not (1 <= claimed_optimal <= len(allowed) + 1):
         raise ValueError("optimal_steps out of range")
-    if not _reachable_in_steps(start, target, set(allowed) | {start, target}, optimal):
-        raise ValueError(f"No path from {start} to {target} within {optimal} steps using the allowed words")
-    return start, target, allowed, optimal
+    true_optimal = _shortest_ladder_steps(start, target, set(allowed) | {start, target})
+    if true_optimal is None:
+        raise ValueError(f"No path from {start} to {target} exists using the allowed words")
+    if true_optimal != claimed_optimal:
+        # Trust the graph, not the LLM's claim — a shorter real path here
+        # means the LLM's stated optimal_steps was simply wrong, not that
+        # the puzzle is unplayable. Log so a persistent pattern (the model
+        # consistently overestimating) is visible without blocking today's
+        # puzzle over a labeling mismatch.
+        logger.warning(
+            "Word Ladder AI claimed optimal_steps=%s but the real shortest path is %s (%s -> %s)",
+            claimed_optimal, true_optimal, start, target,
+        )
+    return start, target, allowed, true_optimal
 
 
 async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], int, str]:
