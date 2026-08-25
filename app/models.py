@@ -33,6 +33,7 @@ class User(Base):
 
     device_tokens = relationship("DeviceToken", cascade="all, delete-orphan")
     game_sessions = relationship("GameSession", cascade="all, delete-orphan")
+    saved_stories = relationship("SavedStory", cascade="all, delete-orphan")
 
 
 class DeviceToken(Base):
@@ -61,16 +62,23 @@ class DeviceToken(Base):
 
 class NotificationLog(Base):
     """One row per push notification actually sent to a user for a given
-    cluster. Serves two purposes for scripts/send_notifications.py: (1)
-    dedup — never notify the same user about the same cluster twice, and
-    (2) breaking-mode daily-cap enforcement — count today's rows for
-    (user_id, mode='breaking') before sending another."""
+    cluster. Serves three purposes for scripts/send_notifications.py: (1)
+    dedup — never notify the same user about the same cluster twice via
+    "breaking", (2) breaking-mode daily-cap enforcement — count today's rows
+    for (user_id, mode='breaking') before sending another, and (3) per-slot
+    daily dedup — daily_slot_utc (only set when mode='daily') identifies
+    which of a user's possibly-several daily_notification_times_utc entries
+    this row is for, so multiple times/day each get their own dedup instead
+    of a single "sent today" flag, and (unlike a sent_at time-window
+    comparison) isn't sensitive to two configured times being close together
+    or to a slot near midnight."""
     __tablename__ = "notification_log"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False)
     mode = Column(String(20), nullable=False)  # "daily" | "breaking"
+    daily_slot_utc = Column(String(5), nullable=True)  # "HH:MM", only set when mode == "daily"
     sent_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
 
     __table_args__ = (
@@ -103,6 +111,42 @@ class GameSession(Base):
     __table_args__ = (
         Index("uq_game_sessions_user_game_date", "user_id", "game_type", "puzzle_date", unique=True),
     )
+
+
+class SavedStory(Base):
+    """One row per (user, cluster) a user has bookmarked. Upserted on save
+    (re-saving an already-saved cluster is a no-op on saved_at, not a
+    duplicate row or a bump) so the client can call save/unsave freely
+    without needing to check current state first. Mirrors the Android-side
+    SavedStoryItem, whose local SharedPreferences persistence this table
+    replaces for logged-in users — see POST/DELETE/GET
+    /users/{user_id}/saved-stories in app/main.py."""
+    __tablename__ = "saved_stories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+    saved_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    cluster = relationship("StoryCluster")
+
+    __table_args__ = (
+        Index("uq_saved_stories_user_cluster", "user_id", "cluster_id", unique=True),
+    )
+
+
+class UserSourceFollow(Base):
+    """A user "starring" a Source. Composite PK (no surrogate id needed),
+    mirroring UserEntityAffinity's style. Read by
+    app.services.affinity.score_clusters_for_user to boost clusters carrying
+    an article from a starred source — "For You" ranking only, per the
+    "User data to store" design session; the "All Stories" feed
+    (headline_score/entity_boost) is untouched by this table."""
+    __tablename__ = "user_source_follows"
+
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class DailyCrossword(Base):

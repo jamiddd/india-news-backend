@@ -1,8 +1,10 @@
 """
-Decides who gets a push notification this run and sends it, for the two
-opt-in modes users can pick in Settings:
+Decides who gets a push notification this run and sends it. Breaking alerts
+and daily digests are independent opt-ins — a user can have both on at once
+(see UserPreferences.breaking_notifications_enabled /
+daily_notification_times_utc in schemas.py/NewsModels.kt):
 
-- "breaking": headline_score > BREAKING_SCORE_THRESHOLD (0.4). This value is
+- Breaking: headline_score > BREAKING_SCORE_THRESHOLD (0.4). This value is
   deliberately above 0.3536, the highest score a singleton (1-outlet) story
   can ever reach regardless of recency (score = distinct_source_count /
   (hours+2)^1.5, and a 1-source story at age 0 scores 1/2^1.5 = 0.3536) — so
@@ -11,11 +13,11 @@ opt-in modes users can pick in Settings:
   BREAKING_DAILY_CAP (5) sends/day per user even on an unusually newsy day;
   confirmed against live production data that ~3 clusters/day naturally
   cross 0.4, so the cap is a rarely-binding safety net, not the normal case.
-- "daily": one notification/day, at approximately the user's chosen
-  preferred time (notification_time_utc, already UTC — see
-  UserPreferences.notification_time_utc in schemas.py/NewsModels.kt for why
-  no timezone field is needed), covering only the single top-headline_score
-  cluster overall (not personalized).
+- Daily: one notification per configured time-of-day (a user can pick
+  several), covering only the single top-headline_score cluster overall
+  (not personalized). Dedup is per time-slot via NotificationLog.
+  daily_slot_utc, not just "already sent today", so multiple
+  daily_notification_times_utc entries each get their own send.
 
 Meant to run every ~15 min via cron, a few minutes after poll_all_sources()
 recomputes headline_score (see poller.py) — e.g. :05/:20/:35/:50, following
@@ -33,7 +35,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from sqlalchemy.orm import selectinload
 
 from firebase_admin import messaging
@@ -74,6 +76,15 @@ def _is_within_daily_window(notification_time_utc: str, now: datetime) -> bool:
     diff = abs(current - target)
     diff = min(diff, 1440 - diff)
     return diff <= DAILY_WINDOW_MINUTES
+
+
+def _due_daily_slots(times_utc: list, now: datetime) -> list:
+    """Which of a user's configured daily_notification_times_utc entries are
+    due this run (within DAILY_WINDOW_MINUTES of now). A user with several
+    times can have more than one come due on the same run in principle
+    (only if two picks are within the cadence of each other), each handled
+    as its own send/dedup below."""
+    return [t for t in times_utc if _is_within_daily_window(t, now)]
 
 
 async def _send(app, token: str, title: str, body: str, cluster_id: int, channel_id: str) -> bool:
@@ -137,23 +148,33 @@ async def main():
             now = datetime.now(timezone.utc)
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
-            # Users with notifications on and at least one registered device.
+            # Users with either notification mode on and at least one
+            # registered device. Breaking and daily are independent opt-ins
+            # now, so this OR's both flags rather than checking one string.
             result = await session.execute(
                 select(User)
                 .options(selectinload(User.device_tokens))
-                .where(text("preferences->>'notification_frequency' != 'off'"))
+                .where(
+                    or_(
+                        text("(preferences->>'breaking_notifications_enabled')::boolean IS TRUE"),
+                        # preferences is a `json` column, not `jsonb` — jsonb_array_length
+                        # needs an explicit cast, json/jsonb aren't binary-compatible.
+                        text("jsonb_array_length(COALESCE((preferences->'daily_notification_times_utc')::jsonb, '[]'::jsonb)) > 0"),
+                    )
+                )
             )
             users = result.scalars().unique().all()
 
             breaking_sent = 0
             daily_sent = 0
+            top_story = None  # lazily fetched once, shared across all daily sends this run
 
             for user in users:
                 if not user.device_tokens:
                     continue
-                frequency = (user.preferences or {}).get("notification_frequency", "off")
+                prefs = user.preferences or {}
 
-                if frequency == "breaking":
+                if prefs.get("breaking_notifications_enabled"):
                     cap_used = (
                         await session.execute(
                             select(func.count(NotificationLog.id)).where(
@@ -163,61 +184,61 @@ async def main():
                             )
                         )
                     ).scalar() or 0
-                    if cap_used >= BREAKING_DAILY_CAP:
-                        continue
-
-                    already_notified = select(NotificationLog.cluster_id).where(
-                        NotificationLog.user_id == user.id, NotificationLog.mode == "breaking"
-                    )
-                    candidate = (
-                        await session.execute(
-                            select(StoryCluster)
-                            .where(
-                                StoryCluster.headline_score > BREAKING_SCORE_THRESHOLD,
-                                StoryCluster.id.notin_(already_notified),
+                    if cap_used < BREAKING_DAILY_CAP:
+                        already_notified = select(NotificationLog.cluster_id).where(
+                            NotificationLog.user_id == user.id, NotificationLog.mode == "breaking"
+                        )
+                        candidate = (
+                            await session.execute(
+                                select(StoryCluster)
+                                .where(
+                                    StoryCluster.headline_score > BREAKING_SCORE_THRESHOLD,
+                                    StoryCluster.id.notin_(already_notified),
+                                )
+                                .order_by(StoryCluster.headline_score.desc())
+                                .limit(1)
                             )
-                            .order_by(StoryCluster.headline_score.desc())
-                            .limit(1)
-                        )
-                    ).scalar_one_or_none()
-                    if candidate is None:
-                        continue
+                        ).scalar_one_or_none()
+                        if candidate is not None:
+                            for device in list(user.device_tokens):
+                                ok = await _send(
+                                    app, device.fcm_token,
+                                    title="Breaking",
+                                    body=candidate.headline,
+                                    cluster_id=candidate.id,
+                                    channel_id="breaking_news",
+                                )
+                                if not ok:
+                                    await session.delete(device)
+                            session.add(NotificationLog(user_id=user.id, cluster_id=candidate.id, mode="breaking"))
+                            breaking_sent += 1
 
-                    for device in list(user.device_tokens):
-                        ok = await _send(
-                            app, device.fcm_token,
-                            title="Breaking",
-                            body=candidate.headline,
-                            cluster_id=candidate.id,
-                            channel_id="breaking_news",
-                        )
-                        if not ok:
-                            await session.delete(device)
-                    session.add(NotificationLog(user_id=user.id, cluster_id=candidate.id, mode="breaking"))
-                    breaking_sent += 1
-
-                elif frequency == "daily":
-                    preferred_time = (user.preferences or {}).get("notification_time_utc")
-                    if not preferred_time or not _is_within_daily_window(preferred_time, now):
-                        continue
-
-                    already_sent_today = (
+                due_slots = _due_daily_slots(prefs.get("daily_notification_times_utc") or [], now)
+                for slot in due_slots:
+                    # Exact (user, slot, today) match rather than a sent_at
+                    # time-window comparison — a window can't tell two
+                    # configured times apart if they're close together, and
+                    # needs today's-date arithmetic that breaks for a slot
+                    # near midnight. daily_slot_utc sidesteps both.
+                    already_sent_for_slot = (
                         await session.execute(
                             select(NotificationLog.id).where(
                                 NotificationLog.user_id == user.id,
                                 NotificationLog.mode == "daily",
+                                NotificationLog.daily_slot_utc == slot,
                                 NotificationLog.sent_at >= today_start,
                             )
                         )
                     ).scalar_one_or_none()
-                    if already_sent_today is not None:
+                    if already_sent_for_slot is not None:
                         continue
 
-                    top_story = (
-                        await session.execute(
-                            select(StoryCluster).order_by(StoryCluster.headline_score.desc()).limit(1)
-                        )
-                    ).scalar_one_or_none()
+                    if top_story is None:
+                        top_story = (
+                            await session.execute(
+                                select(StoryCluster).order_by(StoryCluster.headline_score.desc()).limit(1)
+                            )
+                        ).scalar_one_or_none()
                     if top_story is None:
                         continue
 
@@ -231,7 +252,9 @@ async def main():
                         )
                         if not ok:
                             await session.delete(device)
-                    session.add(NotificationLog(user_id=user.id, cluster_id=top_story.id, mode="daily"))
+                    session.add(NotificationLog(
+                        user_id=user.id, cluster_id=top_story.id, mode="daily", daily_slot_utc=slot,
+                    ))
                     daily_sent += 1
 
             await session.commit()

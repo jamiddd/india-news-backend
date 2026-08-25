@@ -70,14 +70,15 @@ class UserPreferences(BaseModel):
     language_pref: str = "all"
     enabled_categories: List[str] = Field(default_factory=list)
     custom_categories: List[str] = Field(default_factory=list)
-    # "off" | "daily" | "breaking" — see scripts/send_notifications.py for
-    # what each mode actually sends.
-    notification_frequency: str = "off"
-    # HH:MM, UTC — the client converts the user's local time-of-day pick to
-    # UTC before saving (see NewsViewModel's preferred-time setter), so the
-    # backend never needs a timezone field or per-user tz math. Only
-    # meaningful when notification_frequency == "daily".
-    notification_time_utc: Optional[str] = None
+    # Independent of daily_notification_times_utc below — a user can have
+    # both breaking alerts AND daily digests on at once. See
+    # scripts/send_notifications.py for what each actually sends.
+    breaking_notifications_enabled: bool = False
+    # List of "HH:MM" (UTC) — one digest notification per entry, per day. The
+    # client converts each local time-of-day pick to UTC before saving (see
+    # NewsViewModel's preferred-time setter), so the backend never needs a
+    # timezone field or per-user tz math. Empty list = no daily digests.
+    daily_notification_times_utc: List[str] = Field(default_factory=list)
     # Source.id (as a string key, since JSON object keys are always strings)
     # -> boost multiplier applied to headline_score in the "All Stories" feed
     # only (see GET /clusters's source_weights query param). A source absent
@@ -311,6 +312,25 @@ class ReadEventRequest(BaseModel):
     cluster_id: int
     dwell_ms: Optional[int] = Field(default=None, ge=0)
     scroll_depth_pct: Optional[int] = Field(default=None, ge=0, le=100)
+
+
+class SaveStoryRequest(BaseModel):
+    cluster_id: int
+
+
+class SavedStoryOut(BaseModel):
+    saved_at: datetime
+    cluster: StoryClusterOut
+
+
+class SavedStoriesOut(BaseModel):
+    items: List[SavedStoryOut]
+    next_cursor: Optional[str] = None
+    has_more: bool
+
+
+class StarredSourcesOut(BaseModel):
+    items: List[SourceOut]
 
 
 class GameStatsOut(BaseModel):

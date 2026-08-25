@@ -33,6 +33,9 @@ docker exec news_backend_prod python3 scripts/migrate_users_provider_uid_index.p
 docker exec news_backend_prod python3 scripts/add_ranking_columns.py
 docker exec news_backend_prod python3 scripts/add_ai_enriched_column.py
 docker exec news_backend_prod python3 scripts/add_notification_tables.py
+docker exec news_backend_prod python3 scripts/add_saved_stories_table.py
+docker exec news_backend_prod python3 scripts/add_user_source_follows_table.py
+docker exec news_backend_prod python3 scripts/migrate_notification_prefs.py
 
 echo "================================================================="
 echo "  Running enrichment pass (picks up any never-enriched clusters)..."

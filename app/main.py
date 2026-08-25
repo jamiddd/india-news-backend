@@ -44,7 +44,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut, RelatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -57,6 +57,8 @@ from app.schemas import (
     WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
     ReadEventRequest,
+    SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
+    StarredSourcesOut,
 )
 from app.services.affinity import record_engagement, score_clusters_for_user
 from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
@@ -1421,3 +1423,154 @@ async def record_read_event(
 
     await db.commit()
     return {"message": "Recorded"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", status_code=200)
+@limiter.limit("60/minute")
+async def save_story(
+    request: Request,
+    user_id: str,
+    payload: SaveStoryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bookmarks a cluster for user_id. Upserted on (user_id, cluster_id) —
+    re-saving an already-saved cluster is idempotent and does not bump
+    saved_at, so unsave-then-resave ordering stays predictable."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cluster_result = await db.execute(select(StoryCluster).where(StoryCluster.id == payload.cluster_id))
+    if cluster_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    statement = pg_insert(SavedStory).values(
+        user_id=user_id, cluster_id=payload.cluster_id,
+    ).on_conflict_do_nothing(index_elements=["user_id", "cluster_id"])
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Saved"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories/{{cluster_id}}", status_code=200)
+@limiter.limit("60/minute")
+async def unsave_story(
+    request: Request,
+    user_id: str,
+    cluster_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(SavedStory).where(SavedStory.user_id == user_id, SavedStory.cluster_id == cluster_id)
+    )
+    saved = result.scalar_one_or_none()
+    if saved is not None:
+        await db.delete(saved)
+        await db.commit()
+    return {"message": "Unsaved"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", response_model=SavedStoriesOut)
+@limiter.limit("60/minute")
+async def list_saved_stories(
+    request: Request,
+    user_id: str,
+    limit: int = Query(20, ge=1, le=50),
+    cursor: Optional[int] = Query(None, description="Cursor for pagination (a saved_stories.id)"),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    query = (
+        select(SavedStory)
+        .options(selectinload(SavedStory.cluster).selectinload(StoryCluster.articles).selectinload(Article.source))
+        .where(SavedStory.user_id == user_id)
+        .order_by(desc(SavedStory.id))
+    )
+    if cursor:
+        query = query.where(SavedStory.id < cursor)
+    query = query.limit(limit + 1)
+
+    result = await db.execute(query)
+    rows = result.scalars().all()
+
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = str(items[-1].id) if has_more and items else None
+
+    formatted = [
+        SavedStoryOut(saved_at=row.saved_at, cluster=_cluster_to_out(row.cluster))
+        for row in items
+    ]
+
+    return SavedStoriesOut(items=formatted, next_cursor=next_cursor, has_more=has_more)
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/star", status_code=200)
+@limiter.limit("60/minute")
+async def star_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stars source_id for user_id — boosts ranking in /clusters/for-you
+    only (see app.services.affinity.score_clusters_for_user), never in
+    "All Stories". Upserted on (user_id, source_id), idempotent."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    source_result = await db.execute(select(Source).where(Source.id == source_id))
+    if source_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    statement = pg_insert(UserSourceFollow).values(
+        user_id=user_id, source_id=source_id,
+    ).on_conflict_do_nothing(index_elements=["user_id", "source_id"])
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Starred"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/star", status_code=200)
+@limiter.limit("60/minute")
+async def unstar_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(UserSourceFollow).where(
+            UserSourceFollow.user_id == user_id, UserSourceFollow.source_id == source_id,
+        )
+    )
+    follow = result.scalar_one_or_none()
+    if follow is not None:
+        await db.delete(follow)
+        await db.commit()
+    return {"message": "Unstarred"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/sources/starred", response_model=StarredSourcesOut)
+@limiter.limit("60/minute")
+async def list_starred_sources(
+    request: Request,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = await db.execute(
+        select(Source)
+        .join(UserSourceFollow, UserSourceFollow.source_id == Source.id)
+        .where(UserSourceFollow.user_id == user_id)
+        .order_by(Source.name)
+    )
+    sources = result.scalars().all()
+    return StarredSourcesOut(items=[SourceOut.model_validate(s) for s in sources])
