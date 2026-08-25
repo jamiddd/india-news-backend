@@ -170,17 +170,34 @@ async def generate_word_and_quote(feature_date: date, recent_words: list[str] | 
     return WORDS[ordinal % len(WORDS)], {"quote": quote, "author": author}, "curated"
 
 
+async def _retry_missing_background(session: AsyncSession, row: DailyEditorial, feature_date: date) -> DailyEditorial:
+    """The initial fetch is best-effort and its result gets cached on the
+    row forever, so a transient failure (rate limit, missing key at the
+    time, network blip) previously meant no background image for that date
+    ever again. Retry once per request instead — cheap, since a populated
+    background_image short-circuits immediately."""
+    if row.background_image is not None:
+        return row
+    background_query = BACKGROUND_QUERIES[feature_date.toordinal() % len(BACKGROUND_QUERIES)]
+    background_image = await _fetch_background_image(background_query)
+    if background_image is not None:
+        row.background_image = background_image
+        await session.commit()
+        await session.refresh(row)
+    return row
+
+
 async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> DailyEditorial:
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
     if existing:
-        return existing
+        return await _retry_missing_background(session, existing, feature_date)
     lock_key = 77000000 + int(feature_date.strftime("%Y%m%d"))
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
     if existing:
-        return existing
+        return await _retry_missing_background(session, existing, feature_date)
     recent_words, recent_authors = await _recent_words_and_authors(session, feature_date)
     word, quote, _ = await generate_word_and_quote(feature_date, recent_words, recent_authors)
     background_query = BACKGROUND_QUERIES[feature_date.toordinal() % len(BACKGROUND_QUERIES)]
