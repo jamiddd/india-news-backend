@@ -13,6 +13,14 @@ from app.models import Article, DailyQuiz, DailySpellingBee, DailyWordLadder, St
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
+
+# call_claude_json already retries on transport/JSON-parse failures
+# internally. This is a separate outer retry for "the model replied with
+# syntactically valid JSON that fails our own puzzle-shape validation" — a
+# distinct failure mode that used to fall back to the curated/algorithmic
+# puzzle after a single miss, with no second attempt at getting the LLM to
+# produce something valid.
+VALIDATION_RETRY_ATTEMPTS = 3
 IST = ZoneInfo("Asia/Kolkata")
 
 # Same content filter used for the daily poll (app/services/polls.py) — keep
@@ -115,13 +123,21 @@ async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list
         'using all 7 letters at least once. Return JSON only: {"letters": [7 single '
         'uppercase letters], "center_letter": "one of those letters", "words": [...]}'
     )
-    data = await call_claude_json(system=system, user_content="Generate today's Spelling Bee puzzle.", max_tokens=800)
-    if data is not None:
+    # call_claude_json already retries internally on transport/JSON-parse
+    # failures (see its `attempts` param) — this outer loop is for the
+    # separate failure mode of "the model replied with syntactically valid
+    # JSON that doesn't satisfy the puzzle's own rules" (e.g. no pangram, a
+    # word using a letter outside the chosen 7), which used to fall back to
+    # `curated` on the very first such miss with no second attempt.
+    for attempt in range(VALIDATION_RETRY_ATTEMPTS):
+        data = await call_claude_json(system=system, user_content="Generate today's Spelling Bee puzzle.", max_tokens=800)
+        if data is None:
+            break
         try:
             letters, center, words = _validate_bee(data)
             return letters, center, words, "ai"
         except Exception as exc:
-            logger.warning("Spelling Bee AI output failed validation: %s", exc)
+            logger.warning("Spelling Bee AI output failed validation (attempt %s): %s", attempt + 1, exc)
     letters, center, words = _fallback_bee(puzzle_date)
     return letters, center, words, "curated"
 
@@ -206,13 +222,15 @@ async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], 
         '"target_word": "...", "allowed_words": [pool of words, not including start/target], '
         '"optimal_steps": integer length of the shortest such path}'
     )
-    data = await call_claude_json(system=system, user_content="Generate today's Word Ladder puzzle.", max_tokens=500)
-    if data is not None:
+    for attempt in range(VALIDATION_RETRY_ATTEMPTS):
+        data = await call_claude_json(system=system, user_content="Generate today's Word Ladder puzzle.", max_tokens=500)
+        if data is None:
+            break
         try:
             start, target, allowed, optimal = _validate_ladder(data)
             return start, target, allowed, optimal, "ai"
         except Exception as exc:
-            logger.warning("Word Ladder AI output failed validation: %s", exc)
+            logger.warning("Word Ladder AI output failed validation (attempt %s): %s", attempt + 1, exc)
     start, target, allowed, optimal = _fallback_ladder(puzzle_date)
     return start, target, allowed, optimal, "curated"
 
@@ -277,12 +295,14 @@ async def generate_quiz(session: AsyncSession, puzzle_date: date) -> tuple[list[
             '[4 strings], "correct_index": 0-3, "explanation": "one sentence, cites the fact"}, '
             "... exactly 5 items]}"
         )
-        data = await call_claude_json(system=system, user_content=str(stories), max_tokens=1500)
-        if data is not None:
+        for attempt in range(VALIDATION_RETRY_ATTEMPTS):
+            data = await call_claude_json(system=system, user_content=str(stories), max_tokens=1500)
+            if data is None:
+                break
             try:
                 return _validate_quiz(data), "ai"
             except Exception as exc:
-                logger.warning("Quiz AI output failed validation: %s", exc)
+                logger.warning("Quiz AI output failed validation (attempt %s): %s", attempt + 1, exc)
     return _fallback_quiz_questions(puzzle_date), "curated"
 
 
