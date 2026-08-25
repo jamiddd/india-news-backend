@@ -68,6 +68,7 @@ from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.related_stories import find_related_clusters
 from scripts.enrich_all_clusters import enrich_clusters
+from scripts.send_notifications import main as run_send_notifications
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
@@ -719,6 +720,20 @@ async def trigger_enrich(
     return {
         "message": f"Enrichment triggered in background (since_days={since_days}, force_all={force_all})."
     }
+
+@app.post(f"{settings.API_V1_STR}/ingest/notify")
+@limiter.limit("5/hour")
+async def trigger_notify(request: Request, background_tasks: BackgroundTasks):
+    """Fires scripts/send_notifications.py's breaking+daily push run. Meant
+    to be hit by a systemd timer (news-notify.timer) every ~15 min,
+    mirroring /ingest/poll and /ingest/enrich above — see that script's
+    module docstring for what "breaking" vs "daily" actually send.
+    run_send_notifications() opens its own DB session internally (same
+    reason as enrich_clusters above) and holds its own Postgres advisory
+    lock, so an overlapping/late-running background task from a prior timer
+    tick is a safe no-op rather than a double-send."""
+    background_tasks.add_task(run_send_notifications)
+    return {"message": "Notification run triggered in background."}
 
 @app.post(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/enrich")
 @limiter.limit("10/hour")
