@@ -1,10 +1,21 @@
 # Story graph mode — design log
 
-Status: **experimental, faulty, in progress.** Not wired into any live
-endpoint or UI. Lives entirely in `scripts/experiment_story_edges.py`
-(read-only, no writes, no LLM calls). This doc is the record of how we got
-here and what's still broken, so the next session doesn't have to re-derive
-it.
+Status: **experimental, faulty, in progress — paused for data collection.**
+Not wired into any live endpoint or UI. Lives entirely in
+`scripts/experiment_story_edges.py` (read-only, no writes). This doc is the
+record of how we got here and what's still broken, so the next session
+doesn't have to re-derive it.
+
+Round 5 (actor-type filter, below) is deployed to production as of
+2026-08-25, but has zero real-data validation yet — it needs freshly
+enriched clusters carrying `entities.backdrop` to judge against, and that
+only accumulates as the regular poll cycle runs. **Deliberately paused
+here**: come back in ~2-3 days (2026-08-27/28) once enough clusters have
+been enriched under the new prompt, re-run
+`scripts/experiment_story_edges.py` against live data, and check whether
+Round 5 actually reduces the Round 4 false-actor cases
+(`derby`/Brydon-Carse) before doing anything further (Node 7/8 trace,
+embedding-based fallback, or otherwise).
 
 ## The goal
 
@@ -223,12 +234,13 @@ based semantic similarity, discussed as the heavier alternative fix for
 both the fragmentation and dropped-member bugs — not started, no
 infra/model choice made yet.
 
-**Not yet validated**: this round has had no real-data run yet (needs an
-enrichment re-run or fresh clusters to pick up the new `backdrop` field —
-existing `story_clusters` rows enriched before this change have an empty
-`entities.backdrop`). Next session should re-run
-`scripts/experiment_story_edges.py` against live data and manually check
-whether Brydon Carse/derby-style false actors actually stop surfacing.
+**Not yet validated**: this round has had no real-data run yet — needs
+fresh clusters polled/enriched under the new prompt to pick up
+`entities.backdrop` at all (existing rows enriched before this change have
+an empty list, not a confirmed-no-backdrop signal). Deployed 2026-08-25;
+deliberately paused until ~2026-08-27/28 to let 2-3 days of normal polling
+accumulate enough backdrop-tagged clusters to judge against — see the
+Status line at the top of this doc.
 
 ## What's confirmed working vs. still open
 
