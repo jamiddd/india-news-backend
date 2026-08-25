@@ -57,6 +57,13 @@ class PaginatedClustersOut(BaseModel):
     has_more: bool
 
 
+class RelatedClustersOut(BaseModel):
+    items: List[StoryClusterOut]
+    # Display name of the anchor entity the grouping was found through (e.g.
+    # "Govinda") — None if no related stories were found. Debug/UI hint only.
+    actor: Optional[str] = None
+
+
 class UserPreferences(BaseModel):
     theme_mode: str = "system"
     accent_color: str = "blue"

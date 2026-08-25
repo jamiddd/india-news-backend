@@ -46,7 +46,7 @@ from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, utc_now
 from app.schemas import (
-    SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut,
+    SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut, RelatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -64,6 +64,7 @@ from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.related_stories import find_related_clusters
 from scripts.enrich_all_clusters import enrich_clusters
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
@@ -1169,6 +1170,47 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
         ai_enriched=cluster.ai_enriched,
         articles=articles_out
     )
+
+
+@app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/related", response_model=RelatedClustersOut)
+@limiter.limit("60/minute")
+async def get_related_clusters(
+    request: Request,
+    cluster_id: int,
+    sort: str = Query("relevance", pattern="^(relevance|time)$"),
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Flat "related stories" list — see app/services/related_stories.py for
+    what this does and does not guarantee (byproduct of the still-buggy
+    story-graph experiment, see backend/docs/story-graph-design.md)."""
+    cache_key = f"related:{cluster_id}:{sort}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return RelatedClustersOut.model_validate_json(cached)
+
+    related, actor = await find_related_clusters(db, cluster_id, sort=sort, limit=limit)
+    if actor is None and not related:
+        # Distinguish "cluster not in the lookback window at all" (404) from
+        # "found, but genuinely has no related stories" (200, empty list) —
+        # cheaply, by checking existence rather than re-deriving from
+        # find_related_clusters's internals.
+        exists = await db.execute(select(StoryCluster.id).where(StoryCluster.id == cluster_id))
+        if exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Story cluster not found")
+
+    cluster_ids = [c.id for c in related]
+    articles_result = await db.execute(
+        select(StoryCluster)
+        .where(StoryCluster.id.in_(cluster_ids))
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+    )
+    by_id = {c.id: c for c in articles_result.scalars().all()}
+    items = [_cluster_to_out(by_id[cid]) for cid in cluster_ids if cid in by_id]
+
+    result_out = RelatedClustersOut(items=items, actor=actor)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
 
 
 def _validate_game_type(game_type: str) -> None:
