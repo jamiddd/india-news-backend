@@ -70,6 +70,30 @@ _VIDEO_TAG_SELF_CLOSING_RE = re.compile(r'<video\b[^>]*/?>', re.IGNORECASE)
 _SRC_ATTR_RE = re.compile(r'\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
 _MEDIA_FILE_RE = re.compile(r'\.(m3u8|mp4|webm)(\?|$)', re.IGNORECASE)
 
+# Brightcove embeds (Al Jazeera and other publishers using it) show up as a
+# players.brightcove.net URL carrying the account id, player id, and a
+# videoId query param. Unlike JW's sitewide widget, this id genuinely
+# differs per page — but that turned out to be because Al Jazeera injects a
+# rotating "featured video" widget into EVERY page, video or not, so a
+# per-article id alone doesn't prove the page's own content is that video.
+# The actual signal: a real video page's ld+json has a VideoObject entry and
+# NO NewsArticle entry, while a text article that merely carries the
+# featured-video widget has both. So, same restriction shape as JW: only
+# trust an embedUrl found inside a VideoObject block, and only when the
+# page isn't also typed as a NewsArticle.
+_BRIGHTCOVE_EMBED_RE = re.compile(
+    r'players\.brightcove\.net/(\d+)/([A-Za-z0-9_-]+)/index(?:\.min)?\.(?:html|js)\?videoId=(\d+)',
+    re.IGNORECASE,
+)
+_ARTICLE_LD_TYPES = {"NewsArticle", "Article", "ReportageNewsArticle", "BlogPosting"}
+# The player's policy key (needed to call Brightcove's Playback API) isn't on
+# the article page — it's baked into that player's own bundle at
+# players.brightcove.net/<account>/<player>_default/index.min.js. It's fixed
+# per (account, player) pair, not per video, so cache it in-process instead
+# of re-fetching the player bundle for every single article.
+_BRIGHTCOVE_POLICY_KEY_RE = re.compile(r'policyKey:"([^"]+)"')
+_brightcove_policy_key_cache: dict[tuple[str, str], Optional[str]] = {}
+
 
 @dataclass
 class ExtractedArticle:
@@ -127,6 +151,90 @@ def _extract_video_tag(html: str, base_url: str) -> Optional[str]:
     return mp4_fallback or webm_fallback
 
 
+def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
+    entries = []
+    for block in _LD_JSON_RE.findall(html):
+        try:
+            data = json.loads(block)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        candidates = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
+        entries.extend(c for c in candidates if isinstance(c, dict))
+
+    types = set()
+    for entry in entries:
+        entry_type = entry.get("@type")
+        if isinstance(entry_type, list):
+            types.update(entry_type)
+        elif entry_type:
+            types.add(entry_type)
+    if types & _ARTICLE_LD_TYPES:
+        return None
+
+    for entry in entries:
+        if entry.get("@type") != "VideoObject":
+            continue
+        embed_url = entry.get("embedUrl") or entry.get("contentUrl") or ""
+        match = _BRIGHTCOVE_EMBED_RE.search(embed_url)
+        if match:
+            return match.group(1), match.group(2), match.group(3)
+    return None
+
+
+async def _resolve_brightcove_policy_key(client: AsyncSession, account_id: str, player_id: str) -> Optional[str]:
+    cache_key = (account_id, player_id)
+    if cache_key in _brightcove_policy_key_cache:
+        return _brightcove_policy_key_cache[cache_key]
+    policy_key = None
+    try:
+        response = await client.get(
+            f"https://players.brightcove.net/{account_id}/{player_id}/index.min.js",
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+        )
+        if response.status_code == 200:
+            match = _BRIGHTCOVE_POLICY_KEY_RE.search(response.text)
+            if match:
+                policy_key = match.group(1)
+    except Exception as e:
+        logger.debug(f"Brightcove policy key lookup failed for {account_id}/{player_id}: {e}")
+    _brightcove_policy_key_cache[cache_key] = policy_key
+    return policy_key
+
+
+async def _resolve_brightcove_video(
+    client: AsyncSession, account_id: str, video_id: str, policy_key: str
+) -> Optional[str]:
+    """
+    Hits Brightcove's Playback API for a given account/video id and returns a
+    directly-playable source URL — the HLS manifest (.m3u8) if present,
+    since ExoPlayer handles adaptive bitrate switching natively, otherwise
+    the first progressive mp4 fallback.
+    """
+    try:
+        response = await client.get(
+            f"https://edge.api.brightcove.com/playback/v1/accounts/{account_id}/videos/{video_id}",
+            headers={"Accept": f"application/json;pk={policy_key}"},
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+        )
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        sources = data.get("sources") or []
+        mp4_fallback = None
+        for source in sources:
+            src = source.get("src")
+            if not src:
+                continue
+            if source.get("type") == "application/x-mpegURL":
+                return src
+            if mp4_fallback is None and source.get("container") == "MP4":
+                mp4_fallback = src
+        return mp4_fallback
+    except Exception as e:
+        logger.debug(f"Brightcove resolution failed for account {account_id} video {video_id}: {e}")
+        return None
+
+
 async def _resolve_jwplayer_video(client: AsyncSession, media_id: str) -> Optional[str]:
     """
     Hits JW Player's public, unauthenticated delivery API for a given media
@@ -167,8 +275,9 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
       carry one of their own (see image_extractor.extract_rss_image, which
       callers should try first)
     - a playable video URL, tried in order: og:video meta tag, JW Player
-      widget (resolved via JW's delivery API), then a native <video>/<source>
-      tag's direct .mp4/.m3u8/.webm src as a last resort
+      widget (resolved via JW's delivery API), Brightcove embed (resolved
+      via Brightcove's Playback API), then a native <video>/<source> tag's
+      direct .mp4/.m3u8/.webm src as a last resort
 
     Returns ExtractedArticle(None, None) on any failure (network error,
     non-200, no extractable text) so callers can fall back to the RSS
@@ -196,6 +305,13 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
             jw_media_id = _extract_jwplayer_media_id(response.text)
             if jw_media_id:
                 og_video_url = await _resolve_jwplayer_video(client, jw_media_id)
+        if not og_video_url:
+            brightcove_embed = _extract_brightcove_embed(response.text)
+            if brightcove_embed:
+                account_id, player_id, video_id = brightcove_embed
+                policy_key = await _resolve_brightcove_policy_key(client, account_id, player_id)
+                if policy_key:
+                    og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
         return ExtractedArticle(content, og_image_url, og_video_url)
