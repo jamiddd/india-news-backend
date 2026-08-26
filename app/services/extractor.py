@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -37,12 +38,24 @@ _OG_VIDEO_RE_ALT = re.compile(
 # JW Player embeds (The Hindu and other publishers using it) never expose a
 # direct playable file via og:video — og:video, when present at all, points
 # at the *player page* (cdn.jwplayer.com/players/<mediaid>.html), which
-# ExoPlayer can't play. The media id embedded in that URL (or in a
-# `botr_<mediaid>_..._div` container div JW's embed script looks for) can be
-# resolved through JW's public, unauthenticated delivery API into an actual
-# HLS/mp4 source — see _resolve_jwplayer_video.
+# ExoPlayer can't play. The media id embedded in that URL can be resolved
+# through JW's public, unauthenticated delivery API into an actual HLS/mp4
+# source — see _resolve_jwplayer_video.
+#
+# The media id must come from a <script type="application/ld+json"> block
+# whose @type is VideoObject — NOT a bare page-wide text search for a
+# `cdn.jwplayer.com/players/<id>.html` or `botr_<id>_` div. Publishers embed
+# a generic "recommended video" JW widget (e.g. The Hindu's
+# `article-end-video-container`) identically on every article regardless of
+# topic; a text search matches that widget's id on any page and produces a
+# video_url for articles that have nothing to do with that video. The
+# structured VideoObject block only exists on the article that IS that
+# video, so restricting to it is what actually distinguishes real content
+# from the sitewide widget.
+_LD_JSON_RE = re.compile(
+    r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.IGNORECASE | re.DOTALL
+)
 _JW_PLAYER_URL_RE = re.compile(r'cdn\.jwplayer\.com/players/([A-Za-z0-9]+)\.html', re.IGNORECASE)
-_JW_BOTR_DIV_RE = re.compile(r'id=["\']botr_([A-Za-z0-9]+)_', re.IGNORECASE)
 
 
 @dataclass
@@ -63,8 +76,23 @@ def _extract_og_video(html: str) -> Optional[str]:
 
 
 def _extract_jwplayer_media_id(html: str) -> Optional[str]:
-    match = _JW_PLAYER_URL_RE.search(html) or _JW_BOTR_DIV_RE.search(html)
-    return match.group(1) if match else None
+    for block in _LD_JSON_RE.findall(html):
+        try:
+            data = json.loads(block)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        # A page can carry several ld+json blocks (Organization, BreadcrumbList,
+        # etc.) or one block with an @graph list of several typed entries —
+        # check both shapes for the one that's actually a VideoObject.
+        candidates = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
+        for entry in candidates:
+            if not isinstance(entry, dict) or entry.get("@type") != "VideoObject":
+                continue
+            content_url = entry.get("contentUrl") or ""
+            match = _JW_PLAYER_URL_RE.search(content_url)
+            if match:
+                return match.group(1)
+    return None
 
 
 async def _resolve_jwplayer_video(client: AsyncSession, media_id: str) -> Optional[str]:
