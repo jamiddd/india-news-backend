@@ -86,6 +86,20 @@ _BRIGHTCOVE_EMBED_RE = re.compile(
     re.IGNORECASE,
 )
 _ARTICLE_LD_TYPES = {"NewsArticle", "Article", "ReportageNewsArticle", "BlogPosting"}
+
+# YouTube embeds (Hindustan Times Videos, Livemint Videos) show up the same
+# structural way as Brightcove: a VideoObject ld+json block whose
+# contentUrl/embedUrl points at youtube.com/youtu.be. There's no playable
+# stream to resolve here — YouTube doesn't expose one, and scraping one out
+# via yt-dlp-style signature reverse-engineering would be fragile and
+# against YouTube's terms — so this just normalizes the id into a stable
+# embed URL for the app to load in an actual YouTube (IFrame) player.
+# Verified HT/Livemint's regular text articles carry no VideoObject at all
+# (unlike Al Jazeera's sitewide Brightcove widget), but the NewsArticle
+# exclusion is kept anyway as the same cheap safety net.
+_YOUTUBE_CONTENT_URL_RE = re.compile(
+    r'(?:youtube\.com/embed/|youtube\.com/watch\?v=|youtu\.be/)([A-Za-z0-9_-]{11})', re.IGNORECASE
+)
 # The player's policy key (needed to call Brightcove's Playback API) isn't on
 # the article page — it's baked into that player's own bundle at
 # players.brightcove.net/<account>/<player>_default/index.min.js. It's fixed
@@ -151,7 +165,7 @@ def _extract_video_tag(html: str, base_url: str) -> Optional[str]:
     return mp4_fallback or webm_fallback
 
 
-def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
+def _ld_json_entries(html: str) -> list[dict]:
     entries = []
     for block in _LD_JSON_RE.findall(html):
         try:
@@ -160,7 +174,10 @@ def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
             continue
         candidates = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
         entries.extend(c for c in candidates if isinstance(c, dict))
+    return entries
 
+
+def _ld_json_types(entries: list[dict]) -> set[str]:
     types = set()
     for entry in entries:
         entry_type = entry.get("@type")
@@ -168,16 +185,48 @@ def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
             types.update(entry_type)
         elif entry_type:
             types.add(entry_type)
-    if types & _ARTICLE_LD_TYPES:
-        return None
+    return types
 
-    for entry in entries:
-        if entry.get("@type") != "VideoObject":
-            continue
-        embed_url = entry.get("embedUrl") or entry.get("contentUrl") or ""
-        match = _BRIGHTCOVE_EMBED_RE.search(embed_url)
+
+def _ld_json_video_object_urls(entries: list[dict]) -> list[str]:
+    return [
+        entry.get("embedUrl") or entry.get("contentUrl") or ""
+        for entry in entries
+        if entry.get("@type") == "VideoObject"
+    ]
+
+
+def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
+    """
+    Only trusts a VideoObject found on a page that ISN'T also typed as a
+    text-article schema (NewsArticle/Article/etc) — Al Jazeera injects the
+    same rotating "featured video" Brightcove widget into every page, video
+    or not, so a NewsArticle co-occurring with VideoObject means the
+    VideoObject is that sitewide widget, not this page's own content.
+    """
+    entries = _ld_json_entries(html)
+    if _ld_json_types(entries) & _ARTICLE_LD_TYPES:
+        return None
+    for url in _ld_json_video_object_urls(entries):
+        match = _BRIGHTCOVE_EMBED_RE.search(url)
         if match:
             return match.group(1), match.group(2), match.group(3)
+    return None
+
+
+def _extract_youtube_embed_url(html: str) -> Optional[str]:
+    """
+    Unlike Brightcove/Al Jazeera, HT/Livemint's own video pages carry
+    NewsArticle *and* VideoObject together, and — verified against their
+    regular text articles — never emit a VideoObject at all outside a real
+    video page. So no NewsArticle exclusion here; a VideoObject's presence
+    at all is already the correct signal for these publishers.
+    """
+    entries = _ld_json_entries(html)
+    for url in _ld_json_video_object_urls(entries):
+        match = _YOUTUBE_CONTENT_URL_RE.search(url)
+        if match:
+            return f"https://www.youtube.com/embed/{match.group(1)}"
     return None
 
 
@@ -287,8 +336,10 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
       callers should try first)
     - a playable video URL, tried in order: og:video meta tag, JW Player
       widget (resolved via JW's delivery API), Brightcove embed (resolved
-      via Brightcove's Playback API), then a native <video>/<source> tag's
-      direct .mp4/.m3u8/.webm src as a last resort
+      via Brightcove's Playback API), a YouTube embed (normalized to a
+      stable youtube.com/embed/<id> URL — there's no raw stream to resolve,
+      the app plays this in an actual YouTube player), then a native
+      <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last resort
 
     Returns ExtractedArticle(None, None) on any failure (network error,
     non-200, no extractable text) so callers can fall back to the RSS
@@ -323,6 +374,8 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
                 policy_key = await _resolve_brightcove_policy_key(client, account_id, player_id)
                 if policy_key:
                     og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
+        if not og_video_url:
+            og_video_url = _extract_youtube_embed_url(response.text)
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
         return ExtractedArticle(content, og_image_url, og_video_url)
