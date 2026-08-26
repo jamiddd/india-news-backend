@@ -338,6 +338,10 @@ class StarredSourcesOut(BaseModel):
     items: List[SourceOut]
 
 
+class BlockedSourcesOut(BaseModel):
+    items: List[SourceOut]
+
+
 class GameStatsOut(BaseModel):
     total_played: int
     total_completed: int

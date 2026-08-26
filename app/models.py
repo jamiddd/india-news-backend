@@ -149,6 +149,19 @@ class UserSourceFollow(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class UserSourceBlock(Base):
+    """A user blocking a Source so its stories are hidden client-side
+    everywhere (feed, search, saved, related, notifications). Composite PK,
+    same shape as UserSourceFollow. Purely a per-user preference the client
+    filters on — this table has no effect on server-side ranking or feed
+    queries."""
+    __tablename__ = "user_source_blocks"
+
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DailyCrossword(Base):
     """One validated, shared crossword for an Asia/Kolkata calendar date."""
     __tablename__ = "daily_crosswords"

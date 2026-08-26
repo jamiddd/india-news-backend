@@ -44,7 +44,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, StoryReport, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut, RelatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -59,6 +59,7 @@ from app.schemas import (
     ReadEventRequest,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     StarredSourcesOut,
+    BlockedSourcesOut,
     ReportStoryRequest,
 )
 from app.services.affinity import record_engagement, score_clusters_for_user
@@ -1627,3 +1628,73 @@ async def list_starred_sources(
     )
     sources = result.scalars().all()
     return StarredSourcesOut(items=[SourceOut.model_validate(s) for s in sources])
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/block", status_code=200)
+@limiter.limit("60/minute")
+async def block_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blocks source_id for user_id — client filters this source's stories
+    out of every list it renders (feed, search, saved, related,
+    notifications). Purely a client-side preference; has no effect on
+    server-side ranking or feed queries. Upserted on (user_id, source_id),
+    idempotent."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    source_result = await db.execute(select(Source).where(Source.id == source_id))
+    if source_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    statement = pg_insert(UserSourceBlock).values(
+        user_id=user_id, source_id=source_id,
+    ).on_conflict_do_nothing(index_elements=["user_id", "source_id"])
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Blocked"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/block", status_code=200)
+@limiter.limit("60/minute")
+async def unblock_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(UserSourceBlock).where(
+            UserSourceBlock.user_id == user_id, UserSourceBlock.source_id == source_id,
+        )
+    )
+    block = result.scalar_one_or_none()
+    if block is not None:
+        await db.delete(block)
+        await db.commit()
+    return {"message": "Unblocked"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/sources/blocked", response_model=BlockedSourcesOut)
+@limiter.limit("60/minute")
+async def list_blocked_sources(
+    request: Request,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = await db.execute(
+        select(Source)
+        .join(UserSourceBlock, UserSourceBlock.source_id == Source.id)
+        .where(UserSourceBlock.user_id == user_id)
+        .order_by(Source.name)
+    )
+    sources = result.scalars().all()
+    return BlockedSourcesOut(items=[SourceOut.model_validate(s) for s in sources])
