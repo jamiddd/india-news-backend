@@ -19,6 +19,18 @@ VERIFIED_SOURCES = [
         "region": "national"
     },
     {
+        # Video-only feed, added to exercise the video-scraping pipeline
+        # (see app/services/extractor.py's JW Player resolution) in
+        # production — The Hindu's video pages embed JW Player, whose media
+        # id resolves through JW's delivery API to a real .m3u8/.mp4.
+        "name": "The Hindu Videos",
+        "slug": "the-hindu-videos",
+        "feed_url": "https://www.thehindu.com/videos/feeder/default.rss",
+        "homepage_url": "https://www.thehindu.com/videos",
+        "category": "national",
+        "region": "national"
+    },
+    {
         "name": "Indian Express",
         "slug": "indian-express",
         "feed_url": "https://indianexpress.com/section/india/feed/",
