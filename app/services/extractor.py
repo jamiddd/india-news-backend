@@ -209,6 +209,13 @@ async def _resolve_brightcove_video(
     directly-playable source URL — the HLS manifest (.m3u8) if present,
     since ExoPlayer handles adaptive bitrate switching natively, otherwise
     the first progressive mp4 fallback.
+
+    Brightcove lists the same manifest/file twice, once as http:// and once
+    as https://, back to back — picking the first match of a given type
+    would silently prefer http:// (it happens to come first), which the app
+    can't play at all (usesCleartextTraffic is false in the manifest). So
+    this only ever returns an https:// src, upgrading a bare http:// one if
+    that's the only variant a given source happens to offer.
     """
     try:
         response = await client.get(
@@ -220,16 +227,20 @@ async def _resolve_brightcove_video(
             return None
         data = response.json()
         sources = data.get("sources") or []
+        m3u8_url = None
         mp4_fallback = None
         for source in sources:
             src = source.get("src")
             if not src:
                 continue
-            if source.get("type") == "application/x-mpegURL":
-                return src
-            if mp4_fallback is None and source.get("container") == "MP4":
+            if m3u8_url is None and source.get("type") == "application/x-mpegURL":
+                m3u8_url = src
+            elif mp4_fallback is None and source.get("container") == "MP4":
                 mp4_fallback = src
-        return mp4_fallback
+        chosen = m3u8_url or mp4_fallback
+        if chosen and chosen.startswith("http://"):
+            chosen = "https://" + chosen[len("http://"):]
+        return chosen
     except Exception as e:
         logger.debug(f"Brightcove resolution failed for account {account_id} video {video_id}: {e}")
         return None
