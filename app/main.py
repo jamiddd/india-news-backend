@@ -873,14 +873,23 @@ async def list_story_clusters(
                      "single-outlet story (regional wire pickup, local-only coverage) never "
                      "counts as a headline regardless of its headline_score.",
     ),
+    source_id: Optional[int] = Query(
+        None,
+        description="Pin the feed to a single publisher (Reorder Topics 'add a source as a "
+                     "topic' tab) — returns only clusters with at least one article from this "
+                     "Source.id, reverse-chronological, ignoring `category`/`seed`/`user_id`/"
+                     "`source_weights`/the All Stories ranking entirely. Mutually exclusive "
+                     "with those in intent, not enforced; if set, it wins.",
+    ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}:{min_sources or ''}"
+    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}:{min_sources or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
 
-    is_all = not category or category.lower() == "all"
+    is_source_filter = source_id is not None
+    is_all = not is_source_filter and (not category or category.lower() == "all")
     weights = _parse_source_weights(source_weights) if is_all else {}
     # Feed ranking redesign, piece 3: a promoted explore candidate gets a
     # real, live multiplier here — not a shadow signal like piece 1's
@@ -922,6 +931,10 @@ async def list_story_clusters(
         else:
             effective_score = StoryCluster.headline_score * explore_boost_expr
         query = query.order_by(desc(effective_score), desc(StoryCluster.id))
+    elif is_source_filter:
+        subquery = select(Article.cluster_id).where(Article.source_id == source_id)
+        query = query.where(StoryCluster.id.in_(subquery))
+        query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
     else:
         cat = category.lower()
         subquery = (
