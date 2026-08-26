@@ -280,6 +280,17 @@ class PollVote(Base):
     __table_args__ = (UniqueConstraint("poll_id", "voter_hash", name="uq_poll_vote_voter"),)
 
 
+class StoryReport(Base):
+    __tablename__ = "story_reports"
+    id = Column(Integer, primary_key=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    reason = Column(String(30), nullable=False)
+    note = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default="open", index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class PollFallback(Base):
     __tablename__ = "poll_fallbacks"
     id = Column(Integer, primary_key=True)

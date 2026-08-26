@@ -44,7 +44,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, StoryReport, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut, RelatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
@@ -59,6 +59,7 @@ from app.schemas import (
     ReadEventRequest,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     StarredSourcesOut,
+    ReportStoryRequest,
 )
 from app.services.affinity import record_engagement, score_clusters_for_user
 from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
@@ -83,6 +84,7 @@ from app.services.firebase_auth import (
     delete_firebase_user,
 )
 from app.poll_admin import router as poll_admin_router
+from app.story_reports_admin import router as story_reports_admin_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -241,6 +243,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 app.include_router(poll_admin_router)
+app.include_router(story_reports_admin_router)
 
 # Per-IP rate limiting, backed by the same Redis instance used elsewhere —
 # a plain in-memory limiter would let each of the 4 uvicorn workers (see
@@ -1496,6 +1499,28 @@ async def unsave_story(
         await db.delete(saved)
         await db.commit()
     return {"message": "Unsaved"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/clusters/{{cluster_id}}/report", status_code=201)
+@limiter.limit("20/minute")
+async def report_story(
+    request: Request,
+    user_id: str,
+    cluster_id: int,
+    payload: ReportStoryRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cluster_result = await db.execute(select(StoryCluster).where(StoryCluster.id == cluster_id))
+    if cluster_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    db.add(StoryReport(cluster_id=cluster_id, user_id=user_id, reason=payload.reason, note=payload.note))
+    await db.commit()
+    return {"message": "Reported"}
 
 
 @app.get(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", response_model=SavedStoriesOut)

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 class SourceOut(BaseModel):
@@ -316,6 +316,11 @@ class ReadEventRequest(BaseModel):
 
 class SaveStoryRequest(BaseModel):
     cluster_id: int
+
+
+class ReportStoryRequest(BaseModel):
+    reason: Literal["misleading", "factually_incorrect", "offensive", "duplicate_spam", "other"]
+    note: Optional[str] = Field(default=None, max_length=1000)
 
 
 class SavedStoryOut(BaseModel):
