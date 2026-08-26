@@ -4,6 +4,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urljoin
 
 import trafilatura
 from curl_cffi.requests import AsyncSession
@@ -57,6 +58,18 @@ _LD_JSON_RE = re.compile(
 )
 _JW_PLAYER_URL_RE = re.compile(r'cdn\.jwplayer\.com/players/([A-Za-z0-9]+)\.html', re.IGNORECASE)
 
+# Last-resort fallback for publishers that embed a native HTML5 <video> tag
+# (a direct .mp4/.m3u8 src or one/more <source> children) instead of an
+# og:video meta tag or a JW Player widget — e.g. Sky Sports. Unlike the JW
+# path there's no structured VideoObject to confirm the video actually
+# belongs to this article, so this only fires when og:video and JW both
+# come up empty, and only for src values that look like a real media file
+# (mp4/m3u8/webm) rather than a poster image or empty placeholder.
+_VIDEO_TAG_RE = re.compile(r'<video\b[^>]*>.*?</video\s*>', re.IGNORECASE | re.DOTALL)
+_VIDEO_TAG_SELF_CLOSING_RE = re.compile(r'<video\b[^>]*/?>', re.IGNORECASE)
+_SRC_ATTR_RE = re.compile(r'\bsrc=["\']([^"\']+)["\']', re.IGNORECASE)
+_MEDIA_FILE_RE = re.compile(r'\.(m3u8|mp4|webm)(\?|$)', re.IGNORECASE)
+
 
 @dataclass
 class ExtractedArticle:
@@ -93,6 +106,25 @@ def _extract_jwplayer_media_id(html: str) -> Optional[str]:
             if match:
                 return match.group(1)
     return None
+
+
+def _extract_video_tag(html: str, base_url: str) -> Optional[str]:
+    webm_fallback = None
+    mp4_fallback = None
+    for tag_re in (_VIDEO_TAG_RE, _VIDEO_TAG_SELF_CLOSING_RE):
+        for block in tag_re.findall(html):
+            for src in _SRC_ATTR_RE.findall(block):
+                if not _MEDIA_FILE_RE.search(src):
+                    continue
+                resolved = urljoin(base_url, src)
+                lowered = resolved.lower()
+                if ".m3u8" in lowered:
+                    return resolved
+                if mp4_fallback is None and ".mp4" in lowered:
+                    mp4_fallback = resolved
+                elif webm_fallback is None and ".webm" in lowered:
+                    webm_fallback = resolved
+    return mp4_fallback or webm_fallback
 
 
 async def _resolve_jwplayer_video(client: AsyncSession, media_id: str) -> Optional[str]:
@@ -134,6 +166,9 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
     - its og:image meta tag, as a fallback image source for feeds that don't
       carry one of their own (see image_extractor.extract_rss_image, which
       callers should try first)
+    - a playable video URL, tried in order: og:video meta tag, JW Player
+      widget (resolved via JW's delivery API), then a native <video>/<source>
+      tag's direct .mp4/.m3u8/.webm src as a last resort
 
     Returns ExtractedArticle(None, None) on any failure (network error,
     non-200, no extractable text) so callers can fall back to the RSS
@@ -161,6 +196,8 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
             jw_media_id = _extract_jwplayer_media_id(response.text)
             if jw_media_id:
                 og_video_url = await _resolve_jwplayer_video(client, jw_media_id)
+        if not og_video_url:
+            og_video_url = _extract_video_tag(response.text, url)
         return ExtractedArticle(content, og_image_url, og_video_url)
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")

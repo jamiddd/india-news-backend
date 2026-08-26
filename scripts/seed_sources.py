@@ -1012,6 +1012,37 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://guwahatiplus.com",
         "category": "northeast",
         "region": "northeast"
+    },
+    {
+        # Verified 2026-08-27: 71 items live, mixed general-news video feed
+        # (og:video / JW-style embeds resolve via the same extractor path
+        # used for The Hindu Videos).
+        "name": "Hindustan Times Videos",
+        "slug": "hindustan-times-videos",
+        "feed_url": "https://www.hindustantimes.com/feeds/rss/videos/rssfeed.xml",
+        "homepage_url": "https://www.hindustantimes.com/videos",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        # Verified 2026-08-27: 35 items live, business/markets explainer
+        # video feed.
+        "name": "Livemint Videos",
+        "slug": "livemint-videos",
+        "feed_url": "https://www.livemint.com/rss/videos",
+        "homepage_url": "https://www.livemint.com/videos",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        # Verified 2026-08-27: 13 items live, genuinely video-only feed
+        # (medicaldialogues.in/videos and /mdtv/ paths).
+        "name": "Medical Dialogues Videos",
+        "slug": "medical-dialogues-videos",
+        "feed_url": "https://medicaldialogues.in/rss/videos",
+        "homepage_url": "https://medicaldialogues.in/videos",
+        "category": "health",
+        "region": "national"
     }
 ]
 
