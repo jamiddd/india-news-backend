@@ -214,7 +214,7 @@ def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
     return None
 
 
-def _extract_youtube_embed_url(html: str) -> Optional[str]:
+def _extract_youtube_video_id(html: str) -> Optional[str]:
     """
     Unlike Brightcove/Al Jazeera, HT/Livemint's own video pages carry
     NewsArticle *and* VideoObject together, and — verified against their
@@ -226,8 +226,36 @@ def _extract_youtube_embed_url(html: str) -> Optional[str]:
     for url in _ld_json_video_object_urls(entries):
         match = _YOUTUBE_CONTENT_URL_RE.search(url)
         if match:
-            return f"https://www.youtube.com/embed/{match.group(1)}"
+            return match.group(1)
     return None
+
+
+async def _is_youtube_short(client: AsyncSession, video_id: str) -> bool:
+    """
+    YouTube Shorts frequently fail to play through the standard /embed/<id>
+    IFrame player even though they play fine on youtube.com itself — a
+    widely-reported YouTube-side limitation (verified: HT/Livemint's Shorts
+    resolve fine via YouTube's oEmbed endpoint, i.e. they're not deleted or
+    unlisted, they just don't embed reliably). The publisher's own scraped
+    title/ld+json never carries the "#Shorts" tag (that's YouTube-side
+    video metadata, stripped by the time it reaches the article page), so
+    this needs YouTube's oEmbed endpoint — the cheapest unauthenticated way
+    to get the real YouTube-side title — to detect and skip them instead of
+    shipping a video_url that's likely to error in the app's player.
+    """
+    try:
+        response = await client.get(
+            "https://www.youtube.com/oembed",
+            params={"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"},
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+        )
+        if response.status_code != 200:
+            return False
+        title = (response.json().get("title") or "").lower()
+        return "#shorts" in title
+    except Exception as e:
+        logger.debug(f"YouTube oEmbed lookup failed for {video_id}: {e}")
+        return False
 
 
 async def _resolve_brightcove_policy_key(client: AsyncSession, account_id: str, player_id: str) -> Optional[str]:
@@ -337,9 +365,12 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
     - a playable video URL, tried in order: og:video meta tag, JW Player
       widget (resolved via JW's delivery API), Brightcove embed (resolved
       via Brightcove's Playback API), a YouTube embed (normalized to a
-      stable youtube.com/embed/<id> URL — there's no raw stream to resolve,
-      the app plays this in an actual YouTube player), then a native
-      <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last resort
+      stable youtube.com/embed/<id> URL and skipped instead if it's a
+      YouTube Short — see _is_youtube_short, Shorts frequently fail to play
+      through the standard embed player — there's no raw stream to resolve
+      either way, the app plays this in an actual YouTube player), then a
+      native <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last
+      resort
 
     Returns ExtractedArticle(None, None) on any failure (network error,
     non-200, no extractable text) so callers can fall back to the RSS
@@ -375,7 +406,9 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
                 if policy_key:
                     og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
         if not og_video_url:
-            og_video_url = _extract_youtube_embed_url(response.text)
+            youtube_video_id = _extract_youtube_video_id(response.text)
+            if youtube_video_id and not await _is_youtube_short(client, youtube_video_id):
+                og_video_url = f"https://www.youtube.com/embed/{youtube_video_id}"
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
         return ExtractedArticle(content, og_image_url, og_video_url)
