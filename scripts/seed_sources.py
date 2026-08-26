@@ -374,16 +374,6 @@ VERIFIED_SOURCES = [
         "region": "west"
     },
 
-    # East India (Odisha)
-    {
-        "name": "OdishaTV (OTV)",
-        "slug": "odishatv",
-        "feed_url": "https://odishatv.in/feed",
-        "homepage_url": "https://odishatv.in",
-        "category": "regional_east",
-        "region": "east"
-    },
-
     # World
     {
         "name": "Indian Express World",

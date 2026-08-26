@@ -40,6 +40,36 @@ async def is_placeholder_image(session: AsyncSession, source_id: int, image_url:
     return False
 
 
+def extract_rss_video(entry: Any) -> Optional[str]:
+    """
+    Pull a video URL straight out of a feedparser entry, mirroring
+    extract_rss_image's sources but filtered to video-typed entries:
+
+    1. Media RSS <media:content> whose type/medium is video
+    2. An <enclosure> link of a video type
+
+    Returns None if none of these are present — callers should fall back to
+    scraping the article page's og:video (see extractor.py).
+    """
+    media_content = getattr(entry, "media_content", None)
+    if media_content and isinstance(media_content, list):
+        for item in media_content:
+            medium = str(item.get("medium", ""))
+            media_type = str(item.get("type", ""))
+            if medium == "video" or media_type.startswith("video"):
+                url = item.get("url")
+                if url:
+                    return url
+
+    for link in getattr(entry, "links", None) or []:
+        if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("video"):
+            href = link.get("href")
+            if href:
+                return href
+
+    return None
+
+
 def extract_rss_image(entry: Any) -> Optional[str]:
     """
     Pull an image URL straight out of a feedparser entry, in order of how

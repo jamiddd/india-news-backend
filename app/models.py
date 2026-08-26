@@ -417,6 +417,12 @@ class Article(Base):
     fetched_at = Column(DateTime(timezone=True), default=utc_now)
     
     image_url = Column(Text, nullable=True)
+    video_url = Column(Text, nullable=True)
+    # "image" or "video" — mirrors which of image_url/video_url is the lead
+    # media to show; None for legacy rows predating this column. Derived at
+    # write time in poller.py rather than computed on read so the API schema
+    # doesn't need image_url/video_url resolution logic duplicated in Kotlin.
+    media_type = Column(String(10), nullable=True)
     categories = Column(JSON, nullable=True)
     
     simhash = Column(BigInteger, nullable=True, index=True)

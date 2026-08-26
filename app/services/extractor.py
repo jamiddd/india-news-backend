@@ -26,16 +26,30 @@ _OG_IMAGE_RE = re.compile(
 _OG_IMAGE_RE_ALT = re.compile(
     r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']', re.IGNORECASE
 )
+# og:video / og:video:url / og:video:secure_url — same attribute-order
+# ambiguity as og:image, so match both orderings and both property names.
+_OG_VIDEO_RE = re.compile(
+    r'<meta[^>]+property=["\']og:video(?::(?:url|secure_url))?["\'][^>]+content=["\']([^"\']+)["\']', re.IGNORECASE
+)
+_OG_VIDEO_RE_ALT = re.compile(
+    r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:video(?::(?:url|secure_url))?["\']', re.IGNORECASE
+)
 
 
 @dataclass
 class ExtractedArticle:
     content: Optional[str]
     og_image_url: Optional[str]
+    og_video_url: Optional[str] = None
 
 
 def _extract_og_image(html: str) -> Optional[str]:
     match = _OG_IMAGE_RE.search(html) or _OG_IMAGE_RE_ALT.search(html)
+    return match.group(1) if match else None
+
+
+def _extract_og_video(html: str) -> Optional[str]:
+    match = _OG_VIDEO_RE.search(html) or _OG_VIDEO_RE_ALT.search(html)
     return match.group(1) if match else None
 
 
@@ -70,7 +84,8 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
         )
         content = clean_extracted_text(text, title)
         og_image_url = _extract_og_image(response.text)
-        return ExtractedArticle(content, og_image_url)
+        og_video_url = _extract_og_video(response.text)
+        return ExtractedArticle(content, og_image_url, og_video_url)
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")
         return ExtractedArticle(None, None)

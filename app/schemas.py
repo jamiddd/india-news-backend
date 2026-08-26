@@ -27,6 +27,8 @@ class ArticleOut(BaseModel):
     author: Optional[str] = None
     published_at: datetime
     image_url: Optional[str] = None
+    video_url: Optional[str] = None
+    media_type: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

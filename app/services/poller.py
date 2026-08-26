@@ -17,7 +17,7 @@ from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import extract_full_content, IMPERSONATE
-from app.services.image_extractor import extract_rss_image, is_placeholder_image
+from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 
 logging.basicConfig(level=logging.INFO)
@@ -192,6 +192,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         if utc_now() - pub_date > MAX_ARTICLE_AGE:
             continue
         rss_image_url = extract_rss_image(entry)
+        rss_video_url = extract_rss_video(entry)
 
         candidates.append({
             "link": link,
@@ -201,6 +202,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             "author": author,
             "pub_date": pub_date,
             "rss_image_url": rss_image_url,
+            "rss_video_url": rss_video_url,
         })
 
     # Pass 2: scrape full article body (+ fallback og:image) per candidate, bounded concurrency.
@@ -226,6 +228,11 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         image_url = candidate["rss_image_url"] or extraction.og_image_url
         if await is_placeholder_image(session, source.id, image_url, url_hash):
             image_url = None
+        # Prefer a real video (RSS video enclosure/media, then scraped
+        # og:video) over the image — a video is a strictly richer lead media
+        # when a story has both.
+        video_url = candidate["rss_video_url"] or extraction.og_video_url
+        media_type = "video" if video_url else ("image" if image_url else None)
 
         simhash_val = compute_simhash(title, snippet)
 
@@ -286,6 +293,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 snippet=snippet,
                 content=content,
                 image_url=image_url,
+                video_url=video_url,
+                media_type=media_type,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
@@ -322,6 +331,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 snippet=snippet,
                 content=content,
                 image_url=image_url,
+                video_url=video_url,
+                media_type=media_type,
                 author=author,
                 published_at=pub_date,
                 simhash=simhash_val,
