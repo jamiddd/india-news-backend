@@ -47,8 +47,13 @@ async def main(video_ids: list[str]):
                 print(f"  final url:     {response.url}")
                 print(f"  shorts marker: {_YOUTUBE_SHORTS_MARKER in body}")
                 print(f"  lengthSeconds: {length_match.group(1) if length_match else None}")
-                if "consent" in str(response.url).lower() or "captcha" in body.lower():
-                    print("  !! looks like a consent/captcha interstitial, not the video page")
+                # Judged by where the request landed, not by scanning the
+                # body: YouTube's own page JS contains the string "captcha"
+                # on every normal video page, so grepping for it reports an
+                # interstitial that isn't there.
+                landed = str(response.url).lower()
+                if "consent." in landed or "/sorry/" in landed:
+                    print("  !! landed on a consent/captcha interstitial, not the video page")
             except Exception as e:
                 print(f"{video_id}: request failed: {e}")
 
