@@ -41,6 +41,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONCURRENCY = 5
+# Mirrors extractor._YOUTUBE_CONTENT_URL_RE's accepted forms; SQL LIKE has no
+# alternation, so each is matched separately.
+YOUTUBE_URL_PATTERNS = [
+    "%youtube.com/embed/%",
+    "%youtube.com/watch?v=%",
+    "%youtube.com/shorts/%",
+    "%youtu.be/%",
+]
 
 
 async def discover_source_ids(session) -> list[int]:
@@ -59,7 +67,12 @@ async def main():
     parser.add_argument(
         "--missing-only",
         action="store_true",
-        help="Skip articles that already have a video_url (the old default).",
+        help="Only articles with no video_url yet (the old default).",
+    )
+    parser.add_argument(
+        "--annotate-only",
+        action="store_true",
+        help="Only YouTube videos still missing their Shorts flag. Cheapest mode by far.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Report what would change without writing.")
     args = parser.parse_args()
@@ -79,12 +92,22 @@ async def main():
         logger.info("Scope: " + ", ".join(f"{names.get(i, i)} ({i})" for i in sorted(source_ids)))
 
         filters = [Article.source_id.in_(source_ids)]
-        if args.missing_only:
+        if args.annotate_only:
+            # Just the rows that have a YouTube video and no Shorts flag yet.
+            # This is the mode to use for backfilling that flag: the default
+            # below matches every article that has no video *at all* (their
+            # video_is_short is trivially NULL), which for a publisher like
+            # Free Press Journal means re-fetching ~1900 pages to update a
+            # handful — enough load, repeated, to get us throttled by the very
+            # site we're trying to read.
+            filters.append(Article.video_url.isnot(None))
+            filters.append(Article.video_is_short.is_(None))
+            filters.append(
+                or_(*(Article.video_url.like(p) for p in YOUTUBE_URL_PATTERNS))
+            )
+        elif args.missing_only:
             filters.append(Article.video_url.is_(None))
         else:
-            # Rows that already have a video still need re-scraping when the
-            # change is to what we record *about* a video rather than whether
-            # we find one at all (the Shorts flag and duration).
             filters.append(
                 or_(Article.video_url.is_(None), Article.video_is_short.is_(None))
             )
