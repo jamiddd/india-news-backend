@@ -130,6 +130,12 @@ class ExtractedArticle:
     # orientation; duration_seconds drives the feed card's badge.
     video_is_short: Optional[bool] = None
     video_duration_seconds: Optional[int] = None
+    # HTTP status of the article fetch, or None if the request raised before
+    # getting one. Lets a caller tell "this page had no video" apart from "we
+    # were refused" — a distinction the all-None return can't otherwise carry,
+    # and the one a bulk re-scrape needs in order to stop hammering a site
+    # that is already rate-limiting it.
+    fetch_status: Optional[int] = None
 
 
 def _extract_og_image(html: str) -> Optional[str]:
@@ -441,14 +447,16 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
       native <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last
       resort
 
-    Returns ExtractedArticle(None, None) on any failure (network error,
+    Returns an all-None ExtractedArticle on any failure (network error,
     non-200, no extractable text) so callers can fall back to the RSS
-    snippet/no-image the same way a failed scrape would.
+    snippet/no-image the same way a failed scrape would. fetch_status carries
+    the HTTP status when there was one, so a caller that cares can tell a
+    refusal from an ordinary miss.
     """
     try:
         response = await client.get(url, timeout=EXTRACT_TIMEOUT_SECONDS, allow_redirects=True, impersonate=IMPERSONATE)
         if response.status_code != 200 or not response.text:
-            return ExtractedArticle(None, None)
+            return ExtractedArticle(None, None, fetch_status=response.status_code)
 
         # trafilatura's extract() is a synchronous CPU-bound parse (lxml) —
         # run it off the event loop so a big/slow page can't stall polling.
@@ -494,7 +502,12 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
                 client, youtube_match.group(1)
             )
         return ExtractedArticle(
-            content, og_image_url, og_video_url, video_is_short, video_duration_seconds
+            content,
+            og_image_url,
+            og_video_url,
+            video_is_short,
+            video_duration_seconds,
+            fetch_status=response.status_code,
         )
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")

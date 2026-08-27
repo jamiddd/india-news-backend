@@ -41,6 +41,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONCURRENCY = 5
+# Statuses that mean "the publisher is refusing us" rather than "this page has
+# nothing". Both are worth stopping for: continuing to fire at a site already
+# rate-limiting us is what deepens the block.
+BLOCKED_STATUSES = {403, 429}
+# Consecutive refusals tolerated before the run gives up. Counted across
+# concurrent workers, so it's approximate by a few requests either way — which
+# is fine for a circuit breaker whose only job is to not make things worse.
+CONSECUTIVE_BLOCK_LIMIT = 10
 # Mirrors extractor._YOUTUBE_CONTENT_URL_RE's accepted forms; SQL LIKE has no
 # alternation, so each is matched separately.
 YOUTUBE_URL_PATTERNS = [
@@ -119,6 +127,9 @@ async def main():
 
         semaphore = asyncio.Semaphore(CONCURRENCY)
         failures = 0
+        blocked = 0
+        consecutive_blocks = 0
+        aborted = False
 
         # Extraction fans out; the database writes do not. An AsyncSession is
         # not safe to use from several coroutines at once — concurrent
@@ -128,14 +139,35 @@ async def main():
         # workers only fetch, and every write happens in the sequential loop
         # below.
         async def resolve(article_id: int, url: str, title: str):
-            nonlocal failures
+            nonlocal failures, blocked, consecutive_blocks, aborted
+            # Checked before and after queueing: workers already waiting on
+            # the semaphore when the breaker trips should not fire.
+            if aborted:
+                return article_id, url, None
             async with semaphore:
+                if aborted:
+                    return article_id, url, None
                 try:
-                    return article_id, url, await extract_full_content(client, url, title)
+                    extraction = await extract_full_content(client, url, title)
                 except Exception as e:
                     failures += 1
                     logger.warning(f"  extraction raised for {url}: {e}")
                     return article_id, url, None
+
+            if extraction.fetch_status in BLOCKED_STATUSES:
+                blocked += 1
+                consecutive_blocks += 1
+                if consecutive_blocks >= CONSECUTIVE_BLOCK_LIMIT and not aborted:
+                    aborted = True
+                    logger.error(
+                        f"Aborting: {consecutive_blocks} consecutive HTTP "
+                        f"{extraction.fetch_status} responses — the publisher is refusing us. "
+                        "Anything already resolved is still written; retry later, and prefer "
+                        "--annotate-only or --days over a full-archive re-scrape."
+                    )
+            elif extraction.fetch_status == 200:
+                consecutive_blocks = 0
+            return article_id, url, extraction
 
         async with CurlAsyncSession() as client:
             resolved = await asyncio.gather(*(resolve(r.id, r.url, r.title) for r in rows))
@@ -165,15 +197,19 @@ async def main():
                 values["media_type"] = "video"
             await session.execute(update(Article).where(Article.id == article_id).values(**values))
 
+        if blocked:
+            logger.warning(f"{blocked} article(s) were refused (HTTP {'/'.join(map(str, sorted(BLOCKED_STATUSES)))}).")
         if failures:
             logger.warning(f"{failures} article(s) failed extraction outright.")
 
         if args.dry_run:
-            logger.info(f"Dry run: would have resolved video on {found} of {len(rows)} article(s).")
+            state = "Dry run aborted early" if aborted else "Dry run"
+            logger.info(f"{state}: would have resolved video on {found} of {len(rows)} article(s).")
             return
 
         await session.commit()
-        logger.info(f"Done. Wrote video fields on {found} of {len(rows)} article(s).")
+        state = "Aborted early" if aborted else "Done"
+        logger.info(f"{state}. Wrote video fields on {found} of {len(rows)} article(s).")
 
 
 if __name__ == "__main__":
