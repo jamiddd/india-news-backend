@@ -447,17 +447,25 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
                 policy_key = await _resolve_brightcove_policy_key(client, account_id, player_id)
                 if policy_key:
                     og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
-        video_is_short: Optional[bool] = None
-        video_duration_seconds: Optional[int] = None
         if not og_video_url:
             youtube_video_id = _extract_youtube_video_id(response.text)
             if youtube_video_id:
                 og_video_url = f"{_YOUTUBE_EMBED_PREFIX}{youtube_video_id}"
-                video_is_short, video_duration_seconds = await _fetch_youtube_video_meta(
-                    client, youtube_video_id
-                )
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
+
+        # Annotated here rather than inside the YouTube branch above, because
+        # that isn't the only step that can hand back a YouTube URL — an
+        # og:video meta tag pointing at youtube.com is resolved earlier and
+        # would otherwise skip the lookup, leaving the app with a YouTube
+        # video it can't tell the shape or length of.
+        video_is_short: Optional[bool] = None
+        video_duration_seconds: Optional[int] = None
+        youtube_match = _YOUTUBE_CONTENT_URL_RE.search(og_video_url) if og_video_url else None
+        if youtube_match:
+            video_is_short, video_duration_seconds = await _fetch_youtube_video_meta(
+                client, youtube_match.group(1)
+            )
         return ExtractedArticle(
             content, og_image_url, og_video_url, video_is_short, video_duration_seconds
         )
