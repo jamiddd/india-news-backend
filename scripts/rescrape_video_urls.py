@@ -95,44 +95,62 @@ async def main():
         logger.info(f"Found {len(rows)} article(s) to re-scrape.")
 
         semaphore = asyncio.Semaphore(CONCURRENCY)
-        found = 0
+        failures = 0
+
+        # Extraction fans out; the database writes do not. An AsyncSession is
+        # not safe to use from several coroutines at once — concurrent
+        # execute() calls on one session raise "another operation is in
+        # progress", and because that propagates out of gather() it skips the
+        # commit at the end, silently discarding the whole run's work. So the
+        # workers only fetch, and every write happens in the sequential loop
+        # below.
+        async def resolve(article_id: int, url: str, title: str):
+            nonlocal failures
+            async with semaphore:
+                try:
+                    return article_id, url, await extract_full_content(client, url, title)
+                except Exception as e:
+                    failures += 1
+                    logger.warning(f"  extraction raised for {url}: {e}")
+                    return article_id, url, None
 
         async with CurlAsyncSession() as client:
-            async def rescrape(article_id: int, url: str, title: str):
-                nonlocal found
-                async with semaphore:
-                    extraction = await extract_full_content(client, url, title)
-                video_url = extraction.og_video_url
-                if not video_url:
-                    return
-                found += 1
-                # Mirrors poller.py: a YouTube video is never media_type
-                # "video", since the app renders it as an image card with a
-                # badge rather than playing it inline.
-                is_youtube = is_youtube_video_url(video_url)
-                logger.info(
-                    f"  video: {url} -> {video_url}"
-                    + (f" (short={extraction.video_is_short}, {extraction.video_duration_seconds}s)" if is_youtube else "")
-                )
-                if args.dry_run:
-                    return
-                values = {
-                    "video_url": video_url,
-                    "video_is_short": extraction.video_is_short,
-                    "video_duration_seconds": extraction.video_duration_seconds,
-                }
-                if not is_youtube:
-                    values["media_type"] = "video"
-                await session.execute(update(Article).where(Article.id == article_id).values(**values))
+            resolved = await asyncio.gather(*(resolve(r.id, r.url, r.title) for r in rows))
 
-            await asyncio.gather(*(rescrape(r.id, r.url, r.title) for r in rows))
+        found = 0
+        for article_id, url, extraction in resolved:
+            video_url = extraction.og_video_url if extraction else None
+            if not video_url:
+                continue
+            found += 1
+            # Mirrors poller.py: a YouTube video is never media_type "video",
+            # since the app renders it as an image card with a badge rather
+            # than playing it inline.
+            is_youtube = is_youtube_video_url(video_url)
+            logger.info(
+                f"  video: {url} -> {video_url}"
+                + (f" (short={extraction.video_is_short}, {extraction.video_duration_seconds}s)" if is_youtube else "")
+            )
+            if args.dry_run:
+                continue
+            values = {
+                "video_url": video_url,
+                "video_is_short": extraction.video_is_short,
+                "video_duration_seconds": extraction.video_duration_seconds,
+            }
+            if not is_youtube:
+                values["media_type"] = "video"
+            await session.execute(update(Article).where(Article.id == article_id).values(**values))
+
+        if failures:
+            logger.warning(f"{failures} article(s) failed extraction outright.")
 
         if args.dry_run:
             logger.info(f"Dry run: would have resolved video on {found} of {len(rows)} article(s).")
             return
 
         await session.commit()
-        logger.info(f"Done. Resolved video on {found} of {len(rows)} article(s).")
+        logger.info(f"Done. Wrote video fields on {found} of {len(rows)} article(s).")
 
 
 if __name__ == "__main__":
