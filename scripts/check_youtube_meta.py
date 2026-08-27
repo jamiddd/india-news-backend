@@ -24,7 +24,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from app.services.extractor import (
     IMPERSONATE,
     _YOUTUBE_LENGTH_RE,
-    _YOUTUBE_SHORTS_MARKER,
     _fetch_youtube_video_meta,
 )
 
@@ -35,25 +34,23 @@ async def main(video_ids: list[str]):
             # The raw request first, so a bot/consent interstitial shows up as
             # itself rather than as a silent (None, None).
             try:
+                # Unfollowed, mirroring the real lookup: the status and the
+                # Location header are the whole Shorts signal.
                 response = await client.get(
                     f"https://www.youtube.com/shorts/{video_id}",
                     timeout=15.0,
-                    allow_redirects=True,
+                    allow_redirects=False,
                     impersonate=IMPERSONATE,
                 )
                 body = response.text or ""
                 length_match = _YOUTUBE_LENGTH_RE.search(body)
+                location = response.headers.get("location") or ""
                 print(f"{video_id}: HTTP {response.status_code}, {len(body)} bytes")
-                print(f"  final url:     {response.url}")
-                print(f"  shorts marker: {_YOUTUBE_SHORTS_MARKER in body}")
+                print(f"  location:      {location or '(none)'}")
+                print(f"  reads as:      {'Short' if response.status_code == 200 else ('regular' if f'/watch?v={video_id}' in location else 'UNKNOWN — bounced')}")
                 print(f"  lengthSeconds: {length_match.group(1) if length_match else None}")
-                # Judged by where the request landed, not by scanning the
-                # body: YouTube's own page JS contains the string "captcha"
-                # on every normal video page, so grepping for it reports an
-                # interstitial that isn't there.
-                landed = str(response.url).lower()
-                if "consent." in landed or "/sorry/" in landed:
-                    print("  !! landed on a consent/captcha interstitial, not the video page")
+                if "consent." in location or "/sorry/" in location:
+                    print("  !! redirected to a consent/captcha interstitial, not the video")
             except Exception as e:
                 print(f"{video_id}: request failed: {e}")
 

@@ -110,11 +110,6 @@ _YOUTUBE_EMBED_PREFIX = "https://www.youtube.com/embed/"
 # Journal's VideoObject claims duration PT5M02S for a video YouTube reports
 # as 23 seconds, so the publisher figure is not usable for the app's badge.
 _YOUTUBE_LENGTH_RE = re.compile(r'"lengthSeconds":"(\d+)"')
-# Present only on a page YouTube actually renders as a Short. A request for
-# /shorts/<id> on a regular video redirects to /watch, whose page never
-# carries this. Duration alone can't stand in for it — plenty of regular
-# videos are under a minute.
-_YOUTUBE_SHORTS_MARKER = "reelPlayerHeaderRenderer"
 _youtube_meta_cache: dict[str, tuple[Optional[bool], Optional[int]]] = {}
 # The player's policy key (needed to call Brightcove's Playback API) isn't on
 # the article page — it's baked into that player's own bundle at
@@ -266,37 +261,69 @@ async def _fetch_youtube_video_meta(
     client: AsyncSession, video_id: str
 ) -> tuple[Optional[bool], Optional[int]]:
     """
-    Returns (is_short, duration_seconds) for a YouTube video, or (None, None)
-    if YouTube can't be reached — callers must treat None as "unknown" rather
-    than "regular video", since a Short shown letterboxed in a landscape
-    player looks broken.
+    Returns (is_short, duration_seconds) for a YouTube video. Either element
+    may be None for "unknown", and callers must treat it as such rather than
+    as a negative — a Short shown letterboxed in a landscape player looks
+    broken, and a badge must say "Watch" rather than invent a runtime.
 
-    One request to /shorts/<id> answers both questions: YouTube serves the
-    Shorts page for a real Short (identifiable by _YOUTUBE_SHORTS_MARKER) and
-    303-redirects to /watch for anything else, and either page carries
-    "lengthSeconds".
+    Shorts-ness is decided by the redirect status alone, before any body
+    parsing: /shorts/<id> stays 200 for a real Short and 303s to /watch for
+    anything else. That distinction is made by YouTube's router and survives
+    the bot/consent interstitials a datacenter IP draws, which body parsing
+    does not — in production the followed /watch page comes back without the
+    "lengthSeconds" the same request yields from a laptop. An earlier version
+    read Shorts-ness out of the body instead, which reported a confident
+    is_short=False whenever the real page hadn't been served at all.
 
-    The desktop TLS/UA identity from IMPERSONATE is load-bearing here, not
+    A redirect anywhere other than /watch?v=<id> (a consent screen, /sorry/)
+    means we were bounced, not answered, so it yields unknown.
+
+    The desktop TLS/UA identity from IMPERSONATE is load-bearing, not
     incidental: with a *mobile* user agent YouTube 302s both cases to the
-    same place and the Shorts signal disappears entirely.
+    same place and the distinction disappears entirely.
+
+    Duration is best-effort on top of that. It's read from whichever page we
+    end up with, and stays None when that page is gated.
     """
     if video_id in _youtube_meta_cache:
         return _youtube_meta_cache[video_id]
+
     result: tuple[Optional[bool], Optional[int]] = (None, None)
     try:
         response = await client.get(
             f"https://www.youtube.com/shorts/{video_id}",
             timeout=EXTRACT_TIMEOUT_SECONDS,
-            allow_redirects=True,
+            allow_redirects=False,
             impersonate=IMPERSONATE,
         )
-        if response.status_code == 200 and response.text:
-            is_short = _YOUTUBE_SHORTS_MARKER in response.text
-            match = _YOUTUBE_LENGTH_RE.search(response.text)
-            duration = int(match.group(1)) if match else None
-            result = (is_short, duration)
+        is_short: Optional[bool] = None
+        body = ""
+        if response.status_code == 200:
+            is_short = True
+            body = response.text or ""
+        elif response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location") or ""
+            if f"/watch?v={video_id}" in location:
+                is_short = False
+                # Best-effort duration only; this is the request that comes
+                # back gated from a datacenter IP.
+                try:
+                    followed = await client.get(
+                        location,
+                        timeout=EXTRACT_TIMEOUT_SECONDS,
+                        allow_redirects=True,
+                        impersonate=IMPERSONATE,
+                    )
+                    body = followed.text or ""
+                except Exception as e:
+                    logger.debug(f"YouTube watch-page lookup failed for {video_id}: {e}")
+
+        if is_short is not None:
+            match = _YOUTUBE_LENGTH_RE.search(body)
+            result = (is_short, int(match.group(1)) if match else None)
     except Exception as e:
         logger.debug(f"YouTube metadata lookup failed for {video_id}: {e}")
+
     _youtube_meta_cache[video_id] = result
     return result
 
