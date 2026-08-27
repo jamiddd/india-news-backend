@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from sqlalchemy import text
 
 from app.database import engine
-from app.services.extractor import extract_full_content
+from app.services.extractor import EXTRACT_TIMEOUT_SECONDS, IMPERSONATE, extract_full_content
 
 
 async def main(title_substring: str, extract: bool):
@@ -66,9 +66,34 @@ async def main(title_substring: str, extract: bool):
             print(f"    image:    {extraction.og_image_url}")
             print(f"    video:    {extraction.og_video_url}")
             print(f"    is_short={extraction.video_is_short}  duration={extraction.video_duration_seconds}")
-            if not extraction.og_video_url:
-                print("    !! no video resolved — this page yields nothing to re-scrape from here")
+            if extraction.content is None and extraction.og_image_url is None:
+                # All three fields null is extract_full_content's early-return
+                # path: the fetch itself failed (non-200, empty body, or an
+                # exception), so nothing was parsed. That is a different
+                # problem from a page that parsed but carried no video, and
+                # only the raw request can tell them apart.
+                await _report_raw_fetch(client, row.url)
+            elif not extraction.og_video_url:
+                print("    !! parsed fine, but this page carries no video")
             print()
+
+
+async def _report_raw_fetch(client, url: str):
+    """Repeats the fetch extract_full_content makes, reporting how it failed."""
+    try:
+        response = await client.get(
+            url,
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+            allow_redirects=True,
+            impersonate=IMPERSONATE,
+        )
+        body = response.text or ""
+        print(f"    !! fetch returned HTTP {response.status_code}, {len(body)} bytes")
+        print(f"       landed on: {response.url}")
+        if response.status_code != 200:
+            print(f"       body head: {body[:200]!r}")
+    except Exception as e:
+        print(f"    !! fetch raised {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
