@@ -332,6 +332,16 @@ class Source(Base):
     last_fetched_at = Column(DateTime(timezone=True), nullable=True)
     consecutive_failures = Column(Integer, default=0)
     status = Column(String(50), default="active")  # active, degraded, disabled
+    # Skip the per-article page scrape for this source and ingest from the
+    # feed alone. Set for publishers whose article pages sit behind a bot wall
+    # no HTTP client gets past — the NDTV group (including Gadgets 360) is
+    # behind Akamai Bot Manager and 403s every article fetch, verified from
+    # two unrelated networks so it isn't our IP, and through curl_cffi's
+    # Chrome impersonation. Every one of their stories was costing a doomed
+    # request and landing with no body. Such a source still ingests title,
+    # snippet and RSS image; it just never gets scraped content, an og:image
+    # fallback, or video. See scripts/add_rss_only_column.py.
+    rss_only = Column(Boolean, nullable=False, server_default="false", default=False)
 
     articles = relationship("Article", back_populates="source", cascade="all, delete-orphan")
 

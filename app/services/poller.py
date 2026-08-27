@@ -16,7 +16,7 @@ from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
-from app.services.extractor import extract_full_content, is_youtube_video_url, IMPERSONATE
+from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 
@@ -205,14 +205,20 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             "rss_video_url": rss_video_url,
         })
 
-    # Pass 2: scrape full article body (+ fallback og:image) per candidate, bounded concurrency.
+    # Pass 2: scrape full article body (+ fallback og:image) per candidate,
+    # bounded concurrency — unless the source is RSS-only, in which case the
+    # scrape is known to fail and is skipped rather than spent (see
+    # Source.rss_only). Those candidates keep whatever the feed gave them.
     semaphore = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
 
     async def fetch_bounded(link: str, title: str):
         async with semaphore:
             return await extract_full_content(client, link, title)
 
-    extracted = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
+    if source.rss_only:
+        extracted = [ExtractedArticle(None, None) for _ in candidates]
+    else:
+        extracted = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
 
     # Pass 3: near-duplicate clustering + insert, now that content is in hand.
     for candidate, extraction in zip(candidates, extracted):
