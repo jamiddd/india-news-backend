@@ -423,6 +423,13 @@ class Article(Base):
     # write time in poller.py rather than computed on read so the API schema
     # doesn't need image_url/video_url resolution logic duplicated in Kotlin.
     media_type = Column(String(10), nullable=True)
+    # YouTube-only facts, both NULL for a direct-stream video (see
+    # extractor._fetch_youtube_video_meta). is_short picks the fullscreen
+    # player's orientation; duration_seconds fills the feed card's badge.
+    # NULL is "unknown", not "no" — a Short played letterboxed looks broken,
+    # so the app must fall back to portrait-safe layout when it can't tell.
+    video_is_short = Column(Boolean, nullable=True)
+    video_duration_seconds = Column(Integer, nullable=True)
     categories = Column(JSON, nullable=True)
     
     simhash = Column(BigInteger, nullable=True, index=True)

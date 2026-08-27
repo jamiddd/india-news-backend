@@ -98,8 +98,24 @@ _ARTICLE_LD_TYPES = {"NewsArticle", "Article", "ReportageNewsArticle", "BlogPost
 # (unlike Al Jazeera's sitewide Brightcove widget), but the NewsArticle
 # exclusion is kept anyway as the same cheap safety net.
 _YOUTUBE_CONTENT_URL_RE = re.compile(
-    r'(?:youtube\.com/embed/|youtube\.com/watch\?v=|youtu\.be/)([A-Za-z0-9_-]{11})', re.IGNORECASE
+    r'(?:youtube\.com/embed/|youtube\.com/watch\?v=|youtube\.com/shorts/|youtu\.be/)([A-Za-z0-9_-]{11})',
+    re.IGNORECASE,
 )
+# Set on any video_url this module hands back for a YouTube video, so callers
+# (poller.py) can tell "a video we can play ourselves" from "a video only
+# YouTube can play" without re-parsing the URL.
+_YOUTUBE_EMBED_PREFIX = "https://www.youtube.com/embed/"
+# Reading the Shorts marker and the real duration off YouTube's own page,
+# rather than trusting the publisher's ld+json: verified that Free Press
+# Journal's VideoObject claims duration PT5M02S for a video YouTube reports
+# as 23 seconds, so the publisher figure is not usable for the app's badge.
+_YOUTUBE_LENGTH_RE = re.compile(r'"lengthSeconds":"(\d+)"')
+# Present only on a page YouTube actually renders as a Short. A request for
+# /shorts/<id> on a regular video redirects to /watch, whose page never
+# carries this. Duration alone can't stand in for it — plenty of regular
+# videos are under a minute.
+_YOUTUBE_SHORTS_MARKER = "reelPlayerHeaderRenderer"
+_youtube_meta_cache: dict[str, tuple[Optional[bool], Optional[int]]] = {}
 # The player's policy key (needed to call Brightcove's Playback API) isn't on
 # the article page — it's baked into that player's own bundle at
 # players.brightcove.net/<account>/<player>_default/index.min.js. It's fixed
@@ -114,6 +130,11 @@ class ExtractedArticle:
     content: Optional[str]
     og_image_url: Optional[str]
     og_video_url: Optional[str] = None
+    # Both None unless og_video_url is a YouTube video (see
+    # _fetch_youtube_video_meta). is_short drives the app's fullscreen
+    # orientation; duration_seconds drives the feed card's badge.
+    video_is_short: Optional[bool] = None
+    video_duration_seconds: Optional[int] = None
 
 
 def _extract_og_image(html: str) -> Optional[str]:
@@ -230,6 +251,56 @@ def _extract_youtube_video_id(html: str) -> Optional[str]:
     return None
 
 
+def is_youtube_video_url(url: Optional[str]) -> bool:
+    """
+    True for a video only YouTube can play. poller.py uses this to keep such
+    a video out of media_type="video": the app never plays a YouTube video
+    inline (it shows the article image with a duration badge that opens a
+    dedicated fullscreen screen), so ranking it as a video story would
+    over-promote a card that renders as an ordinary image card.
+    """
+    return bool(url) and bool(_YOUTUBE_CONTENT_URL_RE.search(url))
+
+
+async def _fetch_youtube_video_meta(
+    client: AsyncSession, video_id: str
+) -> tuple[Optional[bool], Optional[int]]:
+    """
+    Returns (is_short, duration_seconds) for a YouTube video, or (None, None)
+    if YouTube can't be reached — callers must treat None as "unknown" rather
+    than "regular video", since a Short shown letterboxed in a landscape
+    player looks broken.
+
+    One request to /shorts/<id> answers both questions: YouTube serves the
+    Shorts page for a real Short (identifiable by _YOUTUBE_SHORTS_MARKER) and
+    303-redirects to /watch for anything else, and either page carries
+    "lengthSeconds".
+
+    The desktop TLS/UA identity from IMPERSONATE is load-bearing here, not
+    incidental: with a *mobile* user agent YouTube 302s both cases to the
+    same place and the Shorts signal disappears entirely.
+    """
+    if video_id in _youtube_meta_cache:
+        return _youtube_meta_cache[video_id]
+    result: tuple[Optional[bool], Optional[int]] = (None, None)
+    try:
+        response = await client.get(
+            f"https://www.youtube.com/shorts/{video_id}",
+            timeout=EXTRACT_TIMEOUT_SECONDS,
+            allow_redirects=True,
+            impersonate=IMPERSONATE,
+        )
+        if response.status_code == 200 and response.text:
+            is_short = _YOUTUBE_SHORTS_MARKER in response.text
+            match = _YOUTUBE_LENGTH_RE.search(response.text)
+            duration = int(match.group(1)) if match else None
+            result = (is_short, duration)
+    except Exception as e:
+        logger.debug(f"YouTube metadata lookup failed for {video_id}: {e}")
+    _youtube_meta_cache[video_id] = result
+    return result
+
+
 async def _resolve_brightcove_policy_key(client: AsyncSession, account_id: str, player_id: str) -> Optional[str]:
     cache_key = (account_id, player_id)
     if cache_key in _brightcove_policy_key_cache:
@@ -337,8 +408,9 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
     - a playable video URL, tried in order: og:video meta tag, JW Player
       widget (resolved via JW's delivery API), Brightcove embed (resolved
       via Brightcove's Playback API), a YouTube embed (normalized to a
-      stable youtube.com/embed/<id> URL — there's no raw stream to resolve,
-      the app plays this in an actual YouTube player), then a
+      stable youtube.com/embed/<id> URL, and annotated with its Shorts flag
+      and real duration — there's no raw stream to resolve, the app plays
+      this only in its dedicated fullscreen YouTube screen), then a
       native <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last
       resort
 
@@ -375,13 +447,20 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
                 policy_key = await _resolve_brightcove_policy_key(client, account_id, player_id)
                 if policy_key:
                     og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
+        video_is_short: Optional[bool] = None
+        video_duration_seconds: Optional[int] = None
         if not og_video_url:
             youtube_video_id = _extract_youtube_video_id(response.text)
             if youtube_video_id:
-                og_video_url = f"https://www.youtube.com/embed/{youtube_video_id}"
+                og_video_url = f"{_YOUTUBE_EMBED_PREFIX}{youtube_video_id}"
+                video_is_short, video_duration_seconds = await _fetch_youtube_video_meta(
+                    client, youtube_video_id
+                )
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
-        return ExtractedArticle(content, og_image_url, og_video_url)
+        return ExtractedArticle(
+            content, og_image_url, og_video_url, video_is_short, video_duration_seconds
+        )
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")
         return ExtractedArticle(None, None)

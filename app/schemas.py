@@ -29,6 +29,8 @@ class ArticleOut(BaseModel):
     image_url: Optional[str] = None
     video_url: Optional[str] = None
     media_type: Optional[str] = None
+    video_is_short: Optional[bool] = None
+    video_duration_seconds: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

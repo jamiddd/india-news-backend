@@ -198,6 +198,8 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
             image_url=art.image_url,
             video_url=art.video_url,
             media_type=art.media_type,
+            video_is_short=art.video_is_short,
+            video_duration_seconds=art.video_duration_seconds,
         )
         for art in cluster.articles
     ]
@@ -821,6 +823,8 @@ async def search_story_clusters(
                     image_url=art.image_url,
                     video_url=art.video_url,
                     media_type=art.media_type,
+                    video_is_short=art.video_is_short,
+                    video_duration_seconds=art.video_duration_seconds,
                 )
                 for art in cluster.articles
             ]
@@ -1077,6 +1081,8 @@ async def list_story_clusters(
                 image_url=art.image_url,
                 video_url=art.video_url,
                 media_type=art.media_type,
+                video_is_short=art.video_is_short,
+                video_duration_seconds=art.video_duration_seconds,
             )
             for art in cluster.articles
         ]
@@ -1195,6 +1201,8 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
             image_url=art.image_url,
             video_url=art.video_url,
             media_type=art.media_type,
+            video_is_short=art.video_is_short,
+            video_duration_seconds=art.video_duration_seconds,
         )
         for art in cluster.articles
     ]
