@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import random
 from datetime import date, datetime, time, timedelta
@@ -330,6 +331,53 @@ async def enforce_min_client_version(request: Request, call_next):
         except ValueError:
             pass  # malformed header — ignore rather than block on it
     return await call_next(request)
+
+@app.middleware("http")
+async def add_etag_and_revalidate(request: Request, call_next):
+    """
+    Conditional-GET support: hashes the (uncompressed — this runs inside
+    GZipMiddleware in the stack, added above, so it sees the body before
+    compression) response body as its ETag, and short-circuits to a bare
+    304 if the client's If-None-Match already matches. The 300s Redis
+    cache (see _cache_get/_cache_set) already collapses repeat requests on
+    the *backend* side within that window; this collapses the *client*
+    transfer too — a tab re-visit or a pull-to-refresh right after a
+    previous one gets an empty 304 instead of re-downloading the same
+    gzipped JSON. Cache-Control is deliberately max-age=0/must-revalidate
+    — every request still round-trips to the server (so this can never
+    itself serve stale data), only the body transfer is skippable. GET
+    only, and only on a clean 200 — errors, redirects, and non-GET
+    (POST/PUT/DELETE mutations) pass through untouched.
+    """
+    if request.method != "GET":
+        return await call_next(request)
+
+    response = await call_next(request)
+    if response.status_code != 200:
+        return response
+
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    etag = hashlib.md5(body).hexdigest()
+
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={
+            "ETag": etag,
+            "Cache-Control": "private, max-age=0, must-revalidate",
+        })
+
+    new_headers = dict(response.headers)
+    new_headers["ETag"] = etag
+    new_headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    # Content-Length belonged to whatever body shape call_next produced —
+    # recomputed for the exact bytes being sent now rather than trusted,
+    # since some response paths (e.g. StreamingResponse) never set it.
+    new_headers["Content-Length"] = str(len(body))
+    return Response(
+        content=body,
+        status_code=response.status_code,
+        headers=new_headers,
+        media_type=response.media_type,
+    )
 
 DEFAULT_PREFERENCES = UserPreferences(
     enabled_categories=["all", "national", "business", "official", "sports", "entertainment", "tech", "politics"]
