@@ -1,12 +1,13 @@
 """
 Pure-logic tests for app/services/image_extractor.py — pulling an image URL
-out of a feedparser entry. Uses hand-built stub objects standing in for
-real feedparser.FeedParserDict entries (attribute access, same shape).
-No DB/network.
+out of a feedparser entry, and is_broken_image_url's HEAD-check filter.
+Uses hand-built stub objects standing in for real feedparser.FeedParserDict
+entries (attribute access, same shape) and a stub HTTP client. No real
+network.
 """
 from types import SimpleNamespace
 
-from app.services.image_extractor import extract_rss_image
+from app.services.image_extractor import extract_rss_image, is_broken_image_url
 
 
 class _StubEntry:
@@ -71,3 +72,47 @@ class TestExtractRssImage:
         # extract_rss_image uses getattr(..., None) throughout — a bare
         # object with none of the expected attributes should not raise.
         assert extract_rss_image(SimpleNamespace()) is None
+
+
+class _StubResponse:
+    def __init__(self, status_code=200, headers=None):
+        self.status_code = status_code
+        self.headers = headers or {}
+
+
+class _StubClient:
+    """Stands in for curl_cffi's AsyncSession — only .head() is used."""
+
+    def __init__(self, response=None, exception=None):
+        self._response = response
+        self._exception = exception
+
+    async def head(self, url, **kwargs):
+        if self._exception is not None:
+            raise self._exception
+        return self._response
+
+
+class TestIsBrokenImageUrl:
+    async def test_none_url_is_not_broken(self):
+        assert await is_broken_image_url(_StubClient(), None) is False
+
+    async def test_zero_content_length_is_broken(self):
+        client = _StubClient(_StubResponse(200, {"content-length": "0"}))
+        assert await is_broken_image_url(client, "https://example.com/img.jpg") is True
+
+    async def test_nonzero_content_length_is_not_broken(self):
+        client = _StubClient(_StubResponse(200, {"content-length": "12345"}))
+        assert await is_broken_image_url(client, "https://example.com/img.jpg") is False
+
+    async def test_missing_content_length_fails_open(self):
+        client = _StubClient(_StubResponse(200, {}))
+        assert await is_broken_image_url(client, "https://example.com/img.jpg") is False
+
+    async def test_error_status_fails_open(self):
+        client = _StubClient(_StubResponse(404, {"content-length": "0"}))
+        assert await is_broken_image_url(client, "https://example.com/img.jpg") is False
+
+    async def test_request_exception_fails_open(self):
+        client = _StubClient(exception=TimeoutError("boom"))
+        assert await is_broken_image_url(client, "https://example.com/img.jpg") is False

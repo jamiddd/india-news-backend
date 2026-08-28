@@ -18,7 +18,7 @@ from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, IMPERSONATE
-from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image
+from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 
 logging.basicConfig(level=logging.INFO)
@@ -258,6 +258,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         # reliably the lead image) over the scraped page's og:image fallback.
         image_url = candidate["rss_image_url"] or extraction.og_image_url
         if await is_placeholder_image(session, source.id, image_url, url_hash):
+            image_url = None
+        elif await is_broken_image_url(client, image_url):
             image_url = None
         # Prefer a real video (RSS video enclosure/media, then scraped
         # og:video) over the image — a video is a strictly richer lead media

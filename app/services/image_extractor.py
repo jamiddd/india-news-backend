@@ -1,12 +1,20 @@
 import re
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Article
+from app.services.extractor import IMPERSONATE
+
+if TYPE_CHECKING:
+    from curl_cffi.requests import AsyncSession as CurlAsyncSession
 
 logger = logging.getLogger(__name__)
+
+# How long to wait on the HEAD check in is_broken_image_url before giving up
+# and treating the URL as fine (fail open — see that function's docstring).
+BROKEN_IMAGE_CHECK_TIMEOUT_SECONDS = 5
 
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
@@ -38,6 +46,36 @@ async def is_placeholder_image(session: AsyncSession, source_id: int, image_url:
         logger.info(f"[Placeholder image detected] source_id={source_id} reused {count}x: {image_url}")
         return True
     return False
+
+
+async def is_broken_image_url(client: "CurlAsyncSession", image_url: Optional[str]) -> bool:
+    """HEAD-checks a candidate image/video-thumbnail URL for a genuinely
+    empty (Content-Length: 0) response. Observed live: a tosshub.com
+    (India Today) video-thumbnail URL returning `200 OK` with a 0-byte S3
+    object — apparently a race between the publisher's own thumbnail
+    pipeline finishing and their CDN going live at scrape time. Coil can't
+    render 0 bytes, so without this the app just shows a blank tinted
+    placeholder forever for that story.
+
+    Fails open (returns False, i.e. "treat as fine") on any error, timeout,
+    non-2xx status, or a missing/unparseable Content-Length header — this
+    is a best-effort filter against one specific failure mode, not a
+    correctness dependency, and a real photo should never be dropped over
+    a flaky HEAD request or a CDN that doesn't report Content-Length."""
+    if not image_url:
+        return False
+    try:
+        response = await client.head(
+            image_url,
+            timeout=BROKEN_IMAGE_CHECK_TIMEOUT_SECONDS,
+            impersonate=IMPERSONATE,
+        )
+        if response.status_code >= 400:
+            return False
+        content_length = response.headers.get("content-length")
+        return content_length is not None and int(content_length) == 0
+    except Exception:
+        return False
 
 
 def extract_rss_video(entry: Any) -> Optional[str]:
