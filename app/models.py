@@ -421,6 +421,13 @@ class Article(Base):
     title = Column(Text, nullable=False)
     snippet = Column(Text, nullable=True)
     content = Column(Text, nullable=True)  # Full article body, scraped from the article URL
+    # len(content.split()) at scrape time — lets explore_bandit's dwell-time
+    # baseline (_estimate_word_count) read one small int instead of fetching
+    # the whole body just to count words. NULL for legacy rows predating
+    # this column and for rows with no scraped content; both fall back the
+    # same way _estimate_word_count already did (cluster.summary, then
+    # DEFAULT_WORD_COUNT).
+    word_count = Column(Integer, nullable=True)
     author = Column(String(255), nullable=True)
     
     published_at = Column(DateTime(timezone=True), nullable=False, index=True)

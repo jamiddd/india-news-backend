@@ -3,7 +3,8 @@ import logging
 import hashlib
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any, Set
+from types import SimpleNamespace
+from typing import Optional, List, Dict, Any, Set, Tuple
 import feedparser
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from sqlalchemy.future import select
@@ -146,8 +147,10 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         if url_hash in seen_hashes_this_batch:
             continue
 
-        # Exact Dedup check
-        existing = await session.execute(select(Article).where(Article.url_hash == url_hash))
+        # Exact Dedup check — id only, not the full row (matches the title
+        # check right below; this one used to pull the whole Article,
+        # content included, just to test existence).
+        existing = await session.execute(select(Article.id).where(Article.url_hash == url_hash))
         if existing.scalar_one_or_none():
             continue
 
@@ -220,6 +223,28 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
     else:
         extracted = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
 
+    # Prefetch every recent cluster's representative article, once for the
+    # whole batch, selecting only what near-dup matching below actually
+    # reads (simhash/title/snippet + the source's category). This used to be
+    # a `select(Article, Source.category)` — full row, including the scraped
+    # body — re-run inside the candidate loop for every (candidate, cluster)
+    # pair, i.e. re-fetching the same ~100 article bodies once per candidate.
+    # With Supabase metering egress, that was the single largest line item
+    # in the whole poll cycle for zero benefit — content was never read here.
+    rep_article_ids = {c.representative_article_id for c in recent_clusters if c.representative_article_id}
+    rep_info: Dict[int, Tuple[SimpleNamespace, Optional[str]]] = {}
+    if rep_article_ids:
+        rep_rows = await session.execute(
+            select(Article.id, Article.simhash, Article.title, Article.snippet, Source.category)
+            .join(Source, Article.source_id == Source.id)
+            .where(Article.id.in_(rep_article_ids))
+        )
+        for aid, simhash, rep_title, rep_snippet, category in rep_rows:
+            rep_info[aid] = (
+                SimpleNamespace(simhash=simhash, title=rep_title, snippet=rep_snippet),
+                category,
+            )
+
     # Pass 3: near-duplicate clustering + insert, now that content is in hand.
     for candidate, extraction in zip(candidates, extracted):
         title = candidate["title"]
@@ -260,21 +285,19 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             media_type = "image" if image_url else None
 
         simhash_val = compute_simhash(title, snippet)
+        # Computed once here at scrape time so explore_bandit's
+        # _estimate_word_count can read this int instead of fetching the
+        # whole body later just to count words.
+        word_count_val = max(len(content.split()), 1) if content else None
 
         matched_cluster: Optional[StoryCluster] = None
         for cluster in recent_clusters:
             rep_article = None
             rep_source_category = None
             if cluster.representative_article_id:
-                rep_row = (
-                    await session.execute(
-                        select(Article, Source.category)
-                        .join(Source, Article.source_id == Source.id)
-                        .where(Article.id == cluster.representative_article_id)
-                    )
-                ).first()
-                if rep_row:
-                    rep_article, rep_source_category = rep_row
+                cached = rep_info.get(cluster.representative_article_id)
+                if cached:
+                    rep_article, rep_source_category = cached
 
             # max_distance intentionally omitted here — is_near_duplicate's own
             # default (18) is the empirically-calibrated value; keep this call
@@ -317,6 +340,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 title=title,
                 snippet=snippet,
                 content=content,
+                word_count=word_count_val,
                 image_url=image_url,
                 video_url=video_url,
                 media_type=media_type,
@@ -357,6 +381,7 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 title=title,
                 snippet=snippet,
                 content=content,
+                word_count=word_count_val,
                 image_url=image_url,
                 video_url=video_url,
                 media_type=media_type,
@@ -370,6 +395,15 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             session.add(article)
             await session.flush()
             new_cluster.representative_article_id = article.id
+            # Backfill rep_info for this brand-new article — it wasn't part
+            # of the upfront prefetch (didn't exist yet), but a later
+            # candidate in this same batch can still match against it as
+            # recent_clusters grows. No query needed: this is the exact
+            # object just built above.
+            rep_info[article.id] = (
+                SimpleNamespace(simhash=article.simhash, title=article.title, snippet=article.snippet),
+                source.category,
+            )
             recent_clusters.insert(0, new_cluster)
 
         new_articles_count += 1

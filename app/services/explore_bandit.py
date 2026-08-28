@@ -67,12 +67,16 @@ async def _estimate_word_count(session: AsyncSession, cluster: StoryCluster) -> 
     summary, falling back to a fixed default. Not exact — see
     DEFAULT_WORD_COUNT."""
     if cluster.representative_article_id is not None:
+        # word_count is precomputed at scrape time (poller.py) — reading it
+        # instead of Article.content avoids pulling the whole scraped body
+        # just to call len(.split()) on it. NULL covers legacy rows from
+        # before this column existed, which still fall through below.
         res = await session.execute(
-            select(Article.content).where(Article.id == cluster.representative_article_id)
+            select(Article.word_count).where(Article.id == cluster.representative_article_id)
         )
-        content = res.scalar_one_or_none()
-        if content:
-            return max(len(content.split()), 1)
+        word_count = res.scalar_one_or_none()
+        if word_count:
+            return word_count
     if cluster.summary:
         return max(len(cluster.summary.split()), 1)
     return DEFAULT_WORD_COUNT

@@ -24,11 +24,34 @@ class ArticleOut(BaseModel):
     title: str
     snippet: Optional[str] = None
     content: Optional[str] = None
-    author: Optional[str] = None
     published_at: datetime
     image_url: Optional[str] = None
     video_url: Optional[str] = None
-    media_type: Optional[str] = None
+    video_is_short: Optional[bool] = None
+    video_duration_seconds: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ArticleListOut(BaseModel):
+    """Same as ArticleOut minus `content` — the full scraped article body,
+    3-8KB+ per article. List endpoints (GET /clusters, /search) render only
+    cards (headline/snippet/image), never body text, so shipping it there
+    was pure wasted egress on every feed load. The Android client fetches
+    the full StoryCluster (via GET /clusters/{id}) when a story is actually
+    opened — see NewsViewModel.kt's selectCluster. `author`/`media_type`
+    aren't here either: confirmed unused by any screen, list or detail, so
+    dropped from ArticleOut entirely rather than duplicated into two
+    schemas."""
+    id: int
+    source_id: int
+    source_name: str
+    url: str
+    title: str
+    snippet: Optional[str] = None
+    published_at: datetime
+    image_url: Optional[str] = None
+    video_url: Optional[str] = None
     video_is_short: Optional[bool] = None
     video_duration_seconds: Optional[int] = None
 
@@ -45,18 +68,57 @@ class StoryClusterOut(BaseModel):
     entities: Optional[Any] = None
     topics: Optional[Any] = None
     framing_comparison: Optional[Any] = None
-    # True only on a confirmed successful Anthropic API call — NOT implied
-    # by entities/topics/framing_comparison being present, since those are
-    # always populated by the free rule-based fallback first regardless of
-    # whether the paid API call succeeds. See StoryCluster.ai_enriched.
-    ai_enriched: bool = False
     articles: List[ArticleOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StoryClusterListOut(BaseModel):
+    """Same as StoryClusterOut minus `entities`/`topics`/`framing_comparison`
+    — all three are detail-screen-only (StoryDetailScreen.kt), never read by
+    any feed/list card. `ai_enriched` isn't here either: confirmed to not
+    even be declared in the Android StoryCluster model, so dropped from
+    StoryClusterOut entirely — it was sent on every cluster and deserialized
+    never. See ArticleListOut for the matching per-article trim."""
+    id: int
+    headline: str
+    summary: Optional[str] = None
+    article_count: int
+    first_seen_at: datetime
+    last_updated_at: datetime
+    articles: List[ArticleListOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedClustersOut(BaseModel):
     items: List[StoryClusterOut]
+    next_cursor: Optional[str] = None
+    has_more: bool
+
+
+class PaginatedClustersListOut(BaseModel):
+    """response_model for the slim list endpoints (GET /clusters, /search)
+    — see StoryClusterListOut."""
+    items: List[StoryClusterListOut]
+    next_cursor: Optional[str] = None
+    has_more: bool
+
+
+class ClustersCacheEnvelope(BaseModel):
+    """What GET /clusters actually caches — the page's clusters *before*
+    the per-request weighted shuffle and explore-slot splice, which must
+    run on every request (including cache hits) rather than being baked
+    into a shared cached response. See main.py's list_story_clusters:
+    `seed` and `user_id` are deliberately excluded from the cache key
+    since neither affects which clusters this query returns, only how
+    the cached page gets reordered/spliced per request. `weights` runs
+    parallel to `items`, one _weighted_shuffle weight per cluster,
+    computed once here so a cache hit doesn't need the ORM objects
+    (headline_score, source boosts, explore_status) to reshuffle. Items are
+    the slim StoryClusterListOut — this is what /clusters returns."""
+    items: List[StoryClusterListOut]
+    weights: List[float]
     next_cursor: Optional[str] = None
     has_more: bool
 

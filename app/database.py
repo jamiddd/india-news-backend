@@ -12,10 +12,18 @@ engine = create_async_engine(
     # greenlet-bridged during that specific reconnect path, raising
     # MissingGreenlet instead of the query it was guarding. Observed live: a
     # poller rollback recovery immediately hit this on the very next source.
-    # Postgres and the app share a docker-compose network with no long idle
-    # gaps, so the stale-connection case pre-ping exists for is unlikely here
-    # — worth the tradeoff to drop it rather than carry a live crash path.
-    pool_pre_ping=False
+    # That reasoning assumed Postgres and the app shared a docker-compose
+    # network with no long idle gaps — true when this was written, false
+    # since 2026-08-22 (prod moved to a remote managed Postgres). pre_ping
+    # stays off for the same MissingGreenlet reason, but pool_recycle now
+    # does the job pre_ping would have: proactively drops and replaces any
+    # connection older than this, rather than waiting to discover it's dead
+    # mid-request. Same class of fix already applied to the Redis client
+    # (see redis_client.py's health_check_interval/socket_keepalive) when
+    # that migration first surfaced idle-connection drops, just never
+    # carried over here.
+    pool_pre_ping=False,
+    pool_recycle=1800,
 )
 
 AsyncSessionLocal = async_sessionmaker(

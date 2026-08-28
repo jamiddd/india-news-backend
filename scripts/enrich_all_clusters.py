@@ -40,8 +40,15 @@ async def enrich_clusters(
     for clusters that permanently fail the paid call.
     """
     async with AsyncSessionLocal() as session:
+        # enrich_cluster_with_ai only ever reads title/snippet/source.name
+        # (see app/services/enrichment.py) — load_only stops this from also
+        # dragging every article's full scraped body over the wire, on a
+        # remote (Supabase) Postgres where that's metered egress, every time
+        # this runs (every 20 min via infra/news-enrich.timer).
         query = select(StoryCluster).options(
-            selectinload(StoryCluster.articles).selectinload(Article.source)
+            selectinload(StoryCluster.articles).load_only(
+                Article.title, Article.snippet, Article.source_id
+            ).selectinload(Article.source)
         )
 
         if since_days is not None:

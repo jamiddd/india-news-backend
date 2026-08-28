@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -46,7 +47,8 @@ from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, utc_now
 from app.schemas import (
-    SourceOut, StoryClusterOut, ArticleOut, PaginatedClustersOut, RelatedClustersOut,
+    SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
+    PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -93,14 +95,17 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Redis was already provisioned for rate limiting (see `limiter` below) but
 # sat otherwise idle for reads — every request hit Postgres directly even
 # though the underlying data only actually changes once per poll cycle
-# (~15 min). 30s is short enough that a poll-triggered update is visible
-# almost immediately, while still collapsing the realistic case of many
-# concurrent clients requesting the same (category, cursor) page within a
-# few seconds of each other into one DB query. Deliberately fails open on
-# any Redis error (network blip, Redis restart) — caching is a performance
-# optimization, not a correctness dependency, so a cache miss/error just
-# means "hit the DB like before", never a request failure.
-CACHE_TTL_SECONDS = 30
+# (~15 min). 5 minutes still surfaces a poll-triggered update promptly
+# while collapsing many more reloads/concurrent clients requesting the same
+# (category, cursor) page into one DB query than the old 30s did. For
+# /clusters specifically, order rotation on reload comes from the
+# post-cache weighted shuffle (see _weighted_shuffle's call site below),
+# not from expiring this cache, so a long TTL doesn't make repeat loads
+# look static. Deliberately fails open on any Redis error (network blip,
+# Redis restart) — caching is a performance optimization, not a
+# correctness dependency, so a cache miss/error just means "hit the DB
+# like before", never a request failure.
+CACHE_TTL_SECONDS = 300
 
 async def _cache_get(key: str) -> Optional[str]:
     try:
@@ -179,11 +184,14 @@ def _weighted_shuffle(items: list, weight_fn, seed: str, strength: float = FEED_
 
 
 def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
-    """Builds a StoryClusterOut from an ORM StoryCluster, filling
+    """Builds a full StoryClusterOut (incl. article content/entities/topics/
+    framing_comparison) from an ORM StoryCluster, filling
     ArticleOut.source_name (not a plain column — comes from art.source.name)
     by hand. NOT a plain StoryClusterOut.model_validate(cluster): that fails
     on the missing source_name field. Requires cluster.articles' .source to
-    already be loaded (selectinload), same as every existing call site."""
+    already be loaded (selectinload), same as every existing call site.
+    Use this for single-cluster/detail responses; use _cluster_to_list_out
+    for list endpoints (GET /clusters, /search) — see StoryClusterListOut."""
     articles_out = [
         ArticleOut(
             id=art.id,
@@ -193,11 +201,9 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
             title=art.title,
             snippet=art.snippet,
             content=art.content,
-            author=art.author,
             published_at=art.published_at,
             image_url=art.image_url,
             video_url=art.video_url,
-            media_type=art.media_type,
             video_is_short=art.video_is_short,
             video_duration_seconds=art.video_duration_seconds,
         )
@@ -213,7 +219,37 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
         entities=cluster.entities,
         topics=cluster.topics,
         framing_comparison=cluster.framing_comparison,
-        ai_enriched=cluster.ai_enriched,
+        articles=articles_out,
+    )
+
+
+def _cluster_to_list_out(cluster: StoryCluster) -> StoryClusterListOut:
+    """Slim counterpart to _cluster_to_out for list endpoints — see
+    StoryClusterListOut/ArticleListOut for what's dropped and why. Same
+    selectinload requirement as _cluster_to_out."""
+    articles_out = [
+        ArticleListOut(
+            id=art.id,
+            source_id=art.source_id,
+            source_name=art.source.name if art.source else "Unknown",
+            url=art.url,
+            title=art.title,
+            snippet=art.snippet,
+            published_at=art.published_at,
+            image_url=art.image_url,
+            video_url=art.video_url,
+            video_is_short=art.video_is_short,
+            video_duration_seconds=art.video_duration_seconds,
+        )
+        for art in cluster.articles
+    ]
+    return StoryClusterListOut(
+        id=cluster.id,
+        headline=cluster.headline,
+        summary=cluster.summary,
+        article_count=cluster.article_count,
+        first_seen_at=cluster.first_seen_at,
+        last_updated_at=cluster.last_updated_at,
         articles=articles_out,
     )
 
@@ -249,6 +285,15 @@ app = FastAPI(
 )
 app.include_router(poll_admin_router)
 app.include_router(story_reports_admin_router)
+
+# Every JSON response — cluster lists especially, with full article bodies
+# and JSON columns — was going out uncompressed end to end (confirmed: no
+# `encode` in the live Caddy config either). OkHttp on the client already
+# sends `Accept-Encoding: gzip` and transparently inflates, so this is a
+# same-day ~5-10x cut in client-facing bytes with zero client change.
+# 500-byte floor so tiny responses (e.g. {"message": "..."}) skip the
+# compression overhead entirely.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Per-IP rate limiting, backed by the same Redis instance used elsewhere —
 # a plain in-memory limiter would let each of the 4 uvicorn workers (see
@@ -759,7 +804,7 @@ async def enrich_cluster_endpoint(request: Request, cluster_id: int, db: AsyncSe
     enriched = await enrich_cluster_with_ai(db, cluster)
     return {"message": "Cluster enriched successfully", "data": enriched}
 
-@app.get(f"{settings.API_V1_STR}/search", response_model=PaginatedClustersOut)
+@app.get(f"{settings.API_V1_STR}/search", response_model=PaginatedClustersListOut)
 @limiter.limit("60/minute")
 async def search_story_clusters(
     request: Request,
@@ -797,42 +842,9 @@ async def search_story_clusters(
     items = clusters[:limit]
     next_cursor = str(items[-1].id) if has_more and items else None
 
-    formatted_clusters = [
-        StoryClusterOut(
-            id=cluster.id,
-            headline=cluster.headline,
-            summary=cluster.summary,
-            article_count=cluster.article_count,
-            first_seen_at=cluster.first_seen_at,
-            last_updated_at=cluster.last_updated_at,
-            entities=cluster.entities,
-            topics=cluster.topics,
-            framing_comparison=cluster.framing_comparison,
-            ai_enriched=cluster.ai_enriched,
-            articles=[
-                ArticleOut(
-                    id=art.id,
-                    source_id=art.source_id,
-                    source_name=art.source.name if art.source else "Unknown",
-                    url=art.url,
-                    title=art.title,
-                    snippet=art.snippet,
-                    content=art.content,
-                    author=art.author,
-                    published_at=art.published_at,
-                    image_url=art.image_url,
-                    video_url=art.video_url,
-                    media_type=art.media_type,
-                    video_is_short=art.video_is_short,
-                    video_duration_seconds=art.video_duration_seconds,
-                )
-                for art in cluster.articles
-            ]
-        )
-        for cluster in items
-    ]
+    formatted_clusters = [_cluster_to_list_out(cluster) for cluster in items]
 
-    result_out = PaginatedClustersOut(
+    result_out = PaginatedClustersListOut(
         items=formatted_clusters,
         next_cursor=next_cursor,
         has_more=has_more
@@ -840,7 +852,7 @@ async def search_story_clusters(
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 
-@app.get(f"{settings.API_V1_STR}/clusters", response_model=PaginatedClustersOut)
+@app.get(f"{settings.API_V1_STR}/clusters", response_model=PaginatedClustersListOut)
 @limiter.limit("60/minute")
 async def list_story_clusters(
     request: Request,
@@ -895,130 +907,158 @@ async def list_story_clusters(
     ),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:clusters:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{seed or ''}:{user_id or ''}:{min_sources or ''}:{source_id or ''}"
+    # `seed`/`user_id` deliberately excluded from the cache key: neither
+    # affects which clusters this query returns (see ClustersCacheEnvelope's
+    # docstring in app/schemas.py) — only how the cached page gets
+    # reordered/spliced per request below, which happens on every request,
+    # cache hit or miss.
+    cache_key = f"cache:clusters:v2:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{min_sources or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
-    if cached is not None:
-        return Response(content=cached, media_type="application/json")
 
     is_source_filter = source_id is not None
     is_all = not is_source_filter and (not category or category.lower() == "all")
     weights = _parse_source_weights(source_weights) if is_all else {}
-    # Feed ranking redesign, piece 3: a promoted explore candidate gets a
-    # real, live multiplier here — not a shadow signal like piece 1's
-    # entity_boost, this is the actual mechanism that rescues a buried
-    # story for everyone once it's earned it. See app.services.explore_bandit.
-    explore_boost_expr = case(
-        (StoryCluster.explore_status == "promoted", EXPLORE_PROMOTED_BOOST), else_=1.0
-    )
 
-    query = select(StoryCluster).options(
-        selectinload(StoryCluster.articles).selectinload(Article.source)
-    ).where(StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE)
-
-    if min_sources:
-        query = query.where(StoryCluster.distinct_source_count >= min_sources)
-
-    if is_all:
-        # Default "All Stories" feed: ranked by importance (headline_score —
-        # distinct-outlet corroboration decayed by recency, recomputed once
-        # per poll cycle in poller.py), not raw recency. This is what keeps
-        # a story 6 outlets are covering above a single regional outlet's
-        # story that merely updated more recently.
-        if weights:
-            # Per-cluster boost = the highest weight among its contributing
-            # sources (a cluster with a boosted source among 5 others still
-            # gets the boost — not diluted by the unboosted majority). Built
-            # as a correlated subquery rather than joining Article directly
-            # onto the main query, so it can't fan out StoryCluster rows
-            # (one per matching article) the way a plain join would.
-            weight_case = case(weights, value=Article.source_id, else_=1.0)
-            boost_subq = (
-                select(Article.cluster_id.label("cluster_id"), func.max(weight_case).label("boost"))
-                .group_by(Article.cluster_id)
-                .subquery()
-            )
-            boost_expr = func.coalesce(boost_subq.c.boost, 1.0)
-            effective_score = StoryCluster.headline_score * boost_expr * explore_boost_expr
-            query = query.outerjoin(boost_subq, boost_subq.c.cluster_id == StoryCluster.id)
-        else:
-            effective_score = StoryCluster.headline_score * explore_boost_expr
-        query = query.order_by(desc(effective_score), desc(StoryCluster.id))
-    elif is_source_filter:
-        subquery = select(Article.cluster_id).where(Article.source_id == source_id)
-        query = query.where(StoryCluster.id.in_(subquery))
-        query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
+    if cached is not None:
+        envelope = ClustersCacheEnvelope.model_validate_json(cached)
+        cluster_outs = envelope.items
+        item_weights = envelope.weights
+        next_cursor = envelope.next_cursor
+        has_more = envelope.has_more
     else:
-        cat = category.lower()
-        subquery = (
-            select(Article.cluster_id)
-            .join(Source)
-            .where(Source.category == cat)
+        # Feed ranking redesign, piece 3: a promoted explore candidate gets a
+        # real, live multiplier here — not a shadow signal like piece 1's
+        # entity_boost, this is the actual mechanism that rescues a buried
+        # story for everyone once it's earned it. See app.services.explore_bandit.
+        explore_boost_expr = case(
+            (StoryCluster.explore_status == "promoted", EXPLORE_PROMOTED_BOOST), else_=1.0
         )
-        # For tabs where the source's RSS section alone is too coarse a
-        # signal (broad section feeds mixing in off-topic stories, or a
-        # regional outlet occasionally running an unrelated wire story),
-        # also require the article to actually mention something on-topic.
-        # See app/services/topic_filters.py for why and the keyword lists.
-        gate_keywords = CONTENT_GATED_CATEGORIES.get(cat)
-        if gate_keywords:
-            pattern = keyword_regex(gate_keywords)
-            subquery = subquery.where(
-                or_(
-                    Article.title.op("~*")(pattern),
-                    Article.snippet.op("~*")(pattern),
+
+        query = select(StoryCluster).options(
+            selectinload(StoryCluster.articles).selectinload(Article.source)
+        ).where(StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE)
+
+        if min_sources:
+            query = query.where(StoryCluster.distinct_source_count >= min_sources)
+
+        if is_all:
+            # Default "All Stories" feed: ranked by importance (headline_score —
+            # distinct-outlet corroboration decayed by recency, recomputed once
+            # per poll cycle in poller.py), not raw recency. This is what keeps
+            # a story 6 outlets are covering above a single regional outlet's
+            # story that merely updated more recently.
+            if weights:
+                # Per-cluster boost = the highest weight among its contributing
+                # sources (a cluster with a boosted source among 5 others still
+                # gets the boost — not diluted by the unboosted majority). Built
+                # as a correlated subquery rather than joining Article directly
+                # onto the main query, so it can't fan out StoryCluster rows
+                # (one per matching article) the way a plain join would.
+                weight_case = case(weights, value=Article.source_id, else_=1.0)
+                boost_subq = (
+                    select(Article.cluster_id.label("cluster_id"), func.max(weight_case).label("boost"))
+                    .group_by(Article.cluster_id)
+                    .subquery()
                 )
+                boost_expr = func.coalesce(boost_subq.c.boost, 1.0)
+                effective_score = StoryCluster.headline_score * boost_expr * explore_boost_expr
+                query = query.outerjoin(boost_subq, boost_subq.c.cluster_id == StoryCluster.id)
+            else:
+                effective_score = StoryCluster.headline_score * explore_boost_expr
+            query = query.order_by(desc(effective_score), desc(StoryCluster.id))
+        elif is_source_filter:
+            subquery = select(Article.cluster_id).where(Article.source_id == source_id)
+            query = query.where(StoryCluster.id.in_(subquery))
+            query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
+        else:
+            cat = category.lower()
+            subquery = (
+                select(Article.cluster_id)
+                .join(Source)
+                .where(Source.category == cat)
             )
-        query = query.where(StoryCluster.id.in_(subquery))
-        # Category/region tabs stay pure reverse-chronological — someone who
-        # picked a specific lens wants everything in it, in order, not a
-        # curated subset.
-        query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
-
-    if cursor:
-        if is_all:
-            # Compound "score:id" cursor — headline_score isn't monotonic
-            # with id, so a plain id cursor can't express "everything after
-            # this point in score order". Malformed/stale cursors (e.g. the
-            # old bare-int format, from a client mid-scroll across a
-            # deploy) are treated as "start over" rather than a 500.
-            # Must compare against the same expression used in ORDER BY
-            # (effective_score, boosted or not) — comparing against raw
-            # headline_score while boosted would skip/duplicate rows once a
-            # boosted story sorts out of its unboosted position.
-            try:
-                score_str, id_str = cursor.split(":", 1)
-                query = query.where(
-                    tuple_(effective_score, StoryCluster.id) < (float(score_str), int(id_str))
+            # For tabs where the source's RSS section alone is too coarse a
+            # signal (broad section feeds mixing in off-topic stories, or a
+            # regional outlet occasionally running an unrelated wire story),
+            # also require the article to actually mention something on-topic.
+            # See app/services/topic_filters.py for why and the keyword lists.
+            gate_keywords = CONTENT_GATED_CATEGORIES.get(cat)
+            if gate_keywords:
+                pattern = keyword_regex(gate_keywords)
+                subquery = subquery.where(
+                    or_(
+                        Article.title.op("~*")(pattern),
+                        Article.snippet.op("~*")(pattern),
+                    )
                 )
-            except (ValueError, TypeError):
-                pass
-        else:
-            try:
-                query = query.where(StoryCluster.id < int(cursor))
-            except (ValueError, TypeError):
-                pass
+            query = query.where(StoryCluster.id.in_(subquery))
+            # Category/region tabs stay pure reverse-chronological — someone who
+            # picked a specific lens wants everything in it, in order, not a
+            # curated subset.
+            query = query.order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
 
-    query = query.limit(limit + 1)
-    result = await db.execute(query)
-    clusters = result.scalars().all()
+        if cursor:
+            if is_all:
+                # Compound "score:id" cursor — headline_score isn't monotonic
+                # with id, so a plain id cursor can't express "everything after
+                # this point in score order". Malformed/stale cursors (e.g. the
+                # old bare-int format, from a client mid-scroll across a
+                # deploy) are treated as "start over" rather than a 500.
+                # Must compare against the same expression used in ORDER BY
+                # (effective_score, boosted or not) — comparing against raw
+                # headline_score while boosted would skip/duplicate rows once a
+                # boosted story sorts out of its unboosted position.
+                try:
+                    score_str, id_str = cursor.split(":", 1)
+                    query = query.where(
+                        tuple_(effective_score, StoryCluster.id) < (float(score_str), int(id_str))
+                    )
+                except (ValueError, TypeError):
+                    pass
+            else:
+                try:
+                    query = query.where(StoryCluster.id < int(cursor))
+                except (ValueError, TypeError):
+                    pass
 
-    has_more = len(clusters) > limit
-    items = clusters[:limit]
-    if has_more and items:
-        last = items[-1]
-        if is_all:
-            # Recomputed in Python from the same weights dict rather than
-            # selected as an extra SQL column — `last` is a plain mapped
-            # StoryCluster (from .scalars()), and its already-loaded
-            # .articles (via selectinload) give us everything needed to
-            # reproduce the identical boost the SQL query used to order it.
-            last_boost = max((weights.get(a.source_id, 1.0) for a in last.articles), default=1.0)
-            last_explore_boost = EXPLORE_PROMOTED_BOOST if last.explore_status == "promoted" else 1.0
-            next_cursor = f"{last.headline_score * last_boost * last_explore_boost}:{last.id}"
+        query = query.limit(limit + 1)
+        result = await db.execute(query)
+        clusters = result.scalars().all()
+
+        has_more = len(clusters) > limit
+        items = clusters[:limit]
+        if has_more and items:
+            last = items[-1]
+            if is_all:
+                # Recomputed in Python from the same weights dict rather than
+                # selected as an extra SQL column — `last` is a plain mapped
+                # StoryCluster (from .scalars()), and its already-loaded
+                # .articles (via selectinload) give us everything needed to
+                # reproduce the identical boost the SQL query used to order it.
+                last_boost = max((weights.get(a.source_id, 1.0) for a in last.articles), default=1.0)
+                last_explore_boost = EXPLORE_PROMOTED_BOOST if last.explore_status == "promoted" else 1.0
+                next_cursor = f"{last.headline_score * last_boost * last_explore_boost}:{last.id}"
+            else:
+                next_cursor = str(last.id)
         else:
-            next_cursor = str(last.id)
-    else:
-        next_cursor = None
+            next_cursor = None
+
+        # Same weight the old inline shuffle used (headline_score * source
+        # boost * explore boost) — precomputed here and cached alongside the
+        # formatted clusters so a future cache hit can reshuffle without the
+        # ORM objects (headline_score etc. aren't on StoryClusterOut).
+        cluster_outs = [_cluster_to_list_out(c) for c in items]
+        item_weights = [
+            c.headline_score
+            * max((weights.get(a.source_id, 1.0) for a in c.articles), default=1.0)
+            * (EXPLORE_PROMOTED_BOOST if c.explore_status == "promoted" else 1.0)
+            for c in items
+        ]
+
+        envelope = ClustersCacheEnvelope(
+            items=cluster_outs, weights=item_weights, next_cursor=next_cursor, has_more=has_more,
+        )
+        await _cache_set(cache_key, envelope.model_dump_json())
 
     # Reorder (never refilter/repaginate) a fresh All Stories first page for
     # display, so reloading rotates the feed instead of returning the exact
@@ -1026,23 +1066,27 @@ async def list_story_clusters(
     # updates once per poll cycle — see poller.py). next_cursor above is
     # already locked in from the real deterministic order, so this can't
     # skip or duplicate clusters across pages — it only shuffles what's
-    # already been decided will appear on *this* page.
-    if is_all and seed and cursor is None and items:
-        display_items = _weighted_shuffle(
-            items,
-            weight_fn=lambda c: c.headline_score * max(
-                (weights.get(a.source_id, 1.0) for a in c.articles), default=1.0
-            ) * (EXPLORE_PROMOTED_BOOST if c.explore_status == "promoted" else 1.0),
+    # already been decided will appear on *this* page. Runs on cache hits
+    # too (using the cached `item_weights`) so a long cache TTL doesn't
+    # make reloads look static.
+    if is_all and seed and cursor is None and cluster_outs:
+        shuffled = _weighted_shuffle(
+            list(zip(cluster_outs, item_weights)),
+            weight_fn=lambda pair: pair[1],
             seed=seed,
         )
+        display_items = [pair[0] for pair in shuffled]
     else:
-        display_items = items
+        display_items = cluster_outs
 
     # Feed ranking redesign, piece 3: explore-slot bandit. Only on a fresh,
     # logged-in All Stories first page — see EXPLORE_SLOT_POSITION and the
     # user_id param's docstring above. Silently skipped (never a 500/404)
     # if user_id doesn't match a real user — this endpoint stays usable
-    # anonymously/defensively regardless of what's passed here.
+    # anonymously/defensively regardless of what's passed here. Deliberately
+    # never cached — record_exposure/db.commit() below is a write side
+    # effect that must run exactly once per real request, not be replayed
+    # from a shared cache entry.
     if is_all and cursor is None and user_id and display_items:
         user_exists = (await db.execute(select(User.id).where(User.id == user_id))).scalar_one_or_none()
         if user_exists:
@@ -1056,60 +1100,23 @@ async def list_story_clusters(
                 candidate = candidate_result.scalar_one_or_none()
                 if candidate is not None:
                     insert_at = min(EXPLORE_SLOT_POSITION - 1, len(display_items))
-                    display_items = display_items[:insert_at] + [candidate] + display_items[insert_at:]
+                    display_items = display_items[:insert_at] + [_cluster_to_list_out(candidate)] + display_items[insert_at:]
                     await record_exposure(db, candidate.id, user_id)
                     await db.commit()
 
     formatted_clusters = []
     seen_ids = set()
-    for cluster in display_items:
-        if cluster.id in seen_ids:
+    for cluster_out in display_items:
+        if cluster_out.id in seen_ids:
             continue
-        seen_ids.add(cluster.id)
+        seen_ids.add(cluster_out.id)
+        formatted_clusters.append(cluster_out)
 
-        articles_out = [
-            ArticleOut(
-                id=art.id,
-                source_id=art.source_id,
-                source_name=art.source.name if art.source else "Unknown",
-                url=art.url,
-                title=art.title,
-                snippet=art.snippet,
-                content=art.content,
-                author=art.author,
-                published_at=art.published_at,
-                image_url=art.image_url,
-                video_url=art.video_url,
-                media_type=art.media_type,
-                video_is_short=art.video_is_short,
-                video_duration_seconds=art.video_duration_seconds,
-            )
-            for art in cluster.articles
-        ]
-        
-        formatted_clusters.append(
-            StoryClusterOut(
-                id=cluster.id,
-                headline=cluster.headline,
-                summary=cluster.summary,
-                article_count=cluster.article_count,
-                first_seen_at=cluster.first_seen_at,
-                last_updated_at=cluster.last_updated_at,
-                entities=cluster.entities,
-                topics=cluster.topics,
-                framing_comparison=cluster.framing_comparison,
-                ai_enriched=cluster.ai_enriched,
-                articles=articles_out
-            )
-        )
-
-    result_out = PaginatedClustersOut(
+    return PaginatedClustersListOut(
         items=formatted_clusters,
         next_cursor=next_cursor,
-        has_more=has_more
+        has_more=has_more,
     )
-    await _cache_set(cache_key, result_out.model_dump_json())
-    return result_out
 
 @app.get(f"{settings.API_V1_STR}/clusters/for-you", response_model=PaginatedClustersOut)
 @limiter.limit("60/minute")
@@ -1147,9 +1154,24 @@ async def list_for_you_clusters(
     if user_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Per-user (unlike /clusters, this genuinely varies per requester) —
+    # this endpoint previously hydrated a 200-cluster candidate window with
+    # full articles/content on every single request, uncached, to return
+    # only `limit`. Same short-TTL pattern as /clusters/_cache_get below;
+    # a user reloading "For You" repeatedly within the window now hits
+    # Redis instead of re-scoring 200 clusters against Postgres each time.
+    cache_key = f"cache:for-you:{user_id}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
+
     # Bounded candidate window so scoring stays cheap — affinity is scored
     # in Python (score_clusters_for_user), not SQL, since it has to unpack
-    # each cluster's entities JSON and canonicalize them.
+    # each cluster's entities JSON and canonicalize them. Window cut from
+    # 200 to 100 — score_clusters_for_user's inputs (entities, starred
+    # sources) don't meaningfully benefit from a deeper window, and this
+    # halves how many clusters' full articles get hydrated for a request
+    # that only returns `limit` (<=50) of them.
     candidates_result = await db.execute(
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
@@ -1158,7 +1180,7 @@ async def list_for_you_clusters(
             StoryCluster.entities.isnot(None),
         )
         .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
-        .limit(200)
+        .limit(100)
     )
     candidates = candidates_result.scalars().all()
 
@@ -1166,11 +1188,13 @@ async def list_for_you_clusters(
     ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score), reverse=True)
     items = ranked[:limit]
 
-    return PaginatedClustersOut(
+    result_out = PaginatedClustersOut(
         items=[_cluster_to_out(c) for c in items],
         next_cursor=None,
         has_more=False,
     )
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
 
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)
@@ -1187,39 +1211,7 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
     if not cluster:
         raise HTTPException(status_code=404, detail="Story cluster not found")
 
-    articles_out = [
-        ArticleOut(
-            id=art.id,
-            source_id=art.source_id,
-            source_name=art.source.name if art.source else "Unknown",
-            url=art.url,
-            title=art.title,
-            snippet=art.snippet,
-            content=art.content,
-            author=art.author,
-            published_at=art.published_at,
-            image_url=art.image_url,
-            video_url=art.video_url,
-            media_type=art.media_type,
-            video_is_short=art.video_is_short,
-            video_duration_seconds=art.video_duration_seconds,
-        )
-        for art in cluster.articles
-    ]
-
-    return StoryClusterOut(
-        id=cluster.id,
-        headline=cluster.headline,
-        summary=cluster.summary,
-        article_count=cluster.article_count,
-        first_seen_at=cluster.first_seen_at,
-        last_updated_at=cluster.last_updated_at,
-        entities=cluster.entities,
-        topics=cluster.topics,
-        framing_comparison=cluster.framing_comparison,
-        ai_enriched=cluster.ai_enriched,
-        articles=articles_out
-    )
+    return _cluster_to_out(cluster)
 
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/related", response_model=RelatedClustersOut)

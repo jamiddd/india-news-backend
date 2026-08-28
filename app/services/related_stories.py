@@ -14,6 +14,7 @@ occasionally return an incomplete set of related stories. Under-showing is
 the accepted failure mode for a discovery feature — see the design doc's
 "Next steps" for the actor-type refinement that would reduce this.
 """
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -21,12 +22,37 @@ from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import text
 
 from app.services.entity_graph import canonicalize_entity
+from app.redis_client import get_redis_client
 
 DAYS = 60
 GENERIC_PERCENTILE = 0.95
 MAX_DF_RATIO = 0.015
 SUBSUMPTION_RATIO = 0.8
 MIN_SHARED = 1
+
+# Both load_clusters/load_entity_stats below feed a per-cluster-id cache
+# already (see main.py's GET /clusters/{id}/related), but that cache is
+# keyed on the specific cluster_id being asked about — so any two different
+# "what's related to X" requests within the same few minutes still each
+# re-ran these two queries from scratch: the *entire* 60-day cluster window
+# with its entities JSON, and a full entity_stats table scan. This caches
+# those two inputs themselves, independent of which cluster_id is asked
+# about, so only the (cheap, in-Python) graph rebuild repeats per request.
+RELATED_INPUTS_CACHE_TTL_SECONDS = 300
+
+
+async def _cache_get(key: str):
+    try:
+        return await get_redis_client().get(key)
+    except Exception:
+        return None
+
+
+async def _cache_set(key: str, value: str, ttl: int = RELATED_INPUTS_CACHE_TTL_SECONDS):
+    try:
+        await get_redis_client().setex(key, ttl, value)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -47,6 +73,21 @@ class TopicGroup:
 
 
 async def load_clusters(conn, days: int) -> List[Cluster]:
+    cache_key = f"cache:related:clusters:{days}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return [
+            Cluster(
+                id=d["id"],
+                headline=d["headline"],
+                first_seen_at=datetime.fromisoformat(d["first_seen_at"]),
+                last_updated_at=datetime.fromisoformat(d["last_updated_at"]),
+                distinct_source_count=d["distinct_source_count"],
+                entity_keys=set(d["entity_keys"]),
+            )
+            for d in json.loads(cached)
+        ]
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await conn.execute(
         text(
@@ -83,15 +124,34 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
                 entity_keys=entity_keys,
             )
         )
+
+    await _cache_set(cache_key, json.dumps([
+        {
+            "id": c.id,
+            "headline": c.headline,
+            "first_seen_at": c.first_seen_at.isoformat(),
+            "last_updated_at": c.last_updated_at.isoformat(),
+            "distinct_source_count": c.distinct_source_count,
+            "entity_keys": sorted(c.entity_keys),
+        }
+        for c in clusters
+    ]))
     return clusters
 
 
 async def load_entity_stats(conn) -> Dict[str, Tuple[float, float, str]]:
     """entity_key -> (baseline_rate, mention_count_decayed, display_name)."""
+    cache_key = "cache:related:entity_stats"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return {k: tuple(v) for k, v in json.loads(cached).items()}
+
     result = await conn.execute(
         text("SELECT entity_key, baseline_rate, mention_count_decayed, display_name FROM entity_stats")
     )
-    return {row.entity_key: (row.baseline_rate, row.mention_count_decayed, row.display_name) for row in result}
+    stats = {row.entity_key: (row.baseline_rate, row.mention_count_decayed, row.display_name) for row in result}
+    await _cache_set(cache_key, json.dumps(stats))
+    return stats
 
 
 def build_generic_check(
