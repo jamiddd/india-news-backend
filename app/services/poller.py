@@ -17,7 +17,7 @@ from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
 from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
-from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, IMPERSONATE
+from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 
@@ -265,6 +265,8 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         # og:video) over the image — a video is a strictly richer lead media
         # when a story has both.
         video_url = candidate["rss_video_url"] or extraction.og_video_url
+        if is_expiring_signed_video_url(video_url):
+            video_url = None
         # The Shorts flag and duration describe the *scraped* video, so they
         # only apply when that's the one that won.
         if video_url and video_url == extraction.og_video_url:

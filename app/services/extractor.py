@@ -263,6 +263,22 @@ def is_youtube_video_url(url: Optional[str]) -> bool:
     return bool(url) and bool(_YOUTUBE_CONTENT_URL_RE.search(url))
 
 
+# _resolve_brightcove_video's manifest URL carries a `fastly_token` query
+# param signing a short-TTL grant (observed: a CNBC/Al Jazeera manifest
+# already 403ing within hours of being resolved). Unlike the article's own
+# page, we resolve this once at scrape time and store it — by the time a
+# user actually opens the story, the token has often already expired, so the
+# app just sits frozen on the poster forever. There's no per-article fix
+# short of re-resolving the manifest at serve time (a bigger change), so for
+# now this keeps the URL out of video_url entirely and lets the story fall
+# back to its lead image — better than storing a link that's likely dead on
+# arrival.
+def is_expiring_signed_video_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    return "boltdns.net" in url and "fastly_token=" in url
+
+
 async def _fetch_youtube_video_meta(
     client: AsyncSession, video_id: str
 ) -> tuple[Optional[bool], Optional[int]]:
