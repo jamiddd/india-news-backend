@@ -6,6 +6,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import StoryCluster, Article
+from app.services.content_cleaner import decode_entities
 
 logger = logging.getLogger(__name__)
 
@@ -287,10 +288,15 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                     )
                     raise
 
-                cluster.headline = structured.get("neutral_headline", cluster.headline)
+                # decode_entities as a backstop: every other write path to
+                # these fields (poller.py's RSS ingestion) decodes entities
+                # as its last step, but the model occasionally echoes a
+                # literal "&amp;"-style entity from a source title it saw in
+                # the prompt, and nothing else here would catch that.
+                cluster.headline = decode_entities(structured.get("neutral_headline", cluster.headline))
                 bullets = structured.get("summary_bullets", [])
                 if bullets:
-                    cluster.summary = "\n• " + "\n• ".join(_clamp_bullets(bullets))
+                    cluster.summary = "\n• " + "\n• ".join(decode_entities(b) for b in _clamp_bullets(bullets))
                 if structured.get("entities"):
                     cluster.entities = _sanitize_entities(structured.get("entities"))
                 if structured.get("topics"):
