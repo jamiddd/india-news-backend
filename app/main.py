@@ -155,6 +155,9 @@ def _parse_source_weights(raw: Optional[str]) -> dict:
 # last_updated_at to drift.
 LISTING_MAX_AGE = timedelta(days=4)
 
+# See _truncate_content_preview / ArticleListOut.content.
+CONTENT_PREVIEW_CHAR_LIMIT = 600
+
 # Exponent applied to each cluster's effective_score before it feeds the
 # weighted shuffle below — 1.0 would stay closest to the real ranking (only
 # near-exact ties swap), while lower values compress the effective spread so
@@ -224,6 +227,20 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
     )
 
 
+def _truncate_content_preview(content: Optional[str], limit: int = CONTENT_PREVIEW_CHAR_LIMIT) -> Optional[str]:
+    """Word-boundary-safe clip of the scraped article body for list-endpoint
+    responses — see ArticleListOut.content. `limit` is set well above the
+    Android card's own ~420-char display budget (FeedNewsItemProduction.kt's
+    CARD_SNIPPET_CHAR_BUDGET) so client-side wrapping/justification always
+    has real text to work with, while still avoiding shipping the full
+    3-8KB body to every feed load."""
+    if not content:
+        return content
+    if len(content) <= limit:
+        return content
+    return content[:limit].rsplit(" ", 1)[0].rstrip() + "…"
+
+
 def _cluster_to_list_out(cluster: StoryCluster) -> StoryClusterListOut:
     """Slim counterpart to _cluster_to_out for list endpoints — see
     StoryClusterListOut/ArticleListOut for what's dropped and why. Same
@@ -236,6 +253,7 @@ def _cluster_to_list_out(cluster: StoryCluster) -> StoryClusterListOut:
             url=art.url,
             title=art.title,
             snippet=art.snippet,
+            content=_truncate_content_preview(art.content),
             published_at=art.published_at,
             image_url=art.image_url,
             video_url=art.video_url,
@@ -960,7 +978,10 @@ async def list_story_clusters(
     # docstring in app/schemas.py) — only how the cached page gets
     # reordered/spliced per request below, which happens on every request,
     # cache hit or miss.
-    cache_key = f"cache:clusters:v2:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{min_sources or ''}:{source_id or ''}"
+    # v3: ArticleListOut gained a truncated `content` preview field — bump
+    # the key so caches from before that change don't serve stale null
+    # content until their TTL naturally expires.
+    cache_key = f"cache:clusters:v3:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{min_sources or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
 
     is_source_filter = source_id is not None

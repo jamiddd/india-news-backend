@@ -34,12 +34,14 @@ class ArticleOut(BaseModel):
 
 
 class ArticleListOut(BaseModel):
-    """Same as ArticleOut minus `content` — the full scraped article body,
-    3-8KB+ per article. List endpoints (GET /clusters, /search) render only
-    cards (headline/snippet/image), never body text, so shipping it there
-    was pure wasted egress on every feed load. The Android client fetches
-    the full StoryCluster (via GET /clusters/{id}) when a story is actually
-    opened — see NewsViewModel.kt's selectCluster. `author`/`media_type`
+    """Same as ArticleOut, except `content` here is a truncated preview
+    (see CONTENT_PREVIEW_CHAR_LIMIT in main.py's _cluster_to_list_out), not
+    the full scraped article body (which can run 3-8KB+ per article — full
+    text still only ships via GET /clusters/{id} when a story is opened,
+    see NewsViewModel.kt's selectCluster). The preview exists because the
+    feed card (FeedNewsItemProduction.kt's "Cutout" layout) needs real
+    prose to render a consistent ~6 lines; the AI cluster summary alone
+    was too short/inconsistent for many stories. `author`/`media_type`
     aren't here either: confirmed unused by any screen, list or detail, so
     dropped from ArticleOut entirely rather than duplicated into two
     schemas."""
@@ -49,6 +51,7 @@ class ArticleListOut(BaseModel):
     url: str
     title: str
     snippet: Optional[str] = None
+    content: Optional[str] = None
     published_at: datetime
     image_url: Optional[str] = None
     video_url: Optional[str] = None
