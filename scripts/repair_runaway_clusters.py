@@ -68,7 +68,7 @@ async def main(apply: bool, min_article_count: int):
 
             misfits = [
                 a for a in articles
-                if a.id != rep.id and not shares_topic(rep.title, rep.snippet, a.title, a.snippet)
+                if a.id != rep.id and not shares_topic(rep.title, a.title)
             ]
 
             if not misfits:

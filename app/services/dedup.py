@@ -30,10 +30,26 @@ STOPWORDS = frozenset({
 })
 
 
+# Confirmation-gate thresholds, chosen by grid search against 1,020
+# LLM-labelled article pairs over a real 3-day / 14,087-article fixture
+# (scripts/eval_clustering.py). Measured on that set:
+#
+#   old rule (Jaccard >= 0.25 over title+snippet): precision 1.000, recall 0.027
+#   this rule (Jaccard >= 0.40 over title only):   precision 0.944, recall 0.528
+#
+# i.e. the old gate was not "conservative", it was inert — it found 2.7% of
+# genuine same-story pairs, which is what drove the 98.5% singleton rate.
+# Re-tune by re-running that script, not by intuition.
+MIN_TITLE_JACCARD = 0.40
+MIN_SHARED_TOKENS = 2
+
+
 def significant_tokens(title: str, snippet: Optional[str] = None) -> Set[str]:
-    """Content-bearing tokens (stopwords and short words dropped) used to
-    confirm two articles actually share subject matter, on top of — not
-    instead of — the SimHash distance check."""
+    """Content-bearing tokens (stopwords and short words dropped).
+
+    `snippet` is accepted for callers that still want the combined bag, but
+    topic confirmation deliberately no longer uses it — see title_tokens().
+    """
     combined = normalize_text(f"{title} {snippet or ''}")
     return {
         tok for tok in combined.split()
@@ -41,17 +57,38 @@ def significant_tokens(title: str, snippet: Optional[str] = None) -> Set[str]:
     }
 
 
+def title_tokens(title: str) -> Set[str]:
+    """Content-bearing tokens from the headline alone.
+
+    Snippets are excluded on purpose. Folding them in was the single biggest
+    cause of missed merges: snippet length varies wildly between outlets (a
+    wire brief vs. a full writeup), so the Jaccard *union* denominator
+    explodes while the intersection stays roughly title-sized, and two outlets
+    covering the same event land around J=0.05-0.15 — far below any usable
+    threshold. Titles are short and comparable in length, so overlap between
+    them is a much better-behaved signal. Snippets are still stored and shown;
+    they just don't decide identity.
+    """
+    return {
+        tok for tok in normalize_text(title).split()
+        if len(tok) >= 4 and tok not in STOPWORDS
+    }
+
+
 def shares_topic(
-    title1: str, snippet1: Optional[str],
-    title2: str, snippet2: Optional[str],
-    min_shared: int = 2, min_jaccard: float = 0.25,
+    title1: str, title2: str,
+    min_shared: int = MIN_SHARED_TOKENS,
+    min_jaccard: float = MIN_TITLE_JACCARD,
 ) -> bool:
-    """Whole-content-word confirmation gate: requires both a minimum count
-    of shared significant tokens and a minimum Jaccard overlap, so two short
-    headlines can't pass just by coincidentally sharing a couple of common
-    (but non-stopword) words like "india" or "minister"."""
-    tokens1 = significant_tokens(title1, snippet1)
-    tokens2 = significant_tokens(title2, snippet2)
+    """Confirmation gate: do these two headlines describe the same story?
+
+    Requires both a minimum count of shared significant tokens and a minimum
+    Jaccard overlap over those tokens, so two short headlines can't pass by
+    coincidentally sharing a couple of common (but non-stopword) words like
+    "india" or "minister".
+    """
+    tokens1 = title_tokens(title1)
+    tokens2 = title_tokens(title2)
     if not tokens1 or not tokens2:
         return False
     shared = tokens1 & tokens2
@@ -145,6 +182,18 @@ def hamming_distance(hash1: int, hash2: int) -> int:
     return bin(x).count('1')
 
 def is_near_duplicate(hash1: int, hash2: int, max_distance: int = 18) -> bool:
+    """NO LONGER USED FOR CLUSTERING. Retained for the simhash column, the
+    repair scripts, and its tests.
+
+    The grid search that produced MIN_TITLE_JACCARD also swept this gate, and
+    no configuration retaining it at any threshold beat dropping it outright:
+    `simhash off` and `simhash <= 30` scored identically at the top, and
+    nothing at the old <= 18 survived at all. That matches the note below —
+    a real 6-outlet story averaged 21.3, *above* the threshold — meaning this
+    check was rejecting true matches before the confirmation gate ever saw
+    them. It is a veto that only ever subtracted recall, so poller.py no
+    longer calls it.
+    """
     # Empirically calibrated 2026-08-09 against real production data: a real
     # story (PM Modi/JD Vance call) covered by 6 outlets in the same batch
     # had pairwise title+snippet Hamming distances of 16-28 (avg 21.3)

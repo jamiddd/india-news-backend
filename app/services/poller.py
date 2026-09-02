@@ -3,20 +3,20 @@ import logging
 import hashlib
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from types import SimpleNamespace
 from typing import Optional, List, Dict, Any, Set, Tuple
 import feedparser
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import update, desc, func, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
-from app.models import Source, Article, StoryCluster, EntityStat, utc_now
+from app.models import Source, Article, StoryCluster, ClusterToken, EntityStat, utc_now
 from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
-from app.services.dedup import compute_url_hash, compute_simhash, is_near_duplicate, shares_topic
+from app.services.dedup import compute_url_hash, compute_simhash, shares_topic, title_tokens
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url
 from app.services.content_cleaner import decode_entities, clean_extracted_text
@@ -35,6 +35,21 @@ EXTRACTION_CONCURRENCY = 5
 # "news" just because it's still sitting in the feed's item list. Items with
 # no parseable pubDate default to "now" in parse_pub_date() and always pass.
 MAX_ARTICLE_AGE = timedelta(days=4)
+
+# How far back to look for a cluster a new article might belong to. The old
+# code had no time bound at all but capped candidates at the 100
+# most-recently-updated clusters, which at current volume is roughly the last
+# half hour — the real constraint, and a crippling one. 48h comfortably covers
+# the lag between a fast wire and a slow-refreshing regional feed reporting the
+# same event.
+CLUSTER_MATCH_WINDOW = timedelta(hours=48)
+
+# Upper bound on candidate clusters pulled from the token index for a single
+# article, most-shared-tokens first. Generous enough never to bite in practice
+# (a real story shares tokens with only a handful of live clusters); this is a
+# guard against a pathological headline of very common tokens, not a tuning
+# knob.
+MAX_CANDIDATE_CLUSTERS = 50
 
 # Only conditional-GET headers here — no User-Agent/Accept. curl_cffi's
 # impersonate= already sends a full, internally-consistent Chrome header set
@@ -94,6 +109,67 @@ async def fetch_feed_data(client: CurlAsyncSession, source: Source) -> Dict[str,
         logger.error(f"Error fetching feed [{source.name}]: {str(e)}")
         return {"status": 500, "error": str(e)}
 
+async def _find_candidate_clusters(
+    session: AsyncSession, tokens: Set[str], min_shared: int,
+) -> List[Tuple[int, str, int]]:
+    """Clusters sharing at least `min_shared` headline tokens with `tokens`.
+
+    Returns (cluster_id, article_title, article_source_id) rows for every
+    member article of every candidate cluster, so the caller can confirm
+    against all members rather than only a representative. A cluster whose
+    representative happened to phrase the story unusually used to be
+    unreachable for every later article, no matter how well they matched its
+    other members.
+    """
+    if len(tokens) < min_shared:
+        return []
+
+    cutoff = utc_now() - CLUSTER_MATCH_WINDOW
+    candidate_ids_q = (
+        select(ClusterToken.cluster_id)
+        .join(StoryCluster, StoryCluster.id == ClusterToken.cluster_id)
+        # sorted list, not the raw set: in_() wants a sequence, and a stable
+        # parameter order keeps the statement cache from treating the same
+        # query as a new one on every call.
+        .where(ClusterToken.token.in_(sorted(tokens)))
+        .where(StoryCluster.last_updated_at >= cutoff)
+        .group_by(ClusterToken.cluster_id)
+        .having(func.count() >= min_shared)
+        .order_by(desc(func.count()))
+        .limit(MAX_CANDIDATE_CLUSTERS)
+    )
+    candidate_ids = list((await session.execute(candidate_ids_q)).scalars().all())
+    if not candidate_ids:
+        return []
+
+    members = await session.execute(
+        select(Article.cluster_id, Article.title, Article.source_id)
+        .where(Article.cluster_id.in_(candidate_ids))
+    )
+    # Preserve the shared-token ordering from the query above: the strongest
+    # candidate should be confirmed (and matched) first.
+    rank = {cid: i for i, cid in enumerate(candidate_ids)}
+    rows = list(members)
+    rows.sort(key=lambda r: rank.get(r[0], len(rank)))
+    return rows
+
+
+async def _index_cluster_tokens(
+    session: AsyncSession, cluster_id: int, title: str,
+) -> None:
+    """Add a member article's headline tokens to the cluster's index entry."""
+    tokens = title_tokens(title)
+    if not tokens:
+        return
+    # ON CONFLICT DO NOTHING: the same token routinely recurs across members of
+    # one cluster, and two sources can be ingested concurrently.
+    await session.execute(
+        pg_insert(ClusterToken)
+        .values([{"cluster_id": cluster_id, "token": t} for t in tokens])
+        .on_conflict_do_nothing(index_elements=["cluster_id", "token"])
+    )
+
+
 async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source: Source) -> int:
     res = await fetch_feed_data(client, source)
     if res.get("status") != 200:
@@ -109,24 +185,15 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
     new_articles_count = 0
     items = res.get("items", [])
 
-    recent_clusters_query = await session.execute(
-        select(StoryCluster).order_by(desc(StoryCluster.last_updated_at)).limit(100)
-    )
-    recent_clusters = list(recent_clusters_query.scalars().all())
-
-    # Which sources have already contributed to each of these clusters —
-    # used below to keep distinct_source_count a genuine distinct-outlet
-    # count (article_count alone isn't source-deduped: two articles from
-    # the same outlet would both increment it).
+    # Candidates are now looked up per article from the cluster_tokens index
+    # (see _find_candidate_clusters) rather than prefetched as "the 100 most
+    # recent clusters", so there is nothing to load up front here.
+    #
+    # Which sources have already contributed to each cluster — used below to
+    # keep distinct_source_count a genuine distinct-outlet count (article_count
+    # alone isn't source-deduped: two articles from the same outlet would both
+    # increment it). Populated lazily per candidate cluster.
     cluster_source_ids: Dict[int, Set[int]] = defaultdict(set)
-    if recent_clusters:
-        membership_rows = await session.execute(
-            select(Article.cluster_id, Article.source_id).where(
-                Article.cluster_id.in_([c.id for c in recent_clusters])
-            )
-        )
-        for cid, sid in membership_rows:
-            cluster_source_ids[cid].add(sid)
 
     # Pass 1: filter malformed/duplicate entries down to real candidates.
     candidates = []
@@ -223,27 +290,14 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
     else:
         extracted = await asyncio.gather(*(fetch_bounded(c["link"], c["title"]) for c in candidates))
 
-    # Prefetch every recent cluster's representative article, once for the
-    # whole batch, selecting only what near-dup matching below actually
-    # reads (simhash/title/snippet + the source's category). This used to be
-    # a `select(Article, Source.category)` — full row, including the scraped
-    # body — re-run inside the candidate loop for every (candidate, cluster)
-    # pair, i.e. re-fetching the same ~100 article bodies once per candidate.
-    # With Supabase metering egress, that was the single largest line item
-    # in the whole poll cycle for zero benefit — content was never read here.
-    rep_article_ids = {c.representative_article_id for c in recent_clusters if c.representative_article_id}
-    rep_info: Dict[int, Tuple[SimpleNamespace, Optional[str]]] = {}
-    if rep_article_ids:
-        rep_rows = await session.execute(
-            select(Article.id, Article.simhash, Article.title, Article.snippet, Source.category)
-            .join(Source, Article.source_id == Source.id)
-            .where(Article.id.in_(rep_article_ids))
-        )
-        for aid, simhash, rep_title, rep_snippet, category in rep_rows:
-            rep_info[aid] = (
-                SimpleNamespace(simhash=simhash, title=rep_title, snippet=rep_snippet),
-                category,
-            )
+    # Source id -> category, for the cross-geography merge guard below. Small
+    # table (~230 rows), fetched once per batch rather than joined into the
+    # per-article candidate query. Deliberately only these two columns: the
+    # matching path must never pull article bodies, since Supabase meters
+    # egress and the body is never read here.
+    source_categories: Dict[int, Optional[str]] = dict(
+        (await session.execute(select(Source.id, Source.category))).all()
+    )
 
     # Pass 3: near-duplicate clustering + insert, now that content is in hand.
     for candidate, extraction in zip(candidates, extracted):
@@ -288,53 +342,68 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
         else:
             media_type = "image" if image_url else None
 
+        # Still stored on the article, but NO LONGER used to decide clustering
+        # (see is_near_duplicate's docstring — as a gate it only ever cost
+        # recall). Kept because the column is populated for every existing row
+        # and the repair scripts still read it; drop it in a later cleanup if
+        # nothing comes to depend on it.
         simhash_val = compute_simhash(title, snippet)
         # Computed once here at scrape time so explore_bandit's
         # _estimate_word_count can read this int instead of fetching the
         # whole body later just to count words.
         word_count_val = max(len(content.split()), 1) if content else None
 
-        matched_cluster: Optional[StoryCluster] = None
-        for cluster in recent_clusters:
-            rep_article = None
-            rep_source_category = None
-            if cluster.representative_article_id:
-                cached = rep_info.get(cluster.representative_article_id)
-                if cached:
-                    rep_article, rep_source_category = cached
+        # Candidate lookup by shared headline tokens, across a 48h window,
+        # instead of "the 100 most recently updated clusters". Members of a
+        # candidate come back too, so confirmation runs against every article
+        # in the cluster rather than only its representative.
+        member_rows = await _find_candidate_clusters(
+            session, title_tokens(title), MIN_SHARED_TOKENS
+        )
 
-            # max_distance intentionally omitted here — is_near_duplicate's own
-            # default (18) is the empirically-calibrated value; keep this call
-            # site from silently overriding it if that default is ever revised.
-            if not (rep_article and rep_article.simhash and is_near_duplicate(simhash_val, rep_article.simhash)):
+        matched_cluster_id: Optional[int] = None
+        for cand_cluster_id, cand_title, cand_source_id in member_rows:
+            # Two articles from the same outlet are never a framing contrast,
+            # and templated single-source feeds are the dominant false-merge
+            # mode on real data: on the evaluation fixture, unguarded matching
+            # fused 31 different Yahoo Finance earnings-call transcripts, 29
+            # unrelated Bloomberg executive profiles, and 24 separate job
+            # listings into three "stories", purely because each set shares
+            # its boilerplate headline template. Genuine same-outlet
+            # duplicates are already caught by url_hash.
+            #
+            # Note this skips the *member*, not the whole cluster: an outlet
+            # can still add a second article to a story that other outlets
+            # also cover, because some other member will match instead. What
+            # it blocks is a cluster made ENTIRELY of one outlet's templated
+            # output, which is the actual failure mode. This matches the
+            # semantics measured offline (same_source_guard in
+            # scripts/eval_clustering.py) — keep the two in step.
+            if cand_source_id == source.id:
                 continue
 
-            # is_near_duplicate is only a cheap prefilter (see its docstring)
-            # — confirm with actual shared content words before merging.
-            # Without this, unrelated short headlines that happen to share
-            # enough common filler words coincidentally land within Hamming
-            # range of each other; in production this let one cluster
-            # silently absorb 20+ completely unrelated stories over weeks.
-            if not shares_topic(title, snippet, rep_article.title, rep_article.snippet):
+            if not shares_topic(title, cand_title):
                 continue
 
-            # SimHash on short headlines is loose enough (threshold 18/64
-            # bits) that unrelated stories can coincidentally land within
-            # range. That's tolerable within one geography/topic, but never
-            # across two different "geographic" categories (northeast vs.
-            # regional_south, etc.) — merging those doesn't just misfile one
-            # article, it makes a whole cluster (and everything in it)
-            # appear under the wrong region's tab. Refuse that merge and
-            # fall through to starting a new cluster instead.
+            # Never merge across two different "geographic" categories
+            # (northeast vs. regional_south, etc.) — that doesn't just misfile
+            # one article, it makes a whole cluster (and everything in it)
+            # appear under the wrong region's tab. Refuse and fall through to
+            # starting a new cluster instead.
+            cand_category = source_categories.get(cand_source_id)
             if (
                 source.category in GEOGRAPHIC_CATEGORIES
-                and rep_source_category in GEOGRAPHIC_CATEGORIES
-                and source.category != rep_source_category
+                and cand_category in GEOGRAPHIC_CATEGORIES
+                and source.category != cand_category
             ):
                 continue
 
-            matched_cluster = cluster
+            matched_cluster_id = cand_cluster_id
             break
+
+        matched_cluster: Optional[StoryCluster] = None
+        if matched_cluster_id is not None:
+            matched_cluster = await session.get(StoryCluster, matched_cluster_id)
 
         if matched_cluster:
             article = Article(
@@ -358,10 +427,23 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             session.add(article)
             matched_cluster.article_count += 1
             matched_cluster.last_updated_at = utc_now()
+            # This member's headline tokens make the cluster reachable through
+            # its phrasing too, not just the representative's.
+            await _index_cluster_tokens(session, matched_cluster.id, title)
+
             # Only a genuinely new outlet bumps distinct_source_count — a
             # second candidate from a source already in this cluster (either
             # from before this poll or earlier in this same batch, since the
             # set below is updated immediately) must not double-count.
+            # Candidates are no longer prefetched in bulk, so load this
+            # cluster's contributing sources on first use.
+            if matched_cluster.id not in cluster_source_ids:
+                existing = await session.execute(
+                    select(Article.source_id).where(
+                        Article.cluster_id == matched_cluster.id
+                    )
+                )
+                cluster_source_ids[matched_cluster.id] = set(existing.scalars().all())
             if source.id not in cluster_source_ids[matched_cluster.id]:
                 matched_cluster.distinct_source_count += 1
                 cluster_source_ids[matched_cluster.id].add(source.id)
@@ -399,16 +481,11 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             session.add(article)
             await session.flush()
             new_cluster.representative_article_id = article.id
-            # Backfill rep_info for this brand-new article — it wasn't part
-            # of the upfront prefetch (didn't exist yet), but a later
-            # candidate in this same batch can still match against it as
-            # recent_clusters grows. No query needed: this is the exact
-            # object just built above.
-            rep_info[article.id] = (
-                SimpleNamespace(simhash=article.simhash, title=article.title, snippet=article.snippet),
-                source.category,
-            )
-            recent_clusters.insert(0, new_cluster)
+            # Index the new cluster immediately so a later candidate in this
+            # same batch can match against it. _find_candidate_clusters reads
+            # through the session, so the flush above plus this insert are
+            # enough — no commit needed.
+            await _index_cluster_tokens(session, new_cluster.id, title)
 
         new_articles_count += 1
 

@@ -11,6 +11,8 @@ from app.services.dedup import (
     compute_simhash,
     hamming_distance,
     is_near_duplicate,
+    shares_topic,
+    title_tokens,
 )
 
 
@@ -181,3 +183,85 @@ class TestIsNearDuplicate:
         assert hamming_distance(h1, h2_at_distance_5) == 5
         assert is_near_duplicate(h1, h2_at_distance_4, max_distance=4)
         assert not is_near_duplicate(h1, h2_at_distance_5, max_distance=4)
+
+
+class TestTitleTokens:
+    def test_drops_stopwords_and_short_words(self):
+        assert title_tokens("The RBI cuts repo rate by 25 bps") == {"cuts", "repo", "rate"}
+
+    def test_ignores_snippet_entirely(self):
+        # title_tokens takes only a title — the snippet exclusion is the whole
+        # point of the function (see its docstring).
+        assert title_tokens("Modi meets Putin") == {"modi", "meets", "putin"}
+
+    def test_empty_title(self):
+        assert title_tokens("") == set()
+
+    def test_devanagari_survives_normalisation(self):
+        # normalize_text keeps Unicode marks; a Hindi headline must not be
+        # shattered into nothing (regression: identical PIB titles once
+        # compared as sharing no topic).
+        assert len(title_tokens("प्रधानमंत्री ने बैठक की अध्यक्षता की")) > 0
+
+
+class TestSharesTopic:
+    """The confirmation gate. Thresholds come from the grid search in
+    scripts/eval_clustering.py — see MIN_TITLE_JACCARD in dedup.py."""
+
+    def test_same_story_different_outlets(self):
+        assert shares_topic(
+            "India rejects Court of Arbitration's Indus Waters Treaty award",
+            "India rejects Indus Waters arbitration award",
+        )
+
+    def test_unrelated_headlines(self):
+        assert not shares_topic(
+            "India rejects Indus Waters arbitration award",
+            "Bengaluru techie arrested in online fraud case",
+        )
+
+    def test_shared_common_words_alone_insufficient(self):
+        # Both mention "minister" and "government" but describe different
+        # events — the Jaccard floor is what rejects this.
+        assert not shares_topic(
+            "Minister announces new government housing policy for farmers",
+            "Minister resigns as government faces opposition over fuel prices",
+        )
+
+    def test_templated_headlines_defeat_the_lexical_gate(self):
+        """Documents a real limitation, not desired behaviour.
+
+        These two Yahoo Finance headlines are about completely different
+        companies, but share "2026 / earnings / call / transcript" — Jaccard
+        0.5, comfortably over the threshold. shares_topic CANNOT tell them
+        apart, and on the evaluation fixture this fused 31 unrelated
+        transcripts into one "story" (and 29 Bloomberg executive profiles, and
+        24 job listings).
+
+        What actually prevents it in production is the same-source guard in
+        poller.ingest_source: every one of those headlines comes from a single
+        outlet, and two articles from one outlet are never merged. That means
+        the protection is structural, not lexical — if two DIFFERENT outlets
+        both published templated headlines sharing this much boilerplate, they
+        would still merge incorrectly. If that ever shows up in the feed, the
+        fix is IDF-weighted overlap (already implemented and measured in
+        scripts/eval_clustering.py as the `idf_overlap` metric), not a higher
+        Jaccard threshold.
+        """
+        assert shares_topic(
+            "Affirm (AFRM) Q4 2026 Earnings Call Transcript",
+            "Ulta Beauty (ULTA) Q2 2026 Earnings Call Transcript",
+        )
+
+    def test_empty_titles_never_match(self):
+        assert not shares_topic("", "India rejects arbitration award")
+        assert not shares_topic("India rejects arbitration award", "")
+
+    def test_identical_titles_match(self):
+        title = "Nepal flash floods death toll climbs to 903"
+        assert shares_topic(title, title)
+
+    def test_min_shared_is_enforced(self):
+        # One shared significant token can never be enough, regardless of how
+        # short both headlines are.
+        assert not shares_topic("Indus treaty", "Indus ruling", min_shared=2)
