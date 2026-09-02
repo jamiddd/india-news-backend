@@ -73,6 +73,12 @@ from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.related_stories import find_related_clusters
 from scripts.enrich_all_clusters import enrich_clusters
+
+# Per-run ceiling for the recurring news-enrich.timer. At a 20-minute cadence
+# this is ~7,200 clusters/day of headroom against ~1,100 new clusters/day, so
+# it never throttles normal operation — it exists purely so a large backlog
+# can't be drained (and paid for) in a single unattended tick.
+TIMER_ENRICH_LIMIT = 100
 from scripts.send_notifications import main as run_send_notifications
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
@@ -829,15 +835,28 @@ async def trigger_enrich(
     background_tasks: BackgroundTasks,
     since_days: float = Query(2.0, description="Enrich clusters touched in the last N days"),
     force_all: bool = Query(False, description="Re-enrich even already-ai_enriched clusters (use for one-off backfills, not the recurring timer)"),
+    limit: Optional[int] = Query(TIMER_ENRICH_LIMIT, description="Max clusters per run. Explicitly pass 0 for unbounded (one-off backfills only)."),
 ):
     # enrich_clusters() opens its own DB session internally rather than
     # taking the request-scoped `db` (contrast trigger_poll above, which
     # passes its request-scoped session into the background task) — a
     # background task must not depend on a session FastAPI may already be
     # closing once the response is sent.
-    background_tasks.add_task(enrich_clusters, None, force_all, since_days)
+    # limit=0 is the explicit opt-out; anything else caps the run. Passing
+    # None here (the old behaviour) meant UNBOUNDED, because enrich_clusters
+    # treats a windowed run as "already bounded by the window" and drops its
+    # own DEFAULT_BATCH_LIMIT. With ~9,500 unenriched clusters sitting inside
+    # the default 2-day window, one timer tick would enrich all of them: on
+    # 2026-09-02 that drained ~6,500 clusters and ~$20 of credit in a few
+    # hours, almost entirely on singletons. A recurring timer must never be
+    # able to spend unboundedly.
+    effective_limit = None if limit == 0 else limit
+    background_tasks.add_task(enrich_clusters, effective_limit, force_all, since_days)
     return {
-        "message": f"Enrichment triggered in background (since_days={since_days}, force_all={force_all})."
+        "message": (
+            f"Enrichment triggered in background (since_days={since_days}, "
+            f"force_all={force_all}, limit={effective_limit})."
+        )
     }
 
 @app.post(f"{settings.API_V1_STR}/ingest/notify")

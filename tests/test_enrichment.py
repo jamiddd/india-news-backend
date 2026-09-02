@@ -12,6 +12,7 @@ from app.services.enrichment import (
     parse_json_response,
     extract_entities_rule_based,
     generate_framing_comparison,
+    distinct_source_count,
 )
 
 
@@ -21,9 +22,14 @@ class _StubSource:
 
 
 class _StubArticle:
-    def __init__(self, title, source_name):
+    def __init__(self, title, source_name, source_id=None):
         self.title = title
         self.source = _StubSource(source_name) if source_name else None
+        # Defaults to hashing the name so existing tests that don't care
+        # about source identity still get one distinct id per outlet.
+        self.source_id = source_id if source_id is not None else (
+            hash(source_name) if source_name else None
+        )
 
 
 class TestParseJsonResponse:
@@ -159,3 +165,37 @@ class TestGenerateFramingComparison:
 
     def test_empty_list_returns_empty(self):
         assert generate_framing_comparison([]) == []
+
+
+class TestDistinctSourceCount:
+    """Framing eligibility is defined on OUTLETS, not articles — one outlet
+    republishing itself is not a cross-outlet contrast."""
+
+    def test_counts_distinct_outlets_not_articles(self):
+        articles = [
+            _StubArticle("A", "Times of India", source_id=1),
+            _StubArticle("B", "Times of India", source_id=1),
+            _StubArticle("C", "The Hindu", source_id=2),
+        ]
+        assert distinct_source_count(articles) == 2
+
+    def test_single_outlet_many_articles_is_one(self):
+        articles = [_StubArticle(f"A{i}", "Yahoo Finance", source_id=7) for i in range(5)]
+        assert distinct_source_count(articles) == 1
+
+    def test_empty(self):
+        assert distinct_source_count([]) == 0
+
+    def test_ignores_null_source_ids(self):
+        articles = [
+            _StubArticle("A", None, source_id=None),
+            _StubArticle("B", "The Hindu", source_id=2),
+        ]
+        assert distinct_source_count(articles) == 1
+
+    def test_gate_boundary(self):
+        # The exact condition enrich_cluster_with_ai uses.
+        one = [_StubArticle("A", "NDTV", source_id=1)]
+        two = one + [_StubArticle("B", "Mint", source_id=2)]
+        assert not (distinct_source_count(one) >= 2)
+        assert distinct_source_count(two) >= 2

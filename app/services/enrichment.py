@@ -10,6 +10,18 @@ from app.services.content_cleaner import decode_entities
 
 logger = logging.getLogger(__name__)
 
+# Model routing. Most clusters are single-outlet: a neutral headline plus a
+# three-bullet summary from one article is well within Haiku's range, and it
+# is the overwhelming majority of the volume, so it sets the cost floor.
+#
+# Multi-source clusters are the product's premium surface — they carry the
+# framing comparison, and after the clustering fix they are roughly 8-10% of
+# clusters, so a stronger model on them is affordable. If cost needs cutting
+# again, set MULTI_SOURCE_MODEL back to SINGLE_SOURCE_MODEL: it is the only
+# line that has to change.
+SINGLE_SOURCE_MODEL = "claude-haiku-4-5"
+MULTI_SOURCE_MODEL = "claude-sonnet-5"
+
 # Common entity patterns in Indian news
 KNOWN_ENTITIES = {
     "organizations": [
@@ -197,15 +209,32 @@ def _sanitize_entities(entities: Dict[str, Any]) -> Dict[str, Any]:
     return entities
 
 
+def distinct_source_count(articles: List[Article]) -> int:
+    """Number of distinct outlets in a cluster.
+
+    Deliberately not len(articles): one outlet republishing itself is not a
+    cross-outlet framing contrast, and framing eligibility is defined on
+    outlets, not articles.
+    """
+    return len({a.source_id for a in articles if a.source_id is not None})
+
+
 async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
     """Enrich a story cluster using Anthropic API or fallback rule-based engine."""
     articles = cluster.articles or []
     full_text = f"{cluster.headline} " + " ".join([f"{a.title} {a.snippet or ''}" for a in articles])
 
+    # A framing comparison requires at least two OUTLETS to compare. Measured
+    # on production 2026-09-02: 47,018 clusters carried a framing_comparison
+    # while only 418 had 2+ distinct sources — i.e. ~99% of the app's
+    # flagship feature was an invented comparison of one article against
+    # nothing. Everything below keys off this one flag.
+    can_compare_framing = distinct_source_count(articles) >= 2
+
     # Rule-based baseline enrichment
     entities = extract_entities_rule_based(full_text)
-    framing = generate_framing_comparison(articles)
-    
+    framing = generate_framing_comparison(articles) if can_compare_framing else None
+
     topics = []
     if any(w in full_text.lower() for w in ["rbi", "market", "sensex", "nifty", "gold", "bank", "coalf", "ethan"]):
         topics.append("Economy & Markets")
@@ -249,7 +278,10 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                         "content-type": "application/json"
                     },
                     json={
-                        "model": "claude-haiku-4-5",
+                        "model": (
+                            MULTI_SOURCE_MODEL if can_compare_framing
+                            else SINGLE_SOURCE_MODEL
+                        ),
                         "max_tokens": 1000,
                         # cache_control turns this static system prompt into a
                         # cache-eligible block — it's identical on every single
@@ -301,8 +333,23 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                     cluster.entities = _sanitize_entities(structured.get("entities"))
                 if structured.get("topics"):
                     cluster.topics = structured.get("topics")
-                if structured.get("framing_comparison"):
-                    cluster.framing_comparison = structured.get("framing_comparison")
+                # THE fabrication bug, and it is subtle. The system prompt
+                # explicitly instructs the model to return an EMPTY
+                # framing_comparison for a single-outlet story. The model
+                # complies and returns []. `if structured.get(...)` is falsy
+                # on [], so the assignment was skipped — leaving the
+                # rule-based single-outlet baseline written earlier in place.
+                # The code punished the model for being correct, which is how
+                # 47,018 clusters ended up with a framing comparison when only
+                # 418 had two sources to compare.
+                #
+                # Test presence, not truthiness, so an explicit [] is honoured
+                # as the answer it is. And never accept framing for a cluster
+                # that cannot have one, whatever the model returns.
+                if not can_compare_framing:
+                    cluster.framing_comparison = None
+                elif "framing_comparison" in structured:
+                    cluster.framing_comparison = structured["framing_comparison"] or None
                 cluster.ai_enriched = True
 
                 logger.info(f"[Anthropic AI Enriched] Cluster #{cluster.id}")
