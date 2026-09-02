@@ -43,6 +43,45 @@ def _count_solutions(board: list[int], limit: int = 2) -> int:
     return solutions
 
 
+def _solve(board: list[int]) -> list[int] | None:
+    """Backtracking solver — fills in `board` (0 = blank) and returns the
+    solved grid, or None if it's unsolvable. Assumes the board has at most
+    one solution (true for any well-formed sudoku); if it has several this
+    returns whichever the search finds first, which is fine here since it's
+    only used to derive the solution for a puzzle APIVerve already gave us,
+    not to construct one from scratch."""
+    board = board.copy()
+
+    def solve() -> bool:
+        best_index = -1
+        best_candidates: list[int] = []
+        for index, value in enumerate(board):
+            if value:
+                continue
+            row, col = divmod(index, 9)
+            used = {board[row * 9 + i] for i in range(9)} | {board[i * 9 + col] for i in range(9)}
+            used |= {
+                board[r * 9 + c]
+                for r in range((row // 3) * 3, (row // 3) * 3 + 3)
+                for c in range((col // 3) * 3, (col // 3) * 3 + 3)
+            }
+            candidates = [number for number in range(1, 10) if number not in used]
+            if not candidates:
+                return False
+            if best_index == -1 or len(candidates) < len(best_candidates):
+                best_index, best_candidates = index, candidates
+        if best_index == -1:
+            return True
+        for candidate in best_candidates:
+            board[best_index] = candidate
+            if solve():
+                return True
+            board[best_index] = 0
+        return False
+
+    return board if solve() else None
+
+
 def generate_daily_sudoku(puzzle_date: date) -> tuple[list[int], list[int]]:
     rng = random.Random(int(puzzle_date.strftime("%Y%m%d")))
 
@@ -116,13 +155,21 @@ def _extract_grid(section) -> list[int] | None:
 
 
 async def _apiverve_sudoku() -> tuple[list[int], list[int]] | None:
+    """The free tier gives the puzzle grid but the `solution` field is
+    Premium-gated (comes back None) — we don't actually need APIVerve for
+    that part, since a well-formed sudoku has exactly one solution and
+    _solve already exists (originally for the algorithmic generator's own
+    uniqueness check), so solve the puzzle locally instead."""
     data = await call_apiverve("sudoku", {"difficulty": "medium"})
     if data is None:
         return None
     puzzle = _extract_grid(data.get("puzzle"))
-    solution = _extract_grid(data.get("solution"))
-    if puzzle is None or solution is None or 0 in solution:
-        logger.warning("APIVerve sudoku response had an unrecognized grid shape: %r", data)
+    if puzzle is None:
+        logger.warning("APIVerve sudoku response had an unrecognized puzzle grid shape: %r", data)
+        return None
+    solution = _solve(puzzle)
+    if solution is None:
+        logger.warning("APIVerve sudoku puzzle grid has no solution: %r", puzzle)
         return None
     return puzzle, solution
 

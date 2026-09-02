@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date
@@ -298,12 +299,16 @@ async def _apiverve_quiz() -> list[dict] | None:
     # built-in "give me 5" batch mode, and not every draw fits our fixed
     # 4-option layout (see _parse_trivia_question) — so over-fetch and keep
     # the first 5 that validate, capped so a bad run can't loop forever.
-    for _ in range(15):
+    # Spaced out — firing all 15 back-to-back trips APIVerve's rate limit
+    # (429) well before the monthly credit cap.
+    for attempt in range(15):
         if len(questions) >= 5:
             break
+        if attempt > 0:
+            await asyncio.sleep(0.5)
         data = await call_apiverve("trivia", {"category": "general"})
         if data is None:
-            return None
+            continue
         parsed = _parse_trivia_question(data)
         if parsed is None or parsed["question"].casefold() in seen_questions:
             continue

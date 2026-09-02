@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 
@@ -143,10 +144,12 @@ async def _apiverve_quote(recent_authors: list[str] | None = None) -> dict | Non
     the Claude prompt's avoid-list, just done client-side."""
     recent = {author.casefold() for author in (recent_authors or [])}
     first_valid: dict | None = None
-    for _ in range(5):
+    for attempt in range(5):
+        if attempt > 0:
+            await asyncio.sleep(0.5)
         data = await call_apiverve("randomquote")
         if data is None:
-            return first_valid
+            continue
         try:
             quote = _validate_quote(data)
         except Exception as exc:
