@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyCrossword
+from app.services.apiverve_client import call_apiverve
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
@@ -364,20 +365,42 @@ Requirements:
     return bank if len(bank) >= 12 else None
 
 
+async def _apiverve_word_bank() -> list[tuple[str, str]] | None:
+    """Ask APIVerve's Crossword Generator for its own across/down word+clue
+    list (we ignore its grid layout — _pack_word_bank already does that
+    reliably in plain Python, same reasoning as _ai_word_bank)."""
+    data = await call_apiverve("crossword", {"size": "large", "difficulty": "medium", "theme": "random"})
+    if data is None:
+        return None
+    entries = list(data.get("across") or []) + list(data.get("down") or [])
+    seen: set[str] = set()
+    bank: list[tuple[str, str]] = []
+    for item in entries:
+        if not isinstance(item, dict):
+            continue
+        answer = str(item.get("answer", "")).upper().strip()
+        clue = str(item.get("clue", "")).strip()
+        if not _WORD_RE.match(answer) or not clue or answer in seen:
+            continue
+        seen.add(answer)
+        bank.append((answer, clue))
+    return bank if len(bank) >= 12 else None
+
+
 async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
-    # See _ai_word_bank's docstring for why this only asks the model for
-    # words+clues rather than the full grid.
-    word_bank = await _ai_word_bank(puzzle_date)
-    if word_bank is not None:
-        base_seed = int(puzzle_date.strftime("%Y%m%d"))
+    base_seed = int(puzzle_date.strftime("%Y%m%d"))
+    for fetch_bank, source in ((_apiverve_word_bank(), "apiverve"), (_ai_word_bank(puzzle_date), "ai")):
+        word_bank = await fetch_bank
+        if word_bank is None:
+            continue
         grid, placed = _pack_word_bank(word_bank, base_seed)
         if len(placed) >= 8:
             try:
-                return _grid_to_puzzle(grid, placed), "ai"
+                return _grid_to_puzzle(grid, placed), source
             except Exception as exc:
-                logger.warning("Crossword AI word bank packed but failed validation: %s", exc)
+                logger.warning("Crossword %s word bank packed but failed validation: %s", source, exc)
         else:
-            logger.warning("Crossword AI word bank only packed %s entries", len(placed))
+            logger.warning("Crossword %s word bank only packed %s entries", source, len(placed))
     return algorithmic_fallback_puzzle(puzzle_date), "algorithmic"
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Article, DailyQuiz, DailySpellingBee, DailyWordLadder, StoryCluster
+from app.services.apiverve_client import call_apiverve
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,32 @@ def _validate_bee(payload: dict) -> tuple[list[str], str, list[str]]:
     return letters, center, words
 
 
+async def _apiverve_bee() -> tuple[list[str], str, list[str]] | None:
+    """The `words[]` valid-word list is a Premium-only field — on the free
+    tier APIVerve returns letters but no words, which isn't a playable
+    puzzle (the client can't validate guesses), so treat that as a miss and
+    let the caller fall through to the curated bank."""
+    data = await call_apiverve("spellingbee", {"difficulty": "medium"})
+    if data is None:
+        return None
+    payload = {
+        "letters": data.get("allLetters"),
+        "center_letter": data.get("centerLetter"),
+        "words": [item.get("word") for item in (data.get("words") or []) if isinstance(item, dict)],
+    }
+    try:
+        return _validate_bee(payload)
+    except Exception as exc:
+        logger.info("APIVerve spelling bee unusable (likely free-tier, no words[]): %s", exc)
+        return None
+
+
 async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list[str], str]:
+    apiverve_bee = await _apiverve_bee()
+    if apiverve_bee is not None:
+        letters, center, words = apiverve_bee
+        return letters, center, words, "apiverve"
+
     system = (
         "You invent Spelling Bee puzzles (like the NYT game) for a general-audience daily "
         "puzzle app. Pick 7 unique letters and a list of 8-20 valid, common English words "
@@ -227,7 +253,38 @@ def _validate_ladder(payload: dict) -> tuple[str, str, list[str], int]:
     return start, target, allowed, true_optimal
 
 
+async def _apiverve_ladder() -> tuple[str, str, list[str], int] | None:
+    """APIVerve gives start/end/steps on the free tier but gates the actual
+    `solution`/word-pool behind Premium, so there's no way to build a
+    verifiably-solvable `allowed_words` pool from a free-tier response —
+    this will consistently miss until upgrading, same situation as spelling
+    bee's words[]."""
+    data = await call_apiverve("wordladder", {"difficulty": "medium", "count": 1})
+    if data is None:
+        return None
+    puzzles = data.get("puzzles") or []
+    if not puzzles or not isinstance(puzzles[0], dict):
+        return None
+    puzzle = puzzles[0]
+    payload = {
+        "start_word": puzzle.get("startWord"),
+        "target_word": puzzle.get("endWord"),
+        "allowed_words": puzzle.get("solution"),
+        "optimal_steps": puzzle.get("steps"),
+    }
+    try:
+        return _validate_ladder(payload)
+    except Exception as exc:
+        logger.info("APIVerve word ladder unusable (likely free-tier, no solution[]): %s", exc)
+        return None
+
+
 async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], int, str]:
+    apiverve_ladder = await _apiverve_ladder()
+    if apiverve_ladder is not None:
+        start, target, allowed, optimal = apiverve_ladder
+        return start, target, allowed, optimal, "apiverve"
+
     system = (
         "You invent Word Ladder puzzles for a general-audience daily puzzle app. Pick a "
         "start word and a target word, both common 4-letter English words, plus a pool of "
@@ -301,7 +358,55 @@ def _validate_quiz(payload: dict) -> list[dict]:
     return result
 
 
+_OPTION_LABEL_RE = re.compile(r"^[A-Za-z]\s+")
+
+
+def _parse_trivia_question(data: dict) -> dict | None:
+    """One APIVerve /trivia response -> our question shape, or None if it
+    doesn't fit (e.g. a true/false question with only 2 options — the
+    client's quiz UI is a fixed 4-option layout)."""
+    question = str(data.get("question") or "").strip()
+    answer = str(data.get("answer") or "").strip().casefold()
+    raw_options = [str(option).strip() for option in data.get("options") or []]
+    # Options can come back letter-prefixed, e.g. "A Yes" — strip that label
+    # before comparing against `answer` or displaying to the user.
+    options = [_OPTION_LABEL_RE.sub("", option).strip() for option in raw_options]
+    if not question or len(options) != 4 or len({o.casefold() for o in options}) != 4:
+        return None
+    correct = next((i for i, o in enumerate(options) if o.casefold() == answer), None)
+    if correct is None or UNSAFE.search(question):
+        return None
+    return {"question": question, "options": options, "correct_index": correct, "explanation": ""}
+
+
+async def _apiverve_quiz() -> list[dict] | None:
+    seen_questions: set[str] = set()
+    questions: list[dict] = []
+    # Free-tier trivia questions are single, unrelated draws with no
+    # built-in "give me 5" batch mode, and not every draw fits our fixed
+    # 4-option layout (see _parse_trivia_question) — so over-fetch and keep
+    # the first 5 that validate, capped so a bad run can't loop forever.
+    for _ in range(15):
+        if len(questions) >= 5:
+            break
+        data = await call_apiverve("trivia", {"category": "general"})
+        if data is None:
+            return None
+        parsed = _parse_trivia_question(data)
+        if parsed is None or parsed["question"].casefold() in seen_questions:
+            continue
+        seen_questions.add(parsed["question"].casefold())
+        questions.append(parsed)
+    if len(questions) < 5:
+        return None
+    return [{"id": index + 1, **item} for index, item in enumerate(questions[:5])]
+
+
 async def generate_quiz(session: AsyncSession, puzzle_date: date) -> tuple[list[dict], str]:
+    apiverve_questions = await _apiverve_quiz()
+    if apiverve_questions is not None:
+        return apiverve_questions, "apiverve"
+
     stories = await fetch_today_top_stories(session, puzzle_date)
     if len(stories) >= 3:
         system = (

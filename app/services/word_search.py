@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import string
 from datetime import date
 
@@ -9,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyWordSearch
-from app.services.llm_gen import call_claude_json
+from app.services.apiverve_client import call_apiverve
 
 logger = logging.getLogger(__name__)
 SIZE = 12
@@ -25,41 +26,34 @@ THEMES = [
 DIRECTIONS = ((0, 1), (1, 0), (1, 1), (1, -1), (0, -1), (-1, 0), (-1, -1), (-1, 1))
 
 
-def _validate_theme_and_words(payload: dict) -> tuple[str, list[str]]:
-    theme = str(payload.get("theme") or "").strip()
-    words = [str(word).strip().upper() for word in payload.get("words") or []]
-    if not theme or len(theme) > 80:
-        raise ValueError("Invalid theme")
-    if len(words) != 10 or len({w for w in words}) != 10:
-        raise ValueError("Need exactly 10 unique words")
-    if any(not (4 <= len(w) <= 9) or not w.isalpha() for w in words):
-        raise ValueError("Words must be 4-9 letters, alphabetic only")
-    return theme, words
-
-
-async def generate_theme_and_words(puzzle_date: date) -> tuple[str, list[str], str]:
-    """Ask Claude for a fresh word-search theme + word list. Any topic is
-    fine — this game is meant as a break from the news, not another news
-    surface — so the prompt deliberately doesn't steer toward current
-    events. Falls back to the curated THEMES bank, deterministically picked
-    by date, on failure."""
-    system = (
-        "You invent word search puzzle themes for a general-audience daily puzzle app. "
-        "Pick a fresh, fun theme — any topic (nature, food, sports, history, pop culture, "
-        "everyday objects, etc.) — different from an obvious default. Return JSON only: "
-        '{"theme": "short theme name", "words": [10 English words, 4-9 letters each, '
-        'related to the theme, no duplicates, no proper nouns unless universally known]}'
-    )
-    data = await call_claude_json(system=system, user_content="Generate today's word search theme and words.", max_tokens=600)
-    if data is not None:
-        try:
-            theme, words = _validate_theme_and_words(data)
-            return theme, words, "ai"
-        except Exception as exc:
-            logger.warning("Word search AI output failed validation: %s", exc)
+def theme_and_words_for_date(puzzle_date: date) -> tuple[str, list[str]]:
+    """Deterministically pick a theme + word list from the curated THEMES
+    bank for a given date — no AI involved, this was already
+    dependency-free before the APIVerve swap."""
     seed = int(puzzle_date.strftime("%Y%m%d"))
     theme, source_words = THEMES[seed % len(THEMES)]
-    return theme, list(source_words), "curated"
+    return theme, list(source_words)
+
+
+async def _apiverve_place_words(words: list[str]) -> tuple[list[str], list[str]] | None:
+    """Ask APIVerve's Word Search Generator to place `words` into a grid.
+    We already have the word list (curated, not AI) so we don't need the
+    Premium `words[]` placement-locations field — just the resulting grid."""
+    data = await call_apiverve("wordsearch", {"words": words, "size": SIZE, "difficulty": "medium"}, method="POST")
+    if data is None:
+        return None
+    grid = data.get("grid")
+    if not isinstance(grid, list) or len(grid) != SIZE or any(len(row) != SIZE for row in grid):
+        logger.warning("APIVerve word search returned an unexpected grid shape")
+        return None
+    try:
+        rows = ["".join(str(cell).upper() for cell in row) for row in grid]
+    except Exception as exc:
+        logger.warning("APIVerve word search grid could not be flattened: %s", exc)
+        return None
+    if any(re.search(r"[^A-Z]", row) for row in rows):
+        return None
+    return rows, sorted(words)
 
 
 def place_words(puzzle_date: date, words: list[str]) -> tuple[list[str], list[str]]:
@@ -110,18 +104,17 @@ async def get_or_create_word_search(session: AsyncSession, puzzle_date: date) ->
     if existing:
         return existing
 
-    theme, source_words, source = await generate_theme_and_words(puzzle_date)
-    try:
+    theme, source_words = theme_and_words_for_date(puzzle_date)
+    placed = await _apiverve_place_words(source_words)
+    if placed is not None:
+        grid, words = placed
+        source = "apiverve"
+    else:
+        # Local placement is deterministic and already known to pack the
+        # curated word lists, so it's a reliable fallback if APIVerve is
+        # unavailable or returns something unusable.
         grid, words = place_words(puzzle_date, source_words)
-    except RuntimeError as exc:
-        # AI-supplied words can occasionally be unplaceable (e.g. an
-        # unlucky combination of long words) — the curated bank's words are
-        # already known to pack, so fall back to it rather than 500ing.
-        logger.warning("Word placement failed for %s words (%s); using curated fallback", source, exc)
-        seed = int(puzzle_date.strftime("%Y%m%d"))
-        theme, source_words = THEMES[seed % len(THEMES)]
-        grid, words = place_words(puzzle_date, source_words)
-        source = "curated"
+        source = "algorithmic"
     puzzle = DailyWordSearch(puzzle_date=puzzle_date, theme=theme, grid=grid, words=words, source=source)
     session.add(puzzle)
     await session.commit()

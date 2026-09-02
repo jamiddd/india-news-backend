@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     ASTROJSON_API_KEY: Optional[str] = None
     HOROSCOPE_ENABLED: bool = True
 
+    # Daily games (crossword, sudoku, word search, spelling bee, word
+    # ladder, quiz) content provider. Absent key = each game falls through
+    # to its existing curated/algorithmic generator, same as before.
+    APIVERVE_API_KEY: Optional[str] = None
+
     # Human-reviewed AI daily poll. All secrets are backend-only.
     POLL_ADMIN_USERNAME: str = "admin"
     POLL_ADMIN_PASSWORD: Optional[str] = None

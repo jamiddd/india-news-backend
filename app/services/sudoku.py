@@ -1,3 +1,4 @@
+import logging
 import random
 from datetime import date
 
@@ -5,6 +6,9 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailySudoku
+from app.services.apiverve_client import call_apiverve
+
+logger = logging.getLogger(__name__)
 
 
 def _count_solutions(board: list[int], limit: int = 2) -> int:
@@ -67,6 +71,32 @@ def generate_daily_sudoku(puzzle_date: date) -> tuple[list[int], list[int]]:
     return puzzle, solution
 
 
+def _grid_from_string(text_grid: str) -> list[int] | None:
+    if not isinstance(text_grid, str) or len(text_grid) != 81:
+        return None
+    cells: list[int] = []
+    for char in text_grid:
+        if char.isdigit():
+            cells.append(int(char))
+        elif char in ("-", "."):
+            cells.append(0)
+        else:
+            return None
+    return cells
+
+
+async def _apiverve_sudoku() -> tuple[list[int], list[int]] | None:
+    data = await call_apiverve("sudoku", {"difficulty": "medium"})
+    if data is None:
+        return None
+    puzzle = _grid_from_string(((data.get("puzzle") or {}).get("grid")))
+    solution = _grid_from_string(((data.get("solution") or {}).get("grid")))
+    if puzzle is None or solution is None or 0 in solution:
+        logger.warning("APIVerve sudoku response had an invalid grid")
+        return None
+    return puzzle, solution
+
+
 async def get_or_create_sudoku(session: AsyncSession, puzzle_date: date) -> DailySudoku:
     result = await session.execute(select(DailySudoku).where(DailySudoku.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
@@ -80,7 +110,8 @@ async def get_or_create_sudoku(session: AsyncSession, puzzle_date: date) -> Dail
     if existing:
         return existing
 
-    puzzle, solution = generate_daily_sudoku(puzzle_date)
+    fetched = await _apiverve_sudoku()
+    puzzle, solution = fetched if fetched is not None else generate_daily_sudoku(puzzle_date)
     row = DailySudoku(puzzle_date=puzzle_date, puzzle=puzzle, solution=solution)
     session.add(row)
     await session.commit()
