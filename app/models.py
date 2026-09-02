@@ -409,6 +409,44 @@ class StoryCluster(Base):
     articles = relationship("Article", back_populates="cluster", foreign_keys="Article.cluster_id")
 
 
+class ClusterToken(Base):
+    """Inverted index: which headline tokens appear in which cluster.
+
+    This is the candidate-selection stage of clustering. It replaces the old
+    approach of pulling the 100 most-recently-updated clusters and comparing
+    against those (poller.py), which at ~4,700 articles/day covered only about
+    the last half hour — so an outlet publishing the same story three hours
+    later could never be matched to it, no matter how similar the headline.
+    That single limitation was one of the four causes of the 98.5% singleton
+    rate.
+
+    Candidates are now drawn by shared headline tokens across a 48-hour
+    window, which is both far wider and much cheaper: the lookup is an index
+    scan on `token` rather than a similarity comparison against every live
+    cluster.
+
+    Rows are written for the tokens of every article that joins a cluster (the
+    union across members, not just the representative), so a cluster stays
+    findable through any of its members' phrasings.
+    """
+    __tablename__ = "cluster_tokens"
+
+    cluster_id = Column(
+        Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    # Tokens come from dedup.title_tokens(): normalised, lowercased, stopword
+    # filtered, >= 4 chars. 64 is comfortably above the longest real token.
+    token = Column(String(64), primary_key=True)
+
+    __table_args__ = (
+        # The lookup is always "which clusters contain any of these tokens",
+        # so `token` leads. The PK's (cluster_id, token) ordering can't serve
+        # that, hence a second index rather than relying on the PK.
+        Index("ix_cluster_tokens_token", "token"),
+    )
+
+
 class Article(Base):
     __tablename__ = "articles"
 
