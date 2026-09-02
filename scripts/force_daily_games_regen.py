@@ -1,16 +1,14 @@
 """
 One-off: regenerate today's (or a given date's) Spelling Bee, Word Ladder,
 and/or Quiz right now if — and only if — they're currently on the
-curated/algorithmic fallback, instead of waiting for the next scheduler run.
-Useful after a prompt/validation fix (see VALIDATION_RETRY_ATTEMPTS in
-daily_games.py) to confirm it actually resolves to "ai" without waiting,
-without needlessly re-rolling a game that's already fine.
+curated fallback, instead of waiting for the next scheduler run. Useful
+after an APIVerve outage/free-tier miss to retry without needlessly
+re-rolling a game that's already sourced from APIVerve.
 
 Checks each game's existing row's `source` column before doing anything:
-skips (no LLM call, no DB write) if it's already "ai", regenerates if it's
-"curated"/"algorithmic" or the row doesn't exist yet. Pass --force to
-regenerate regardless of current source (e.g. to get a different "ai"
-result you didn't like).
+skips (no API call, no DB write) if it's already "apiverve", regenerates if
+it's "curated" or the row doesn't exist yet. Pass --force to regenerate
+regardless of current source.
 
 get_or_create_daily_games (the real request path) does NOT do this check —
 it skips generation entirely if a row already exists for the date,
@@ -45,7 +43,7 @@ async def _needs_regen(session, model, puzzle_date: date, force: bool):
     )).scalar_one_or_none()
     if existing is None:
         return None, True
-    if not force and existing.source == "ai":
+    if not force and existing.source == "apiverve":
         return existing, False
     return existing, True
 
@@ -84,7 +82,7 @@ async def regen_quiz(session, puzzle_date: date, force: bool) -> None:
     if existing is not None:
         await session.delete(existing)
         await session.flush()
-    questions, source = await generate_quiz(session, puzzle_date)
+    questions, source = await generate_quiz(puzzle_date)
     session.add(DailyQuiz(puzzle_date=puzzle_date, questions=questions, source=source))
     print(f"quiz: regenerated, source={source}")
 

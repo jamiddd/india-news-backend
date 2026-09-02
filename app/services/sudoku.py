@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import random
 from datetime import date
@@ -71,28 +73,56 @@ def generate_daily_sudoku(puzzle_date: date) -> tuple[list[int], list[int]]:
     return puzzle, solution
 
 
-def _grid_from_string(text_grid: str) -> list[int] | None:
-    if not isinstance(text_grid, str) or len(text_grid) != 81:
-        return None
+def _cells_from_chars(chars: str) -> list[int] | None:
     cells: list[int] = []
-    for char in text_grid:
+    for char in chars:
         if char.isdigit():
             cells.append(int(char))
-        elif char in ("-", "."):
+        elif char in ("-", ".", "_", "x", "X", " "):
             cells.append(0)
         else:
             return None
     return cells
 
 
+def _parse_grid(value) -> list[int] | None:
+    """APIVerve's exact grid shape isn't nailed down by the public docs, so
+    accept anything reasonable: an 81-char string (any non-digit treated as
+    blank), a string with row separators (newlines/spaces) that leaves 81
+    digits once stripped, or a 9x9 nested list of ints/single-char strings."""
+    if isinstance(value, str):
+        stripped = "".join(ch for ch in value if not ch.isspace())
+        if len(stripped) == 81:
+            return _cells_from_chars(stripped)
+        return None
+    if isinstance(value, list) and len(value) == 9 and all(isinstance(row, (list, str)) for row in value):
+        flat = "".join("".join(str(cell) for cell in row) if isinstance(row, list) else row for row in value)
+        if len(flat) == 81:
+            return _cells_from_chars(flat)
+    return None
+
+
+def _extract_grid(section) -> list[int] | None:
+    """A `puzzle`/`solution` section might itself be the grid (string or
+    9x9 list), or a dict wrapping it under a `grid`/`board` key."""
+    if isinstance(section, dict):
+        for key in ("grid", "board", "puzzle", "solution"):
+            if key in section:
+                parsed = _parse_grid(section[key])
+                if parsed is not None:
+                    return parsed
+        return None
+    return _parse_grid(section)
+
+
 async def _apiverve_sudoku() -> tuple[list[int], list[int]] | None:
     data = await call_apiverve("sudoku", {"difficulty": "medium"})
     if data is None:
         return None
-    puzzle = _grid_from_string(((data.get("puzzle") or {}).get("grid")))
-    solution = _grid_from_string(((data.get("solution") or {}).get("grid")))
+    puzzle = _extract_grid(data.get("puzzle"))
+    solution = _extract_grid(data.get("solution"))
     if puzzle is None or solution is None or 0 in solution:
-        logger.warning("APIVerve sudoku response had an invalid grid")
+        logger.warning("APIVerve sudoku response had an unrecognized grid shape: %r", data)
         return None
     return puzzle, solution
 

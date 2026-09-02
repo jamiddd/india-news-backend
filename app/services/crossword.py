@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyCrossword
 from app.services.apiverve_client import call_apiverve
-from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
 INDIA_TZ = ZoneInfo("Asia/Kolkata")
@@ -323,52 +322,11 @@ def algorithmic_fallback_puzzle(puzzle_date: date) -> dict[str, Any]:
 _WORD_RE = re.compile(r"^[A-Z]{3,9}$")
 
 
-async def _ai_word_bank(puzzle_date: date) -> list[tuple[str, str]] | None:
-    """Ask Claude for a fresh word+clue list only — no grid layout, no
-    symmetry math. 2026-08-24: asking the model to lay out the actual 11x11
-    symmetric grid repeatedly failed (wrong dimensions, broken symmetry, or —
-    even at bounded effort — burning the whole token budget on reasoning
-    with no output at all). The grid math is exactly what
-    _pack_word_bank/algorithmic_fallback_puzzle already does reliably in
-    plain Python, so let the model contribute only what it's actually good
-    at: varied vocabulary and clues.
-    """
-    prompt = """Generate 30 crossword answer words with clues for a medium-difficulty, general-knowledge American-style crossword.
-Return JSON only: {"words": [{"answer": "EXAMPLE", "clue": "A sample or instance"}, ...]}
-
-Requirements:
-1. Exactly 30 entries.
-2. Each "answer" is 3 to 9 uppercase letters A-Z only, no spaces, hyphens, or punctuation.
-3. No duplicate answers.
-4. A good mix of lengths from 3 to 9 letters (include several 6-9 letter words, since those anchor the grid).
-5. Clues are clear, factual, and family-friendly — one sentence, no fill-in-the-blank."""
-    data = await call_claude_json(
-        system="", user_content=prompt, model="claude-sonnet-5", max_tokens=2000,
-        temperature=None, attempts=2, timeout=45,
-    )
-    if data is None:
-        return None
-    raw_words = data.get("words") if isinstance(data, dict) else None
-    if not isinstance(raw_words, list):
-        return None
-    seen: set[str] = set()
-    bank: list[tuple[str, str]] = []
-    for item in raw_words:
-        if not isinstance(item, dict):
-            continue
-        answer = str(item.get("answer", "")).upper().strip()
-        clue = str(item.get("clue", "")).strip()
-        if not _WORD_RE.match(answer) or not clue or answer in seen:
-            continue
-        seen.add(answer)
-        bank.append((answer, clue))
-    return bank if len(bank) >= 12 else None
-
-
 async def _apiverve_word_bank() -> list[tuple[str, str]] | None:
     """Ask APIVerve's Crossword Generator for its own across/down word+clue
-    list (we ignore its grid layout — _pack_word_bank already does that
-    reliably in plain Python, same reasoning as _ai_word_bank)."""
+    list — we ignore its grid layout, since _pack_word_bank already does
+    that reliably in plain Python (11x11 symmetric packing is a harder
+    structured-generation task than sourcing varied vocabulary+clues)."""
     data = await call_apiverve("crossword", {"size": "large", "difficulty": "medium", "theme": "random"})
     if data is None:
         return None
@@ -389,18 +347,16 @@ async def _apiverve_word_bank() -> list[tuple[str, str]] | None:
 
 async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
     base_seed = int(puzzle_date.strftime("%Y%m%d"))
-    for fetch_bank, source in ((_apiverve_word_bank(), "apiverve"), (_ai_word_bank(puzzle_date), "ai")):
-        word_bank = await fetch_bank
-        if word_bank is None:
-            continue
+    word_bank = await _apiverve_word_bank()
+    if word_bank is not None:
         grid, placed = _pack_word_bank(word_bank, base_seed)
         if len(placed) >= 8:
             try:
-                return _grid_to_puzzle(grid, placed), source
+                return _grid_to_puzzle(grid, placed), "apiverve"
             except Exception as exc:
-                logger.warning("Crossword %s word bank packed but failed validation: %s", source, exc)
+                logger.warning("Crossword apiverve word bank packed but failed validation: %s", exc)
         else:
-            logger.warning("Crossword %s word bank only packed %s entries", source, len(placed))
+            logger.warning("Crossword apiverve word bank only packed %s entries", len(placed))
     return algorithmic_fallback_puzzle(puzzle_date), "algorithmic"
 
 

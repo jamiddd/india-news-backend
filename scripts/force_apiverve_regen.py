@@ -101,7 +101,7 @@ async def regen_ladder(session, puzzle_date: date) -> None:
 
 
 async def regen_quiz(session, puzzle_date: date) -> None:
-    questions, source = await generate_quiz(session, puzzle_date)
+    questions, source = await generate_quiz(puzzle_date)
     await _replace(session, DailyQuiz, puzzle_date, {"questions": questions, "source": source})
     print(f"quiz: regenerated, source={source}")
 

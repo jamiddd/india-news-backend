@@ -1,8 +1,6 @@
 from datetime import date
 
-import pytest
-
-from app.services.word_search import THEMES, _validate_theme_and_words, place_words
+from app.services.word_search import THEMES, place_words, theme_and_words_for_date
 
 
 def _directions():
@@ -35,19 +33,7 @@ def test_different_dates_produce_different_grids():
     assert place_words(date(2026, 8, 9), words) != place_words(date(2026, 8, 10), words)
 
 
-def test_theme_validator_accepts_curated_bank_entries():
-    for theme, words in THEMES:
-        validated_theme, validated_words = _validate_theme_and_words({"theme": theme, "words": words})
-        assert validated_theme == theme
-        assert sorted(validated_words) == sorted(w.upper() for w in words)
-
-
-def test_theme_validator_rejects_wrong_word_count():
-    with pytest.raises(ValueError, match="10 unique"):
-        _validate_theme_and_words({"theme": "Space", "words": ["GALAXY", "COMET"]})
-
-
-def test_theme_validator_rejects_non_alpha_or_bad_length():
-    words = ["GALAXY", "PLANET", "COMET", "ORBIT", "NEBULA", "ROCKET", "SATURN", "LUNAR", "METEOR", "AB12"]
-    with pytest.raises(ValueError, match="4-9 letters"):
-        _validate_theme_and_words({"theme": "Space", "words": words})
+def test_theme_and_words_for_date_is_deterministic_and_from_the_curated_bank():
+    theme, words = theme_and_words_for_date(date(2026, 8, 9))
+    assert (theme, words) == theme_and_words_for_date(date(2026, 8, 9))
+    assert any(theme == t and words == list(w) for t, w in THEMES)

@@ -2,39 +2,15 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date
 
-from sqlalchemy import desc, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.models import Article, DailyQuiz, DailySpellingBee, DailyWordLadder, StoryCluster
+from app.models import DailyQuiz, DailySpellingBee, DailyWordLadder
 from app.services.apiverve_client import call_apiverve
-from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
-
-# call_claude_json already retries on transport/JSON-parse failures
-# internally. This is a separate outer retry for "the model replied with
-# syntactically valid JSON that fails our own puzzle-shape validation" — a
-# distinct failure mode that used to fall back to the curated/algorithmic
-# puzzle after a single miss, with no second attempt at getting the LLM to
-# produce something valid.
-VALIDATION_RETRY_ATTEMPTS = 3
-
-
-def _with_feedback(base_content: str, last_error: str | None) -> str:
-    """Appends the previous attempt's validation error to the prompt so a
-    retry isn't just "ask the exact same thing again and hope" — the model
-    gets told specifically what was wrong last time and can correct for it."""
-    if last_error is None:
-        return base_content
-    return (
-        f"{base_content}\n\nYour previous attempt failed validation with this "
-        f"error: {last_error}\nFix that specific problem and try again."
-    )
-IST = ZoneInfo("Asia/Kolkata")
 
 # Same content filter used for the daily poll (app/services/polls.py) — keep
 # game content (quiz questions especially) away from sensitive subjects.
@@ -152,33 +128,6 @@ async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list
     if apiverve_bee is not None:
         letters, center, words = apiverve_bee
         return letters, center, words, "apiverve"
-
-    system = (
-        "You invent Spelling Bee puzzles (like the NYT game) for a general-audience daily "
-        "puzzle app. Pick 7 unique letters and a list of 8-20 valid, common English words "
-        "(4+ letters) that use only those 7 letters, each word may reuse letters, and every "
-        "word must contain a chosen center letter. Include at least one pangram — a word "
-        'using all 7 letters at least once. Return JSON only: {"letters": [7 single '
-        'uppercase letters], "center_letter": "one of those letters", "words": [...]}'
-    )
-    # call_claude_json already retries internally on transport/JSON-parse
-    # failures (see its `attempts` param) — this outer loop is for the
-    # separate failure mode of "the model replied with syntactically valid
-    # JSON that doesn't satisfy the puzzle's own rules" (e.g. no pangram, a
-    # word using a letter outside the chosen 7), which used to fall back to
-    # `curated` on the very first such miss with no second attempt.
-    base_content = "Generate today's Spelling Bee puzzle."
-    last_error: str | None = None
-    for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-        data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=800)
-        if data is None:
-            break
-        try:
-            letters, center, words = _validate_bee(data)
-            return letters, center, words, "ai"
-        except Exception as exc:
-            logger.warning("Spelling Bee AI output failed validation (attempt %s): %s", attempt + 1, exc)
-            last_error = str(exc)
     letters, center, words = _fallback_bee(puzzle_date)
     return letters, center, words, "curated"
 
@@ -284,57 +233,20 @@ async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], 
     if apiverve_ladder is not None:
         start, target, allowed, optimal = apiverve_ladder
         return start, target, allowed, optimal, "apiverve"
-
-    system = (
-        "You invent Word Ladder puzzles for a general-audience daily puzzle app. Pick a "
-        "start word and a target word, both common 4-letter English words, plus a pool of "
-        "6-15 unique valid English words (same length as start/target) — the pool must "
-        "contain a path from start to target where each step changes exactly one letter "
-        'from a previous pool/start word. Return JSON only: {"start_word": "...", '
-        '"target_word": "...", "allowed_words": [pool of words, not including start/target], '
-        '"optimal_steps": integer length of the shortest such path}'
-    )
-    base_content = "Generate today's Word Ladder puzzle."
-    last_error: str | None = None
-    for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-        data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=500)
-        if data is None:
-            break
-        try:
-            start, target, allowed, optimal = _validate_ladder(data)
-            return start, target, allowed, optimal, "ai"
-        except Exception as exc:
-            logger.warning("Word Ladder AI output failed validation (attempt %s): %s", attempt + 1, exc)
-            last_error = str(exc)
     start, target, allowed, optimal = _fallback_ladder(puzzle_date)
     return start, target, allowed, optimal, "curated"
 
 
 # ---------------------------------------------------------------------------
-# Daily Quiz — generated from today's top corroborated stories
+# Daily Quiz
 # ---------------------------------------------------------------------------
 
-async def fetch_today_top_stories(session: AsyncSession, puzzle_date: date, limit: int = 8) -> list[dict]:
-    """Same shape as polls.py's generate_draft: recent, multi-source-corroborated
-    clusters ranked by headline_score, filtered for sensitive topics, reduced to a
-    compact payload of headline/summary/outlet-snippets suitable for an LLM prompt."""
-    day_start = datetime.combine(puzzle_date, time.min, tzinfo=IST)
-    day_end = day_start + timedelta(days=1)
-    candidates = (await session.execute(
-        select(StoryCluster).options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .where(StoryCluster.first_seen_at >= day_start, StoryCluster.first_seen_at < day_end, StoryCluster.distinct_source_count >= 2)
-        .order_by(desc(StoryCluster.headline_score)).limit(20)
-    )).scalars().all()
-    safe = [cluster for cluster in candidates if not UNSAFE.search(cluster.headline or "")][:limit]
-    return [{
-        "cluster_id": cluster.id,
-        "headline": cluster.headline,
-        "summary": cluster.summary,
-        "articles": [{"outlet": a.source.name if a.source else "Source", "headline": a.title, "snippet": (a.snippet or "")[:220]} for a in cluster.articles[:5]],
-    } for cluster in safe]
-
-
 def _validate_quiz(payload: dict) -> list[dict]:
+    """General-purpose quiz-shape validator — exactly 5 distinct questions,
+    each with 4 distinct options and a valid correct_index, filtered for
+    sensitive topics. Not on the APIVerve path (see _parse_trivia_question,
+    which validates one question at a time from a different payload shape)
+    but kept as the shape check for QUIZ_SETS and any future batch source."""
     questions = payload.get("questions") or []
     if len(questions) != 5:
         raise ValueError("Need exactly 5 questions")
@@ -402,33 +314,10 @@ async def _apiverve_quiz() -> list[dict] | None:
     return [{"id": index + 1, **item} for index, item in enumerate(questions[:5])]
 
 
-async def generate_quiz(session: AsyncSession, puzzle_date: date) -> tuple[list[dict], str]:
+async def generate_quiz(puzzle_date: date) -> tuple[list[dict], str]:
     apiverve_questions = await _apiverve_quiz()
     if apiverve_questions is not None:
         return apiverve_questions, "apiverve"
-
-    stories = await fetch_today_top_stories(session, puzzle_date)
-    if len(stories) >= 3:
-        system = (
-            "You write a 5-question daily news quiz for a general-audience news app, based "
-            "strictly on the supplied stories. Do not invent facts not present in the "
-            "material. Avoid questions about death, violence, tragedy or crime even if "
-            "mentioned in the source material — prefer factual, context, or figures-based "
-            'questions. Return JSON only: {"questions": [{"question": "...", "options": '
-            '[4 strings], "correct_index": 0-3, "explanation": "one sentence, cites the fact"}, '
-            "... exactly 5 items]}"
-        )
-        base_content = str(stories)
-        last_error: str | None = None
-        for attempt in range(VALIDATION_RETRY_ATTEMPTS):
-            data = await call_claude_json(system=system, user_content=_with_feedback(base_content, last_error), max_tokens=1500)
-            if data is None:
-                break
-            try:
-                return _validate_quiz(data), "ai"
-            except Exception as exc:
-                logger.warning("Quiz AI output failed validation (attempt %s): %s", attempt + 1, exc)
-                last_error = str(exc)
     return _fallback_quiz_questions(puzzle_date), "curated"
 
 
@@ -454,7 +343,7 @@ async def get_or_create_daily_games(session: AsyncSession, puzzle_date: date):
 
     quiz = (await session.execute(select(DailyQuiz).where(DailyQuiz.puzzle_date == puzzle_date))).scalar_one_or_none()
     if quiz is None:
-        questions, source = await generate_quiz(session, puzzle_date)
+        questions, source = await generate_quiz(puzzle_date)
         quiz = DailyQuiz(puzzle_date=puzzle_date, questions=questions, source=source)
         session.add(quiz)
 
