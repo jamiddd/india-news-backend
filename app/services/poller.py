@@ -453,6 +453,21 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             if source.id not in cluster_source_ids[matched_cluster.id]:
                 matched_cluster.distinct_source_count += 1
                 cluster_source_ids[matched_cluster.id].add(source.id)
+                # A new outlet changes what the enrichment should say: the
+                # summary now has more coverage to synthesise, and the framing
+                # comparison must list this outlet too. enrich_clusters only
+                # selects clusters where entities IS NULL OR ai_enriched IS
+                # FALSE, so without this a cluster enriched while it was a
+                # singleton keeps its one-outlet framing forever, however many
+                # outlets it later picks up. Measured 2026-09-02, hours after
+                # the clustering fix went live: 202 clusters already had fewer
+                # framing entries than they had outlets.
+                #
+                # Cost is bounded by the enrichment window, not by this flag:
+                # news-enrich.timer passes since_days=0.5, so a story is
+                # re-enriched only while it is still developing, and stops
+                # once it ages out of that window.
+                matched_cluster.ai_enriched = False
         else:
             new_cluster = StoryCluster(
                 headline=title,
