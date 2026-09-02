@@ -16,7 +16,13 @@ from app.models import Source, Article, StoryCluster, ClusterToken, EntityStat, 
 from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
-from app.services.dedup import compute_url_hash, compute_simhash, shares_topic, title_tokens
+from app.services.dedup import (
+    MIN_SHARED_TOKENS,
+    compute_url_hash,
+    compute_simhash,
+    shares_topic,
+    title_tokens,
+)
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url
 from app.services.content_cleaner import decode_entities, clean_extracted_text
@@ -618,12 +624,27 @@ async def poll_all_sources(session: AsyncSession) -> int:
         sources = res.scalars().all()
         total_new = 0
 
+        # Capture (id, name) as plain values up front and iterate over THOSE,
+        # re-fetching each Source inside the try below.
+        #
+        # The loop must not touch an ORM attribute outside the try. The
+        # previous version read `source.name` there, reasoning that capturing
+        # it early avoided a PendingRollbackError — but session.rollback()
+        # expires every object in the session unconditionally, so on the next
+        # iteration that same line triggered a lazy refresh. A lazy refresh is
+        # IO from a plain attribute access, which raises MissingGreenlet under
+        # asyncio, and because the line sat outside the try it propagated and
+        # killed the entire cycle. One failing source took down all 228: a
+        # NameError in one source's ingest on 2026-09-02 stopped ingestion
+        # completely rather than skipping that source as intended.
+        source_refs = [(s.id, s.name) for s in sources]
+
         async with CurlAsyncSession() as client:
-            for source in sources:
-                source_name = source.name  # capture before the try: once the
-                # session's transaction is aborted below, even this lazy ORM
-                # attribute access would itself raise PendingRollbackError
+            for source_id, source_name in source_refs:
                 try:
+                    source = await session.get(Source, source_id)
+                    if source is None:
+                        continue  # deleted mid-cycle
                     count = await ingest_source(session, client, source)
                     total_new += count
                 except Exception as e:

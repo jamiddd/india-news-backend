@@ -5,3 +5,8 @@ anthropic>=0.69.0  # scripts/eval_clustering.py only — the app itself calls th
                    # Messages API over raw httpx (see services/enrichment.py).
                    # The eval harness uses the Batch API, whose submit/poll/
                    # results cycle is not worth hand-rolling for a dev script.
+pyflakes>=3.2.0  # catches undefined names, which no test here covers: a
+                 # NameError inside a function body passes import, passes
+                 # ast.parse, and only fails when that line executes. One
+                 # such name in poller.py took production ingestion down for
+                 # ~45 minutes on 2026-09-02. Run: python -m pyflakes app/ scripts/
