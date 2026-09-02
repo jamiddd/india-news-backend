@@ -14,6 +14,7 @@ services:
       - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY:-}
       - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
       - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
+      - APIVERVE_API_KEY=${APIVERVE_API_KEY:-}
       - POLL_ADMIN_USERNAME=${POLL_ADMIN_USERNAME:-admin}
       - POLL_ADMIN_PASSWORD=${POLL_ADMIN_PASSWORD:-}
       - POLL_SESSION_SECRET=${POLL_SESSION_SECRET:-}
@@ -47,6 +48,10 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # This container also pre-generates sudoku/word search/spelling bee/
+      # word ladder/quiz/editorial each night (see run_crossword_scheduler.py
+      # despite the name), all of which now try APIVerve first.
+      - APIVERVE_API_KEY=${APIVERVE_API_KEY:-}
 
   poll_scheduler:
     build:
