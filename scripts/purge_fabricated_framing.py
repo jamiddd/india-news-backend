@@ -39,6 +39,11 @@ from app.database import AsyncSessionLocal
 # Counts distinct sources from the articles table rather than trusting
 # story_clusters.distinct_source_count, which is a maintained counter and
 # therefore the thing most likely to be wrong if anything ever drifted.
+#
+# `IS NOT NULL` alone is not enough: rows cleared before models.py set
+# none_as_null=True hold the JSON value `null`, which is NOT NULL to Postgres.
+# Matching them here is deliberate — it normalises those rows to real SQL NULL
+# as a side effect, so `IS NULL` means what it says everywhere afterwards.
 TARGET_PREDICATE = """
     framing_comparison IS NOT NULL
     AND (
@@ -46,6 +51,13 @@ TARGET_PREDICATE = """
         FROM articles a
         WHERE a.cluster_id = story_clusters.id
     ) < 2
+"""
+
+# Rows that are already logically empty and only need the representation
+# normalised — reported separately so the purge count isn't inflated by them.
+JSON_NULL_PREDICATE = """
+    framing_comparison IS NOT NULL
+    AND json_typeof(framing_comparison) = 'null'
 """
 
 
@@ -58,9 +70,15 @@ async def main(apply: bool) -> None:
             f"SELECT count(*) FROM story_clusters WHERE {TARGET_PREDICATE}"
         ))).scalar()
 
+        json_nulls = (await session.execute(text(
+            f"SELECT count(*) FROM story_clusters WHERE {JSON_NULL_PREDICATE}"
+        ))).scalar()
+
         print(f"clusters with framing_comparison : {total_with_framing}")
         print(f"of those, fewer than 2 sources   : {fabricated}")
         print(f"legitimate (2+ sources), kept    : {total_with_framing - fabricated}")
+        print(f"already-empty JSON 'null' rows   : {json_nulls} "
+              f"(counted above; normalised to SQL NULL by this run)")
 
         if not fabricated:
             print("\nNothing to purge.")

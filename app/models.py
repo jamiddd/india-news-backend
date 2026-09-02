@@ -372,9 +372,20 @@ class StoryCluster(Base):
     first_seen_at = Column(DateTime(timezone=True), default=utc_now, index=True)
     last_updated_at = Column(DateTime(timezone=True), default=utc_now, index=True)
 
-    entities = Column(JSON, nullable=True)  # {"persons": [], "organizations": [], "locations": []}
-    topics = Column(JSON, nullable=True)    # ["politics", "economy"]
-    framing_comparison = Column(JSON, nullable=True) # Outlet headline angle comparison
+    # none_as_null=True on all three: SQLAlchemy's JSON type defaults to
+    # none_as_null=False, which persists Python None as the JSON *value*
+    # `null` rather than SQL NULL. These three columns are all explicitly set
+    # to None — framing_comparison whenever a cluster has fewer than 2 sources
+    # (enrichment.py), all three by scripts/repair_runaway_clusters.py — and
+    # without this flag those rows are NOT NULL as far as Postgres is
+    # concerned, so `WHERE framing_comparison IS NULL` silently misses every
+    # one of them. Confirmed in production 2026-09-02: cleared rows read back
+    # as sql_null=False, json_typeof='null'. The API is unaffected either way
+    # (JSON null deserialises to None), but any query, index, or partial
+    # constraint using IS NULL is quietly wrong without this.
+    entities = Column(JSON(none_as_null=True), nullable=True)  # {"persons": [], "organizations": [], "locations": []}
+    topics = Column(JSON(none_as_null=True), nullable=True)    # ["politics", "economy"]
+    framing_comparison = Column(JSON(none_as_null=True), nullable=True) # Outlet headline angle comparison
 
     # Shadow signal for the feed ranking redesign (piece 1: global
     # importance) — the reactivation ratio of this cluster's single most
