@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import DailyEditorial
+from app.services.apiverve_client import call_apiverve
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
@@ -94,21 +95,26 @@ async def _fetch_background_image(query: str) -> dict | None:
         return None
 
 
-def _validate_word_and_quote(payload: dict) -> tuple[dict, dict]:
-    word = payload.get("word") or {}
-    quote = payload.get("quote") or {}
+def _validate_word(word: dict) -> dict:
     word_fields = ("word", "pronunciation", "part_of_speech", "definition", "example", "origin")
-    quote_fields = ("quote", "author")
     if any(not str(word.get(f) or "").strip() for f in word_fields):
         raise ValueError("Incomplete word fields")
-    if any(not str(quote.get(f) or "").strip() for f in quote_fields):
-        raise ValueError("Incomplete quote fields")
     if not str(word["word"]).strip().replace(" ", "").isalpha():
         raise ValueError("Word must be alphabetic")
     word_out = {f: str(word[f]).strip() for f in word_fields}
     word_out["word"] = word_out["word"].upper()
-    quote_out = {f: str(quote[f]).strip() for f in quote_fields}
-    return word_out, quote_out
+    return word_out
+
+
+def _validate_quote(quote: dict) -> dict:
+    quote_fields = ("quote", "author")
+    if any(not str(quote.get(f) or "").strip() for f in quote_fields):
+        raise ValueError("Incomplete quote fields")
+    return {f: str(quote[f]).strip() for f in quote_fields}
+
+
+def _validate_word_and_quote(payload: dict) -> tuple[dict, dict]:
+    return _validate_word(payload.get("word") or {}), _validate_quote(payload.get("quote") or {})
 
 
 async def _recent_words_and_authors(session: AsyncSession, feature_date: date, days: int = 21) -> tuple[list[str], list[str]]:
@@ -131,43 +137,114 @@ async def _recent_words_and_authors(session: AsyncSession, feature_date: date, d
     return words, authors
 
 
-async def generate_word_and_quote(feature_date: date, recent_words: list[str] | None = None, recent_authors: list[str] | None = None) -> tuple[dict, dict, str]:
-    """Ask Claude for a fresh word-of-the-day + quote-of-the-day pair. Falls
-    back to the curated WORDS/QUOTES banks, deterministically picked by
-    date, on failure — same resilience pattern as
-    word_search.generate_theme_and_words."""
-    avoid = ""
-    if recent_words:
-        avoid += f" Do not reuse any of these recent words: {', '.join(recent_words)}."
-    if recent_authors:
-        avoid += f" Prefer an author not in this recent list: {', '.join(recent_authors)}."
+async def _apiverve_quote(recent_authors: list[str] | None = None) -> dict | None:
+    """APIVerve's Random Quote has no topic/avoid-author filter, so draw a
+    few and prefer one whose author wasn't used recently — same intent as
+    the Claude prompt's avoid-list, just done client-side."""
+    recent = {author.casefold() for author in (recent_authors or [])}
+    first_valid: dict | None = None
+    for _ in range(5):
+        data = await call_apiverve("randomquote")
+        if data is None:
+            return first_valid
+        try:
+            quote = _validate_quote(data)
+        except Exception as exc:
+            logger.info("APIVerve random quote unusable: %s", exc)
+            continue
+        if first_valid is None:
+            first_valid = quote
+        if quote["author"].casefold() not in recent:
+            return quote
+    return first_valid
+
+
+async def _ai_word(feature_date: date, recent_words: list[str] | None = None) -> dict | None:
+    avoid = f" Do not reuse any of these recent words: {', '.join(recent_words)}." if recent_words else ""
     system = (
-        "You generate content for a daily 'Word of the Day' and 'Quote of the Day' "
-        "feature in a general-audience news app. Pick an interesting, moderately "
-        "advanced English word (not obscure or offensive) and a real, attributable "
-        "inspirational or thought-provoking quote from a known historical or public "
-        "figure. Vary your picks meaningfully day to day — avoid always reaching for "
-        "the single most predictable/cliché answer (e.g. 'serendipity', a generic "
-        f"Steve Jobs quote).{avoid} Return JSON only: "
-        '{"word": {"word": "...", "pronunciation": "phonetic spelling", '
-        '"part_of_speech": "noun/verb/adjective/etc", "definition": "...", '
-        '"example": "a sentence using the word", "origin": "brief etymology"}, '
-        '"quote": {"quote": "the quote text", "author": "who said it"}}'
+        "You generate content for a daily 'Word of the Day' feature in a general-audience "
+        "news app. Pick an interesting, moderately advanced English word (not obscure or "
+        "offensive). Vary your picks meaningfully day to day — avoid always reaching for "
+        f"the single most predictable/cliché answer (e.g. 'serendipity').{avoid} Return "
+        'JSON only: {"word": "...", "pronunciation": "phonetic spelling", "part_of_speech": '
+        '"noun/verb/adjective/etc", "definition": "...", "example": "a sentence using the '
+        'word", "origin": "brief etymology"}'
     )
     data = await call_claude_json(
         system=system,
-        user_content=f"Generate the word and quote of the day for {feature_date.isoformat()}.",
-        max_tokens=800,
+        user_content=f"Generate the word of the day for {feature_date.isoformat()}.",
+        max_tokens=500,
         temperature=1.0,
     )
-    if data is not None:
-        try:
-            return (*_validate_word_and_quote(data), "ai")
-        except Exception as exc:
-            logger.warning("Word/quote AI output failed validation: %s", exc)
+    if data is None:
+        return None
+    try:
+        return _validate_word(data)
+    except Exception as exc:
+        logger.warning("Word-of-the-day AI output failed validation: %s", exc)
+        return None
+
+
+async def generate_word_and_quote(feature_date: date, recent_words: list[str] | None = None, recent_authors: list[str] | None = None) -> tuple[dict, dict, str]:
+    """Quote of the Day comes from APIVerve first (falling back to the
+    combined Claude prompt, then the curated bank, for the quote only).
+    Word of the Day still goes through Claude then the curated bank — see
+    the "check APIVerve for Services" investigation: APIVerve's Dictionary/
+    Random Word APIs can't supply pronunciation/part_of_speech/example/
+    origin, so they're not a fit for this schema."""
     ordinal = feature_date.toordinal()
-    quote, author = QUOTES[ordinal % len(QUOTES)]
-    return WORDS[ordinal % len(WORDS)], {"quote": quote, "author": author}, "curated"
+
+    quote = await _apiverve_quote(recent_authors)
+    quote_source = "apiverve" if quote is not None else None
+
+    word = await _ai_word(feature_date, recent_words)
+    word_source = "ai" if word is not None else None
+
+    if word is None or quote is None:
+        # Either half missed — the combined prompt is still the richest
+        # single fallback, and cheaper than two separate retries.
+        avoid = ""
+        if recent_words:
+            avoid += f" Do not reuse any of these recent words: {', '.join(recent_words)}."
+        if recent_authors:
+            avoid += f" Prefer an author not in this recent list: {', '.join(recent_authors)}."
+        system = (
+            "You generate content for a daily 'Word of the Day' and 'Quote of the Day' "
+            "feature in a general-audience news app. Pick an interesting, moderately "
+            "advanced English word (not obscure or offensive) and a real, attributable "
+            "inspirational or thought-provoking quote from a known historical or public "
+            "figure. Vary your picks meaningfully day to day — avoid always reaching for "
+            "the single most predictable/cliché answer (e.g. 'serendipity', a generic "
+            f"Steve Jobs quote).{avoid} Return JSON only: "
+            '{"word": {"word": "...", "pronunciation": "phonetic spelling", '
+            '"part_of_speech": "noun/verb/adjective/etc", "definition": "...", '
+            '"example": "a sentence using the word", "origin": "brief etymology"}, '
+            '"quote": {"quote": "the quote text", "author": "who said it"}}'
+        )
+        data = await call_claude_json(
+            system=system,
+            user_content=f"Generate the word and quote of the day for {feature_date.isoformat()}.",
+            max_tokens=800,
+            temperature=1.0,
+        )
+        combined = None
+        if data is not None:
+            try:
+                combined = _validate_word_and_quote(data)
+            except Exception as exc:
+                logger.warning("Word/quote AI output failed validation: %s", exc)
+        if word is None:
+            word = combined[0] if combined is not None else WORDS[ordinal % len(WORDS)]
+            word_source = "ai" if combined is not None else "curated"
+        if quote is None:
+            if combined is not None:
+                quote, quote_source = combined[1], "ai"
+            else:
+                fallback_quote, fallback_author = QUOTES[ordinal % len(QUOTES)]
+                quote, quote_source = {"quote": fallback_quote, "author": fallback_author}, "curated"
+
+    source = quote_source if quote_source == word_source else f"{word_source}+{quote_source}"
+    return word, quote, source
 
 
 async def _retry_missing_background(session: AsyncSession, row: DailyEditorial, feature_date: date) -> DailyEditorial:
