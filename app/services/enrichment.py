@@ -127,50 +127,23 @@ def extract_entities_rule_based(text: str) -> Dict[str, List[str]]:
         "backdrop": []
     }
 
-def generate_framing_comparison(articles: List[Article]) -> List[Dict[str, str]]:
-    """Generate descriptive headline angle comparisons across outlets."""
-    framing = []
-    for art in articles:
-        src = art.source.name if art.source else "Source"
-        title = art.title
-        
-        # Categorize angle. Ordered from most to least specific so a headline
-        # matching multiple buckets gets the more informative one. The old
-        # version fell through to a bare "General Reporting" for anything
-        # that didn't hit one of 3 narrow buckets, which in practice was most
-        # headlines — these extra buckets and the title-based fallback below
-        # cut how often that generic label actually surfaces.
-        lower_title = title.lower()
-        if any(w in lower_title for w in ["says", "announced", "launches", "approves", "meets", "unveils", "signs", "orders"]):
-            angle = "Official / Policy Statement"
-        elif any(w in lower_title for w in ["protest", "clash", "row", "lynches", "rape", "crime", " vs ", "slams", "accuses", "blames"]):
-            angle = "Conflict & Opposition Impact"
-        elif any(w in lower_title for w in ["rate", "sensex", "nifty", "market", "gold", "price", "quarter", "stock", "ipo", "gdp", "inflation"]):
-            angle = "Financial & Market Impact"
-        elif any(w in lower_title for w in ["court", "hc", "verdict", "judge", "bail", "petition", "cbi", "ed raids", "probe"]):
-            angle = "Legal / Investigative"
-        elif any(w in lower_title for w in ["dies", "killed", "injured", "accident", "fire", "flood", "cyclone", "quake", "rescue"]):
-            angle = "Disaster / Casualty Report"
-        elif any(w in lower_title for w in ["wins", "beats", "century", "medal", "tournament", "match", "final"]):
-            angle = "Sports Result"
-        elif any(w in lower_title for w in ["film", "actor", "actress", "box office", "trailer", "song", "album"]):
-            angle = "Entertainment"
-        else:
-            # Last-resort fallback: use the leading verb/subject phrase
-            # (first few words) as a descriptive angle instead of the
-            # uninformative generic label, so distinct stories still read
-            # as distinct in the framing comparison UI.
-            words = title.strip().split()
-            angle = " ".join(words[:5]) + ("…" if len(words) > 5 else "")
-            if not angle:
-                angle = "General Reporting"
-
-        framing.append({
-            "outlet": src,
-            "headline": title,
-            "headline_angle": angle
-        })
-    return framing
+# There is deliberately no rule-based framing fallback.
+#
+# A framing comparison is a claim about how outlets *differ*. A keyword
+# lookup cannot make that claim: four outlets covering the same earthquake
+# all contain "quake", so they all resolve to the identical bucket label,
+# and the UI renders four rows saying the same thing under the heading
+# "how outlets frame it". The previous version also fell through to
+# "first five words of the headline" for anything its verb list missed
+# (it matched "announced" but not "announces"), which shipped truncated
+# headlines dressed up as analysis. Both were observed in production on
+# 2026-09-03.
+#
+# This is the same fabrication class as the single-outlet bug fixed in
+# 0ca7d07: presenting a table lookup as editorial judgment. Framing is now
+# populated ONLY by a successful model call. If that call fails,
+# framing_comparison stays None and the client hides the section — an
+# absent comparison is honest, a fabricated one is not.
 
 MAX_SUMMARY_BULLETS = 3
 MAX_BULLET_CHARS = 280  # ~35 words at average English word length
@@ -233,7 +206,6 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
 
     # Rule-based baseline enrichment
     entities = extract_entities_rule_based(full_text)
-    framing = generate_framing_comparison(articles) if can_compare_framing else None
 
     topics = []
     if any(w in full_text.lower() for w in ["rbi", "market", "sensex", "nifty", "gold", "bank", "coalf", "ethan"]):
@@ -247,7 +219,10 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
 
     cluster.entities = entities
     cluster.topics = topics
-    cluster.framing_comparison = framing
+    # Cleared, not merely left alone: a re-enrichment of a cluster that
+    # previously got framing must not keep serving the stale one if this
+    # pass fails to produce a new one.
+    cluster.framing_comparison = None
 
     # Enrichment is the premium tier's core feature, so every cluster —
     # singletons included — gets the paid AI pass, not just multi-source

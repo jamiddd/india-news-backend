@@ -72,6 +72,19 @@ HEADERS = {
 # loop below.
 GEOGRAPHIC_CATEGORIES = {"northeast", "regional_south", "regional_west", "regional_east"}
 
+def should_reenrich_on_new_outlet(distinct_source_count: int) -> bool:
+    """True when a cluster reaching `distinct_source_count` outlets is worth
+    paying to re-enrich. Doubling thresholds only: 2, 4, 8, 16...
+
+    Bounds re-enrichment to O(log outlets) paid passes per story instead of
+    O(outlets). See the call site for the cost incident this fixes. The 1->2
+    transition is always included because that is the one that unlocks the
+    framing comparison at all.
+    """
+    n = distinct_source_count
+    return n >= 2 and (n & (n - 1)) == 0
+
+
 def parse_pub_date(entry) -> datetime:
     parsed_tuple = getattr(entry, "published_parsed", None) or getattr(entry, "updated_parsed", None)
     if parsed_tuple:
@@ -463,11 +476,30 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 # the clustering fix went live: 202 clusters already had fewer
                 # framing entries than they had outlets.
                 #
-                # Cost is bounded by the enrichment window, not by this flag:
-                # news-enrich.timer passes since_days=0.5, so a story is
-                # re-enriched only while it is still developing, and stops
-                # once it ages out of that window.
-                matched_cluster.ai_enriched = False
+                # ...but NOT on every outlet. Resetting per-joining-outlet
+                # costs O(outlets) paid passes per story, and it fires
+                # precisely on the 1->2 transition that also routes the
+                # cluster to MULTI_SOURCE_MODEL (enrichment.py) — so a
+                # 12-outlet story bought 11 Sonnet re-enrichments as it
+                # developed. That churn also kept the enrich timer's
+                # per-tick cap permanently saturated, so it ran at max
+                # throughput continuously instead of draining to zero.
+                # Measured: ~$20 of spend between 2026-09-02 22:00 and
+                # 2026-09-03 15:00, starting at this flag's deploy.
+                #
+                # Re-enrich at doubling thresholds instead: 2, 4, 8, 16...
+                # That is O(log outlets) — at most ~4 passes for a story
+                # with 16 outlets rather than 15 — while still guaranteeing
+                # a refresh at the 1->2 transition, which is the one that
+                # actually unlocks the framing comparison. Between
+                # thresholds the summary gains little from one more outlet
+                # saying the same thing, which is what the old comment's
+                # "202 clusters had fewer framing entries than outlets"
+                # measurement was really about: the 1->2 case.
+                if should_reenrich_on_new_outlet(
+                    matched_cluster.distinct_source_count
+                ):
+                    matched_cluster.ai_enriched = False
         else:
             new_cluster = StoryCluster(
                 headline=title,

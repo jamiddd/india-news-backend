@@ -2,7 +2,7 @@
 Pure-logic tests for app/services/enrichment.py's non-network pieces:
 parse_json_response (the fence-stripping fallback chain that's already
 broken once in production — see india-news-app-handoff.md §11 gotcha #6),
-extract_entities_rule_based, and generate_framing_comparison. No DB/network.
+extract_entities_rule_based, and distinct_source_count. No DB/network.
 """
 import json
 
@@ -11,9 +11,9 @@ import pytest
 from app.services.enrichment import (
     parse_json_response,
     extract_entities_rule_based,
-    generate_framing_comparison,
     distinct_source_count,
 )
+from app.services.poller import should_reenrich_on_new_outlet
 
 
 class _StubSource:
@@ -119,52 +119,12 @@ class TestExtractEntitiesRuleBased:
 
     def test_no_matches_returns_empty_lists(self):
         result = extract_entities_rule_based("A completely unrelated sentence about cats.")
-        assert result == {"persons": [], "organizations": [], "locations": []}
+        assert result == {"persons": [], "organizations": [], "locations": [], "backdrop": []}
 
     def test_no_duplicate_entities(self):
         text = "RBI RBI RBI all mentioned the RBI repeatedly."
         result = extract_entities_rule_based(text)
         assert result["organizations"].count("RBI") == 1
-
-
-class TestGenerateFramingComparison:
-    def test_official_policy_angle(self):
-        # Trigger words are matched literally ("announced", not "announces")
-        # — this test title is deliberately exact, not just close.
-        articles = [_StubArticle("Government announced new scheme", "NDTV")]
-        result = generate_framing_comparison(articles)
-        assert result[0]["headline_angle"] == "Official / Policy Statement"
-
-    def test_conflict_angle(self):
-        articles = [_StubArticle("Protest breaks out over new law", "Hindustan Times")]
-        result = generate_framing_comparison(articles)
-        assert result[0]["headline_angle"] == "Conflict & Opposition Impact"
-
-    def test_financial_angle(self):
-        articles = [_StubArticle("Sensex hits record high in early trade", "Moneycontrol")]
-        result = generate_framing_comparison(articles)
-        assert result[0]["headline_angle"] == "Financial & Market Impact"
-
-    def test_general_reporting_fallback(self):
-        articles = [_StubArticle("A quiet day in the neighborhood", "Local News")]
-        result = generate_framing_comparison(articles)
-        assert result[0]["headline_angle"] == "General Reporting"
-
-    def test_missing_source_falls_back_to_generic_label(self):
-        articles = [_StubArticle("Some headline", None)]
-        result = generate_framing_comparison(articles)
-        assert result[0]["outlet"] == "Source"
-
-    def test_preserves_article_order(self):
-        articles = [
-            _StubArticle("First headline", "Outlet A"),
-            _StubArticle("Second headline", "Outlet B"),
-        ]
-        result = generate_framing_comparison(articles)
-        assert [r["outlet"] for r in result] == ["Outlet A", "Outlet B"]
-
-    def test_empty_list_returns_empty(self):
-        assert generate_framing_comparison([]) == []
 
 
 class TestDistinctSourceCount:
@@ -199,3 +159,24 @@ class TestDistinctSourceCount:
         two = one + [_StubArticle("B", "Mint", source_id=2)]
         assert not (distinct_source_count(one) >= 2)
         assert distinct_source_count(two) >= 2
+
+
+class TestShouldReenrichOnNewOutlet:
+    """Re-enrichment gate. Resetting ai_enriched on every joining outlet cost
+    O(outlets) paid passes per story and kept the enrich timer saturated
+    (~$20 over 2026-09-02/03); this bounds it to the doubling thresholds."""
+
+    def test_fires_on_the_transition_that_unlocks_framing(self):
+        # 1 -> 2 is the one that must never be skipped: below 2 outlets there
+        # is no framing comparison to generate at all.
+        assert should_reenrich_on_new_outlet(2) is True
+
+    def test_does_not_fire_for_a_singleton(self):
+        assert should_reenrich_on_new_outlet(1) is False
+
+    def test_fires_only_at_doubling_thresholds(self):
+        fired = [n for n in range(1, 33) if should_reenrich_on_new_outlet(n)]
+        assert fired == [2, 4, 8, 16, 32]
+
+    def test_a_sixteen_outlet_story_costs_four_passes_not_fifteen(self):
+        assert sum(should_reenrich_on_new_outlet(n) for n in range(2, 17)) == 4
