@@ -11,7 +11,13 @@ from sqlalchemy.dialects import postgresql
 
 from app.config import settings
 from app.models import StoryCluster
-from app.services.feed_gate import apply_feed_gate, gate_cache_marker, gate_min_sources
+from app.services.feed_gate import (
+    LISTING_MAX_AGE,
+    apply_feed_gate,
+    gate_cache_marker,
+    gate_min_sources,
+    notifiable_clauses,
+)
 
 
 def _sql(query) -> str:
@@ -63,3 +69,42 @@ class TestGateHelpers:
         off = gate_cache_marker()
         monkeypatch.setattr(settings, "FEED_GATE_ENABLED", True)
         assert gate_cache_marker() != off
+
+
+class TestNotifiableClauses:
+    """What a cluster must be before it is worth waking someone's phone for.
+
+    The daily digest previously selected on nothing but "highest
+    headline_score in the table" — no source requirement and no age bound.
+    """
+
+    def test_requires_corroboration_regardless_of_the_feed_gate(self, monkeypatch):
+        # Unconditional by design: a push is the most intrusive surface the
+        # app has, so it does not relax when the in-app feed is ungated.
+        monkeypatch.setattr(settings, "FEED_GATE_ENABLED", False)
+        sql = _sql(select(StoryCluster.id).where(*notifiable_clauses()))
+        assert "distinct_source_count" in sql
+
+    def test_bounds_age(self, monkeypatch):
+        # headline_score decays on last_updated_at, so an out-of-band write
+        # to that column makes a years-old cluster score as if it were
+        # breaking news. The age bound is what stops it being pushed.
+        monkeypatch.setattr(settings, "FEED_GATE_ENABLED", False)
+        sql = _sql(select(StoryCluster.id).where(*notifiable_clauses()))
+        assert "coalesce" in sql.lower()
+        assert "became_multi_source_at" in sql
+
+    def test_uses_the_same_age_window_as_listings(self):
+        # One definition, so a story cannot be pushed after it has aged out
+        # of the feed it would open into.
+        assert LISTING_MAX_AGE.days == 4
+
+    def test_singleton_ceiling_is_below_the_breaking_threshold(self):
+        # Breaking's multi-source guarantee was, before this change, purely
+        # an emergent property of one constant sitting above one number:
+        # score = distinct_source_count / (hours+2)^1.5, so a 1-source story
+        # peaks at 1/2^1.5 at age 0. The explicit clause means the guarantee
+        # no longer depends on nobody ever retuning the threshold.
+        singleton_ceiling = 1 / (0 + 2) ** 1.5
+        assert singleton_ceiling < 0.4
+        assert round(singleton_ceiling, 4) == 0.3536

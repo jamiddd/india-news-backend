@@ -13,8 +13,46 @@ precision, is the risk this gate exposes: ~46% of genuinely related pairs
 are still not merged, and under this gate those stories are invisible rather
 than merely buried.
 """
+from datetime import timedelta
+
+from sqlalchemy import func
+
 from app.config import settings
-from app.models import StoryCluster
+from app.models import StoryCluster, utc_now
+
+
+# Clusters older than this never surface in listings, in either feed. Added
+# after finding stale singleton crypto clusters (some from 2022) ranking as
+# if fresh: their last_updated_at had been bulk-touched to "now" by an
+# out-of-band write unrelated to any real new coverage, which both sorted
+# them above genuinely current stories in category tabs (ordered by
+# last_updated_at) and inflated their headline_score's recency-decay term in
+# the "All" feed. Lives here beside the gate because it answers the same
+# question — may this cluster be shown — and because scripts outside the
+# FastAPI app need it too (notifications).
+LISTING_MAX_AGE = timedelta(days=4)
+
+
+def listing_age_anchor():
+    """The timestamp a cluster's listing age is measured from.
+
+    COALESCE(became_multi_source_at, first_seen_at): for a corroborated
+    story, its clock starts when it earned its second outlet, not when its
+    first article appeared. Those two moments have a median gap of ~4 hours
+    for stories that stop at two outlets, so anchoring on first_seen_at
+    spends a large slice of the window before the story was even
+    presentable as comparative coverage. Falls back to first_seen_at for
+    single-source clusters, which is exactly the pre-gate behaviour — and
+    for rows the migration backfilled, since it backfilled from
+    first_seen_at.
+
+    Both halves are set once and never rewritten, so this inherits
+    first_seen_at's immunity to the last_updated_at drift described above.
+    See models.py StoryCluster.became_multi_source_at.
+    """
+    return func.coalesce(
+        StoryCluster.became_multi_source_at, StoryCluster.first_seen_at
+    )
 
 
 def gate_min_sources() -> int:
@@ -58,3 +96,26 @@ def gate_cache_marker() -> str:
     flag worked.
     """
     return "g1" if settings.FEED_GATE_ENABLED else "g0"
+
+
+def notifiable_clauses():
+    """What a cluster must be before it is worth waking someone's phone for.
+
+    Applied to BOTH modes, and deliberately not conditional on
+    FEED_GATE_ENABLED. A push is the most intrusive surface the app has, so
+    the bar is the product's own thesis — corroborated coverage — whether or
+    not the in-app feed is currently gated. For breaking this codifies
+    behaviour that was already true but only as an emergent property of the
+    threshold constant (see the module docstring); for the daily digest it is
+    a genuine change.
+
+    The age bound is the same one every listing uses. The daily digest had
+    none at all, which left it exposed to precisely the stale-cluster class
+    LISTING_MAX_AGE exists to stop — a cluster whose last_updated_at was
+    bulk-touched to "now" scores as if it were breaking news and would be
+    pushed as the story of the day.
+    """
+    return (
+        StoryCluster.distinct_source_count >= settings.FEED_MIN_DISTINCT_SOURCES,
+        listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
+    )

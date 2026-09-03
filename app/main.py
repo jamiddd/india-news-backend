@@ -71,7 +71,12 @@ from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
-from app.services.feed_gate import apply_feed_gate, gate_cache_marker
+from app.services.feed_gate import (
+    LISTING_MAX_AGE,
+    apply_feed_gate,
+    gate_cache_marker,
+    listing_age_anchor,
+)
 from app.services.related_stories import find_related_clusters
 from scripts.enrich_all_clusters import enrich_clusters
 
@@ -148,38 +153,6 @@ def _parse_source_weights(raw: Optional[str]) -> dict:
             continue
         weights[sid] = weight
     return weights
-
-# Clusters older than this (by _listing_age_anchor below — when the story
-# actually first appeared, or was first corroborated; never last_updated_at)
-# never surface in listings, in either feed.
-# Added after finding stale singleton crypto clusters (some from 2022)
-# ranking as if fresh: their last_updated_at had been bulk-touched to "now"
-# by an out-of-band write unrelated to any real new coverage, which both
-# sorted them above genuinely current stories in category tabs (ordered by
-# last_updated_at) and inflated their headline_score's recency-decay term in
-# the "All" feed. first_seen_at is set once at cluster creation and never
-# rewritten by anything, so it's the one timestamp immune to that class of
-# corruption — filtering on it is a hard backstop regardless of what causes
-# last_updated_at to drift.
-LISTING_MAX_AGE = timedelta(days=4)
-
-
-def _listing_age_anchor():
-    """The timestamp a cluster's listing age is measured from.
-
-    COALESCE(became_multi_source_at, first_seen_at): for a corroborated
-    story, its clock starts when it earned its second outlet, not when its
-    first article appeared. Those two moments have a median gap of ~4 hours
-    for stories that stop at two outlets, so anchoring on first_seen_at
-    spends a large slice of the 4-day window before the story was even
-    presentable as comparative coverage. Falls back to first_seen_at for
-    single-source clusters, which is exactly today's behaviour — and for
-    rows the migration backfilled, since it backfilled from first_seen_at.
-    See models.py StoryCluster.became_multi_source_at.
-    """
-    return func.coalesce(
-        StoryCluster.became_multi_source_at, StoryCluster.first_seen_at
-    )
 
 # See _truncate_content_preview / ArticleListOut.content.
 CONTENT_PREVIEW_CHAR_LIMIT = 600
@@ -1047,7 +1020,7 @@ async def list_story_clusters(
 
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).selectinload(Article.source)
-        ).where(_listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
+        ).where(listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
         query = apply_feed_gate(query)
 
         if min_sources:
@@ -1288,7 +1261,7 @@ async def list_for_you_clusters(
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
         .where(
-            _listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
+            listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
             StoryCluster.entities.isnot(None),
         )
     )

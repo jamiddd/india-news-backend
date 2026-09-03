@@ -4,12 +4,20 @@ and daily digests are independent opt-ins — a user can have both on at once
 (see UserPreferences.breaking_notifications_enabled /
 daily_notification_times_utc in schemas.py/NewsModels.kt):
 
+Both modes require a corroborated, in-window cluster — see
+notifiable_clauses() in app/services/feed_gate.py. That requirement is
+unconditional, not tied to FEED_GATE_ENABLED: a push is the most intrusive
+surface the app has.
+
 - Breaking: headline_score > BREAKING_SCORE_THRESHOLD (0.4). This value is
   deliberately above 0.3536, the highest score a singleton (1-outlet) story
   can ever reach regardless of recency (score = distinct_source_count /
   (hours+2)^1.5, and a 1-source story at age 0 scores 1/2^1.5 = 0.3536) — so
   crossing 0.4 is only mathematically possible when 2+ independent outlets
-  are actively corroborating the same story right now. Capped at
+  are actively corroborating the same story right now. The explicit
+  multi-source clause added 2026-09-03 does not change which clusters
+  qualify; it stops that guarantee from depending on one constant staying
+  above one number, which nothing in the code said out loud. Capped at
   BREAKING_DAILY_CAP (5) sends/day per user even on an unusually newsy day;
   confirmed against live production data that ~3 clusters/day naturally
   cross 0.4, so the cap is a rarely-binding safety net, not the normal case.
@@ -18,6 +26,13 @@ daily_notification_times_utc in schemas.py/NewsModels.kt):
   (not personalized). Dedup is per time-slot via NotificationLog.
   daily_slot_utc, not just "already sent today", so multiple
   daily_notification_times_utc entries each get their own send.
+
+  Unlike breaking, this path had NO threshold, no source requirement and no
+  age bound — just "highest headline_score in the table". It could push a
+  single-source story, and a stale one: headline_score decays on
+  last_updated_at, and an out-of-band write that touches that column makes a
+  years-old cluster score as if it were breaking. Both are fixed by
+  notifiable_clauses(); see docs/multi-source-feed-plan.md §5.H.
 
 Meant to run every ~15 min via cron, a few minutes after poll_all_sources()
 recomputes headline_score (see poller.py) — e.g. :05/:20/:35/:50, following
@@ -45,6 +60,7 @@ from firebase_admin import messaging
 from app.database import AsyncSessionLocal
 from app.models import User, DeviceToken, NotificationLog, StoryCluster, utc_now
 from app.services.firebase_auth import _get_firebase_app
+from app.services.feed_gate import notifiable_clauses
 from app.services.job_lease import job_lease
 
 logging.basicConfig(level=logging.INFO)
@@ -237,6 +253,7 @@ async def main():
                                 select(StoryCluster)
                                 .where(
                                     StoryCluster.headline_score > BREAKING_SCORE_THRESHOLD,
+                                    *notifiable_clauses(),
                                     StoryCluster.id.notin_(already_notified),
                                 )
                                 .order_by(StoryCluster.headline_score.desc())
@@ -289,7 +306,10 @@ async def main():
                     if top_story is None:
                         top_story = (
                             await session.execute(
-                                select(StoryCluster).order_by(StoryCluster.headline_score.desc()).limit(1)
+                                select(StoryCluster)
+                                .where(*notifiable_clauses())
+                                .order_by(StoryCluster.headline_score.desc())
+                                .limit(1)
                             )
                         ).scalar_one_or_none()
                     if top_story is None:
