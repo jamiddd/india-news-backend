@@ -962,7 +962,13 @@ def main() -> None:
     ins.add_argument("--baseline", action="store_true",
                      help="inspect PRE-REWORK behaviour (historical, not what runs today)")
     ins.add_argument("--shipped", action="store_true",
-                     help="inspect what production actually runs today (SHIPPED_PARAMS)")
+                     help="(default) inspect production's config; kept for "
+                          "explicitness, and every tuning flag below applies "
+                          "on top of it")
+    ins.add_argument("--proposal", action="store_true",
+                     help="the abandoned Phase 1 proposal (overlap metric, no "
+                          "same-source guard) — historical, almost never what "
+                          "you want")
     ins.add_argument("--limit", type=int, default=12)
     ins.add_argument("--min-size", type=int, default=2)
     for name, kind in (("metric", str), ("fields", str)):
@@ -971,6 +977,14 @@ def main() -> None:
     ins.add_argument("--simhash-max-distance", type=int)
     ins.add_argument("--min-shared", type=int)
     ins.add_argument("--no-simhash", action="store_true")
+    ins.add_argument("--simhash", action="store_true")
+    # The guard that stops templated single-outlet feeds (Yahoo Finance
+    # earnings transcripts, job listings) fusing into fake mega-clusters.
+    # It had no flag at all, which is why a config could only be inspected
+    # with the guard off.
+    ins.add_argument("--same-source-guard", action="store_true")
+    ins.add_argument("--no-same-source-guard", action="store_true")
+    ins.add_argument("--no-geo-guard", action="store_true")
 
     args = ap.parse_args()
 
@@ -996,32 +1010,55 @@ def main() -> None:
 
     if args.mode == "inspect":
         articles = load_fixture(args.fixture)
+
+        # Base config. SHIPPED is the default because the question this mode
+        # answers is almost always "what would production do if I changed X",
+        # and the previous default — an abandoned Phase 1 proposal running
+        # metric=overlap with NO same-source guard — silently answered a
+        # different question. It cost two sessions real time, once producing
+        # a 1,253-article blob that looked like evidence against a config
+        # nobody had proposed.
         if args.baseline:
             p = CURRENT_PARAMS
-        elif args.shipped:
-            # The only way to reproduce production here: there is no
-            # --same-source-guard flag, and that guard is exactly what stops
-            # templated single-outlet feeds fusing into fake mega-clusters.
-            p = SHIPPED_PARAMS
-        else:
-            # The Phase 1 proposal, overridable per flag.
+        elif args.proposal:
             p = replace(
                 CURRENT_PARAMS,
                 use_blocking=True, metric="overlap", fields="title",
                 threshold=0.5, min_shared=2, window_hours=48.0,
                 candidate_limit=None, compare_all_members=True,
             )
-            overrides = {
-                k: v for k, v in (
-                    ("metric", args.metric), ("fields", args.fields),
-                    ("threshold", args.threshold),
-                    ("simhash_max_distance", args.simhash_max_distance),
-                    ("min_shared", args.min_shared),
-                ) if v is not None
-            }
-            if args.no_simhash:
-                overrides["use_simhash"] = False
-            p = replace(p, **overrides)
+        else:
+            p = SHIPPED_PARAMS
+
+        # Overrides apply to whichever base was chosen. Previously this block
+        # lived inside the else, so --shipped ignored every tuning flag and
+        # printed SHIPPED while the caller believed they were looking at
+        # their candidate. Silent, and wrong in the direction that makes a
+        # config look safer than it is.
+        overrides = {
+            k: v for k, v in (
+                ("metric", args.metric), ("fields", args.fields),
+                ("threshold", args.threshold),
+                ("simhash_max_distance", args.simhash_max_distance),
+                ("min_shared", args.min_shared),
+            ) if v is not None
+        }
+        if args.no_simhash:
+            overrides["use_simhash"] = False
+        if args.simhash:
+            overrides["use_simhash"] = True
+        if args.no_same_source_guard:
+            overrides["same_source_guard"] = False
+        if args.same_source_guard:
+            overrides["same_source_guard"] = True
+        if args.no_geo_guard:
+            overrides["geo_guard"] = False
+        p = replace(p, **overrides)
+
+        # The label is printed by _inspect, but print the resolved config here
+        # too: a run whose flags did nothing should be obvious from the first
+        # line of output, not discoverable by noticing two runs matched.
+        print(f"RESOLVED  {p.label()}")
         _inspect(articles, p, args.limit, args.min_size)
         return
 
