@@ -31,8 +31,8 @@ from app.services.editorial_features import (
 
 async def main(target_date: date):
     async with AsyncSessionLocal() as session:
-        recent_words, recent_authors = await _recent_words_and_authors(session, target_date)
-        word, quote, source = await generate_word_and_quote(target_date, recent_words, recent_authors)
+        recent_words, recent_authors, used_keys = await _recent_words_and_authors(session, target_date)
+        word, quote, source = await generate_word_and_quote(target_date, recent_words, recent_authors, used_keys)
         print(f"source: {source}")
         print(f"word: {word['word']}")
         print(f"quote: {quote['quote']!r} — {quote['author']}")

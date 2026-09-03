@@ -113,7 +113,7 @@ async def regen_quote(session, puzzle_date: date) -> None:
     if existing is None:
         print("quote of the day: no existing editorial row for this date — run the app's normal endpoint first to create one")
         return
-    _, recent_authors = await _recent_words_and_authors(session, puzzle_date)
+    _, recent_authors, _ = await _recent_words_and_authors(session, puzzle_date)
     quote = await _apiverve_quote(recent_authors)
     if quote is None:
         print("quote of the day: APIVerve unavailable, left existing quote untouched")
