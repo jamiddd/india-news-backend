@@ -10,11 +10,14 @@ is a lookup, not a generation with a chance of failing.
 Puzzles are chosen by date ordinal. The generated files are shuffled at build
 time precisely so this walk doesn't serve near-identical puzzles on
 consecutive days, and both are large enough to run for years without
-repeating: ~3,000 Bee puzzles and 4,000 Ladder pairs.
+repeating: ~3,000 Bee puzzles and 4,000 Ladder pairs. The Wordle answer
+pool (~3,450 words) is written alphabetically rather than shuffled, so
+wordle_for walks it by a coprime stride instead of by +1 -- see there.
 """
 from __future__ import annotations
 
 import logging
+import math
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +30,12 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "wordlists"
 # per puzzle, because the pool is one 338 KB file whereas ~3,000 expanded word
 # lists would be several megabytes of near-duplicate data.
 BEE_MIN_LENGTH = 4
+
+# Coprime with the answer-pool size so the daily walk is a full-cycle
+# permutation rather than a subset. Asserted at read time in _wordle_answers
+# rather than assumed, because the pool size changes whenever the word lists
+# are rebuilt and a shared factor would silently shrink the rotation.
+WORDLE_STRIDE = 1009
 
 
 def _read(name: str) -> list[str]:
@@ -45,6 +54,23 @@ def _bee_answers() -> frozenset[str]:
 @lru_cache(maxsize=1)
 def _bee_puzzles() -> tuple[tuple[str, str], ...]:
     return tuple((row.split()[0], row.split()[1]) for row in _read("bee_puzzles.txt"))
+
+
+@lru_cache(maxsize=1)
+def _wordle_answers() -> tuple[str, ...]:
+    answers = tuple(_read("wordle_answers.txt"))
+    if answers and math.gcd(WORDLE_STRIDE, len(answers)) != 1:
+        raise ValueError(
+            f"WORDLE_STRIDE {WORDLE_STRIDE} shares a factor with the "
+            f"{len(answers)}-word answer pool; the daily walk would only "
+            f"reach {len(answers) // math.gcd(WORDLE_STRIDE, len(answers))} of them"
+        )
+    return answers
+
+
+@lru_cache(maxsize=1)
+def _wordle_guesses() -> frozenset[str]:
+    return frozenset(_read("wordle_guesses.txt"))
 
 
 @lru_cache(maxsize=1)
@@ -98,11 +124,49 @@ def word_ladder_for(puzzle_date: date) -> tuple[str, str, list[str], int]:
     return start.upper(), target.upper(), [word.upper() for word in _ladder_words()], steps
 
 
+def wordle_for(puzzle_date: date) -> tuple[str, list[str]]:
+    """(answer, accepted guesses) for the day.
+
+    The answer pool is SCOWL <= 35 (common words a general audience knows);
+    the guess list is the wider SCOWL <= 70, so the player can try words
+    that would never be chosen as an answer. Both are shipped to the client
+    — including the answer — so play works offline and scoring needs no
+    round trip, the same trade the Quiz makes with `correct_index`. The
+    answer is always a member of the guess list, so the client can validate
+    with one set.
+    """
+    answers = _wordle_answers()
+    # Unlike bee_puzzles.txt and ladder_puzzles.txt, which build_wordlists.py
+    # shuffles before writing, wordle_answers.txt is written sorted. Stepping
+    # +1 per day would hand out alphabetically adjacent answers on
+    # consecutive days (CLOUD, CLOUT, CLOVE...) -- a genuine hint for anyone
+    # who plays daily. WORDLE_STRIDE is coprime with the pool size, so the
+    # walk still visits every word exactly once before repeating, but lands
+    # far apart each day.
+    answer = answers[(puzzle_date.toordinal() * WORDLE_STRIDE) % len(answers)].upper()
+    guesses = sorted({word.upper() for word in _wordle_guesses()} | {answer})
+    return answer, guesses
+
+
+def accepted_guesses() -> list[str]:
+    """Every five-letter word the client should accept as a guess, uppercase.
+
+    Served per request instead of stored per puzzle -- it is identical every
+    day. Returns an empty list if the data files didn't ship, which the route
+    unions with the day's answer so the player can still type the solution.
+    """
+    try:
+        return sorted(word.upper() for word in _wordle_guesses())
+    except (OSError, ValueError) as exc:
+        logger.warning("Wordle guess list unavailable: %s", exc)
+        return []
+
+
 def available() -> bool:
     """False if the data files didn't ship, so callers can fall back rather
     than fail the whole day's games."""
     try:
-        return bool(_bee_puzzles()) and bool(_ladder_puzzles()) and bool(_bee_answers())
+        return bool(_bee_puzzles()) and bool(_ladder_puzzles()) and bool(_bee_answers()) and bool(_wordle_answers())
     except OSError as exc:
         logger.warning("Word list data unavailable: %s", exc)
         return False

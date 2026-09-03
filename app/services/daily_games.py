@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyQuiz, DailySpellingBee, DailyWordLadder
+from app.models import DailyQuiz, DailySpellingBee, DailyWordle, DailyWordLadder
 from app.services import wordlists
 from app.services.apiverve_client import call_apiverve
 
@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 # Same content filter used for the daily poll (app/services/polls.py) — keep
 # game content (quiz questions especially) away from sensitive subjects.
+# Classic Wordle rules: five letters, six tries. Shared with the client via
+# DailyWordleOut so the grid is sized from the payload rather than hardcoded.
+WORDLE_LENGTH = 5
+WORDLE_MAX_GUESSES = 6
+
 UNSAFE = re.compile(r"\b(killed|dies|death|rape|murder|lynch|riot|communal|terror|suicide|victim|accident|crash|flood|cyclone|earthquake|funeral|hostage)\b", re.I)
 
 SPELLING_BEES = [
@@ -45,6 +50,11 @@ WORD_LADDERS = [
     # removing the distractors, which would change the puzzle's design.
     ("SAME", "COST", ["SAME", "CAME", "CAMP", "COMP", "COOP", "COOT", "COST", "COME", "CAST", "CASE", "MOST"], 4),
 ]
+
+# Deterministic fallback answers if the committed word list doesn't ship.
+# Deliberately ordinary five-letter words; the client's accepted-guess list
+# comes from the same file, so this path also degrades to "answer only".
+WORDLE_FALLBACKS = ["CRANE", "PLANT", "SHORE", "BRICK", "MOUND", "SWIFT", "GLEAM"]
 
 QUIZ_SETS = [
     [
@@ -77,6 +87,10 @@ def _fallback_bee(puzzle_date: date) -> tuple[list[str], str, list[str]]:
 
 def _fallback_ladder(puzzle_date: date) -> tuple[str, str, list[str], int]:
     return WORD_LADDERS[puzzle_date.toordinal() % len(WORD_LADDERS)]
+
+
+def _fallback_wordle(puzzle_date: date) -> str:
+    return WORDLE_FALLBACKS[puzzle_date.toordinal() % len(WORDLE_FALLBACKS)]
 
 
 def _fallback_quiz_questions(puzzle_date: date) -> list[dict]:
@@ -251,6 +265,33 @@ async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], 
 
 
 # ---------------------------------------------------------------------------
+# Wordle
+# ---------------------------------------------------------------------------
+
+def _validate_wordle(answer: str, accepted: list[str]) -> str:
+    """The answer must be a five-letter word the client will also accept as a
+    guess -- otherwise the player can be locked out of typing the solution."""
+    answer = answer.strip().upper()
+    if len(answer) != WORDLE_LENGTH or not answer.isalpha():
+        raise ValueError(f"Answer must be {WORDLE_LENGTH} letters: {answer}")
+    if answer not in set(accepted):
+        raise ValueError(f"Answer {answer} is not in the accepted-guess list")
+    return answer
+
+
+async def generate_wordle(puzzle_date: date) -> tuple[str, str]:
+    """Straight from the committed SCOWL answer pool -- no AI, no APIVerve
+    (which has no Wordle generator at any tier). Returns (answer, source)."""
+    if wordlists.available():
+        try:
+            answer, accepted = wordlists.wordle_for(puzzle_date)
+            return _validate_wordle(answer, accepted), "wordlist"
+        except Exception as exc:
+            logger.error("Committed wordle list failed validation: %s", exc)
+    return _fallback_wordle(puzzle_date), "curated"
+
+
+# ---------------------------------------------------------------------------
 # Daily Quiz
 # ---------------------------------------------------------------------------
 
@@ -358,6 +399,12 @@ async def get_or_create_daily_games(session: AsyncSession, puzzle_date: date):
         ladder = DailyWordLadder(puzzle_date=puzzle_date, start_word=start, target_word=target, allowed_words=allowed, optimal_steps=optimal, source=source)
         session.add(ladder)
 
+    wordle = (await session.execute(select(DailyWordle).where(DailyWordle.puzzle_date == puzzle_date))).scalar_one_or_none()
+    if wordle is None:
+        answer, source = await generate_wordle(puzzle_date)
+        wordle = DailyWordle(puzzle_date=puzzle_date, answer=answer, source=source)
+        session.add(wordle)
+
     quiz = (await session.execute(select(DailyQuiz).where(DailyQuiz.puzzle_date == puzzle_date))).scalar_one_or_none()
     if quiz is None:
         questions, source = await generate_quiz(puzzle_date)
@@ -365,4 +412,4 @@ async def get_or_create_daily_games(session: AsyncSession, puzzle_date: date):
         session.add(quiz)
 
     await session.commit()
-    return bee, ladder, quiz
+    return bee, ladder, quiz, wordle

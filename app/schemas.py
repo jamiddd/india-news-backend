@@ -256,6 +256,14 @@ class DailyWordLadderOut(BaseModel):
     optimal_steps: int
 
 
+class DailyWordleOut(BaseModel):
+    date: date
+    answer: str
+    word_length: int
+    max_guesses: int
+    accepted_guesses: List[str]
+
+
 class DailyQuizQuestionOut(BaseModel):
     id: int
     question: str

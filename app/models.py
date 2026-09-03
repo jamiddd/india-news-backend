@@ -286,6 +286,19 @@ class DailyWordLadder(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class DailyWordle(Base):
+    __tablename__ = "daily_wordles"
+    id = Column(Integer, primary_key=True, index=True)
+    puzzle_date = Column(Date, nullable=False, unique=True, index=True)
+    answer = Column(String(10), nullable=False)
+    # The accepted-guess list is NOT stored per puzzle: it is the same ~6,400
+    # words every day, so a copy per row would be tens of megabytes of
+    # duplicate data. The route re-reads it from the committed word list at
+    # serve time, the same way Spelling Bee recomputes its word list.
+    source = Column(String(30), nullable=False, default="wordlist")
+    generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DailyQuiz(Base):
     __tablename__ = "daily_quizzes"
     id = Column(Integer, primary_key=True, index=True)

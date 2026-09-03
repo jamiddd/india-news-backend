@@ -56,7 +56,7 @@ from app.schemas import (
     CrosswordRevealRequest, CrosswordRevealResponse,
     DailySudokuOut,
     DailyWordSearchOut,
-    DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut,
+    DailySpellingBeeOut, DailyWordLadderOut, DailyQuizOut, DailyWordleOut,
     WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
     ReadEventRequest,
@@ -89,7 +89,8 @@ from scripts.send_notifications import main as run_send_notifications
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
-from app.services.daily_games import get_or_create_daily_games
+from app.services.daily_games import get_or_create_daily_games, WORDLE_MAX_GUESSES
+from app.services import wordlists
 from app.services.editorial_features import get_or_create_editorial
 from app.services.horoscope import get_or_create_horoscope
 from app.services.polls import IST, activate_poll, serialize_poll, voter_hash
@@ -619,14 +620,14 @@ async def daily_word_search(request: Request, date: str | None = Query(None), db
 @app.get(f"{settings.API_V1_STR}/spelling-bee/daily", response_model=DailySpellingBeeOut)
 @limiter.limit("30/minute")
 async def daily_spelling_bee(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    bee, _, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
+    bee, _, _, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {"date": bee.puzzle_date, "letters": bee.letters, "center_letter": bee.center_letter, "words": bee.words}
 
 
 @app.get(f"{settings.API_V1_STR}/word-ladder/daily", response_model=DailyWordLadderOut)
 @limiter.limit("30/minute")
 async def daily_word_ladder(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    _, ladder, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
+    _, ladder, _, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {
         "date": ladder.puzzle_date,
         "start_word": ladder.start_word,
@@ -636,10 +637,28 @@ async def daily_word_ladder(request: Request, date: str | None = Query(None), db
     }
 
 
+@app.get(f"{settings.API_V1_STR}/wordle/daily", response_model=DailyWordleOut)
+@limiter.limit("30/minute")
+async def daily_wordle(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
+    _, _, _, wordle = await get_or_create_daily_games(db, resolve_puzzle_date(date))
+    # Recomputed per request rather than stored per puzzle -- the same ~6,400
+    # words every day (see DailyWordle.answer's note). The answer is folded in
+    # so it is always typeable even on the "curated" fallback path, where it
+    # comes from WORDLE_FALLBACKS instead of the word list.
+    accepted = sorted(set(wordlists.accepted_guesses()) | {wordle.answer})
+    return {
+        "date": wordle.puzzle_date,
+        "answer": wordle.answer,
+        "word_length": len(wordle.answer),
+        "max_guesses": WORDLE_MAX_GUESSES,
+        "accepted_guesses": accepted,
+    }
+
+
 @app.get(f"{settings.API_V1_STR}/quiz/daily", response_model=DailyQuizOut)
 @limiter.limit("30/minute")
 async def daily_quiz(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    _, _, quiz = await get_or_create_daily_games(db, resolve_puzzle_date(date))
+    _, _, quiz, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
     return {"date": quiz.puzzle_date, "questions": quiz.questions}
 
 
