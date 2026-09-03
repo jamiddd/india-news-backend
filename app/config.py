@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     DEFAULT_POLL_INTERVAL_SECONDS: int = 300  # 5 minutes
     INGESTION_USER_AGENT: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36 (IndiaNewsApp Engine)"
 
+    # Minimum distinct outlets a story needs before it counts as
+    # corroborated. Today this only marks when a cluster crosses the line
+    # (StoryCluster.became_multi_source_at, written in poller.py) — the feed
+    # still shows everything. It becomes the actual feed gate in a later
+    # step; kept in config from the start so the threshold can be tightened
+    # without a code change if false merges show up at scale. See
+    # docs/multi-source-feed-plan.md.
+    FEED_MIN_DISTINCT_SOURCES: int = 2
+
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 

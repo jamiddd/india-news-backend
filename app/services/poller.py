@@ -467,6 +467,19 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
             if source.id not in cluster_source_ids[matched_cluster.id]:
                 matched_cluster.distinct_source_count += 1
                 cluster_source_ids[matched_cluster.id].add(source.id)
+                # Stamp the moment this story became corroborated. Tested as
+                # ">= threshold and not yet stamped" rather than "== threshold"
+                # so it still fires for a cluster that arrives past the line
+                # (a repair script, or FEED_MIN_DISTINCT_SOURCES being lowered
+                # after rows already exist) instead of silently never being
+                # set. Write-once: the first crossing is the one the feed
+                # orders and ages on. See models.py StoryCluster.
+                if (
+                    matched_cluster.became_multi_source_at is None
+                    and matched_cluster.distinct_source_count
+                    >= settings.FEED_MIN_DISTINCT_SOURCES
+                ):
+                    matched_cluster.became_multi_source_at = utc_now()
                 # A new outlet changes what the enrichment should say: the
                 # summary now has more coverage to synthesise, and the framing
                 # comparison must list this outlet too. enrich_clusters only

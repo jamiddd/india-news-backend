@@ -433,6 +433,29 @@ class StoryCluster(Base):
     first_seen_at = Column(DateTime(timezone=True), default=utc_now, index=True)
     last_updated_at = Column(DateTime(timezone=True), default=utc_now, index=True)
 
+    # When this cluster earned its FEED_MIN_DISTINCT_SOURCES'th distinct
+    # outlet — i.e. when it became corroborated — as opposed to
+    # first_seen_at, which is when its first article appeared. NULL for
+    # clusters that never got there. Set once, in poller.py's matching loop
+    # at the same crossing that triggers re-enrichment; never rewritten, so
+    # it inherits first_seen_at's immunity to the last_updated_at drift
+    # described in main.py's LISTING_MAX_AGE comment.
+    #
+    # Listings age-filter on COALESCE(became_multi_source_at, first_seen_at)
+    # rather than first_seen_at alone. The two moments can be hours apart —
+    # median 238 minutes for stories that stop at two outlets — so a story
+    # first seen at 09:00 and corroborated at 12:00 would otherwise enter a
+    # corroboration-based feed already three hours into its 4-day window,
+    # aged out early and buried on arrival for the user it is new to.
+    # See docs/multi-source-feed-plan.md §5.B.
+    # No index=True: the indexes this column needs are not the plain
+    # single-column one create_all would build — a partial index for
+    # "is it corroborated" queries and an expression index for the
+    # COALESCE listing filter. Both live in
+    # scripts/add_became_multi_source_at.py, the same split headline_score
+    # already uses.
+    became_multi_source_at = Column(DateTime(timezone=True), nullable=True)
+
     # none_as_null=True on all three: SQLAlchemy's JSON type defaults to
     # none_as_null=False, which persists Python None as the JSON *value*
     # `null` rather than SQL NULL. These three columns are all explicitly set

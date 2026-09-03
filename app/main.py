@@ -148,8 +148,9 @@ def _parse_source_weights(raw: Optional[str]) -> dict:
         weights[sid] = weight
     return weights
 
-# Clusters older than this (by first_seen_at — when the story actually first
-# appeared, not last_updated_at) never surface in listings, in either feed.
+# Clusters older than this (by _listing_age_anchor below — when the story
+# actually first appeared, or was first corroborated; never last_updated_at)
+# never surface in listings, in either feed.
 # Added after finding stale singleton crypto clusters (some from 2022)
 # ranking as if fresh: their last_updated_at had been bulk-touched to "now"
 # by an out-of-band write unrelated to any real new coverage, which both
@@ -160,6 +161,24 @@ def _parse_source_weights(raw: Optional[str]) -> dict:
 # corruption — filtering on it is a hard backstop regardless of what causes
 # last_updated_at to drift.
 LISTING_MAX_AGE = timedelta(days=4)
+
+
+def _listing_age_anchor():
+    """The timestamp a cluster's listing age is measured from.
+
+    COALESCE(became_multi_source_at, first_seen_at): for a corroborated
+    story, its clock starts when it earned its second outlet, not when its
+    first article appeared. Those two moments have a median gap of ~4 hours
+    for stories that stop at two outlets, so anchoring on first_seen_at
+    spends a large slice of the 4-day window before the story was even
+    presentable as comparative coverage. Falls back to first_seen_at for
+    single-source clusters, which is exactly today's behaviour — and for
+    rows the migration backfilled, since it backfilled from first_seen_at.
+    See models.py StoryCluster.became_multi_source_at.
+    """
+    return func.coalesce(
+        StoryCluster.became_multi_source_at, StoryCluster.first_seen_at
+    )
 
 # See _truncate_content_preview / ArticleListOut.content.
 CONTENT_PREVIEW_CHAR_LIMIT = 600
@@ -1024,7 +1043,7 @@ async def list_story_clusters(
 
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).selectinload(Article.source)
-        ).where(StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE)
+        ).where(_listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
 
         if min_sources:
             query = query.where(StoryCluster.distinct_source_count >= min_sources)
@@ -1264,7 +1283,7 @@ async def list_for_you_clusters(
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
         .where(
-            StoryCluster.first_seen_at >= utc_now() - LISTING_MAX_AGE,
+            _listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
             StoryCluster.entities.isnot(None),
         )
         .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
