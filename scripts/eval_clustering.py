@@ -814,7 +814,9 @@ def main() -> None:
     ins = sub.add_parser("inspect", help="show a config's merges (no labels/API needed)")
     ins.add_argument("--fixture", required=True)
     ins.add_argument("--baseline", action="store_true",
-                     help="inspect current production behaviour instead")
+                     help="inspect PRE-REWORK behaviour (historical, not what runs today)")
+    ins.add_argument("--shipped", action="store_true",
+                     help="inspect what production actually runs today (SHIPPED_PARAMS)")
     ins.add_argument("--limit", type=int, default=12)
     ins.add_argument("--min-size", type=int, default=2)
     for name, kind in (("metric", str), ("fields", str)):
@@ -850,6 +852,11 @@ def main() -> None:
         articles = load_fixture(args.fixture)
         if args.baseline:
             p = CURRENT_PARAMS
+        elif args.shipped:
+            # The only way to reproduce production here: there is no
+            # --same-source-guard flag, and that guard is exactly what stops
+            # templated single-outlet feeds fusing into fake mega-clusters.
+            p = SHIPPED_PARAMS
         else:
             # The Phase 1 proposal, overridable per flag.
             p = replace(
