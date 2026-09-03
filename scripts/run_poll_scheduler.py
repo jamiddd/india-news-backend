@@ -58,21 +58,25 @@ async def main():
         try: await connection.run_sync(Base.metadata.create_all)
         finally: await connection.execute(text("SELECT pg_advisory_unlock(918273645)"))
     async with AsyncSessionLocal() as session: await seed_fallbacks(session)
+    # One action per pass, then sleep and re-evaluate. The loop used to do
+    # two — a catch-up for the current window, then a second action after the
+    # sleep — which meant the next pass repeated whatever the sleep had just
+    # done. Every draft and every publish ran twice (visible as doubled lines
+    # in docker logs), and on a day where drafting failed that was two full
+    # sets of Claude retries instead of one.
     while True:
         now = datetime.now(IST)
         draft_at = datetime.combine(now.date(), time(4, 30), tzinfo=IST)
         publish_at = datetime.combine(now.date(), time(9), tzinfo=IST)
         if now >= publish_at:
             await publish(now.date())
-            next_run, action = datetime.combine(now.date() + timedelta(days=1), time(4, 30), tzinfo=IST), "draft"
+            next_run = datetime.combine(now.date() + timedelta(days=1), time(4, 30), tzinfo=IST)
         elif now >= draft_at:
             await prepare(now.date())
-            next_run, action = publish_at, "publish"
+            next_run = publish_at
         else:
-            next_run, action = draft_at, "draft"
+            next_run = draft_at
         await asyncio.sleep(max(1, (next_run - datetime.now(IST)).total_seconds()))
-        if action == "draft": await prepare(next_run.date())
-        else: await publish(next_run.date())
 
 
 if __name__ == "__main__":

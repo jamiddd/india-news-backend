@@ -63,3 +63,35 @@ def test_appends_missing_question_mark():
         "options": ["Yes", "No"],
     })
     assert question.endswith("?")
+
+
+
+def test_poll_scheduler_runs_each_action_once_per_day():
+    """The loop used to act twice per pass — a catch-up action, then a second
+    one after the sleep, which the next pass then repeated. Doubled every
+    draft and publish, and doubled the Claude retries on a failing day."""
+    from datetime import datetime, time, timedelta
+    from collections import Counter
+
+    def simulate(start: datetime, passes: int = 40) -> list[tuple[str, date]]:
+        """Mirrors main()'s scheduling decisions with a fake clock, where
+        sleeping jumps straight to next_run."""
+        now, log = start, []
+        for _ in range(passes):
+            draft_at = datetime.combine(now.date(), time(4, 30))
+            publish_at = datetime.combine(now.date(), time(9))
+            if now >= publish_at:
+                log.append(("publish", now.date()))
+                next_run = datetime.combine(now.date() + timedelta(days=1), time(4, 30))
+            elif now >= draft_at:
+                log.append(("prepare", now.date()))
+                next_run = publish_at
+            else:
+                next_run = draft_at
+            now = next_run
+        return log
+
+    for start_hour in (0, 5, 10, 23):
+        log = simulate(datetime(2026, 9, 3, start_hour, 0))
+        repeated = [entry for entry, count in Counter(log).items() if count > 1]
+        assert not repeated, f"start {start_hour}:00 repeated {repeated}"
