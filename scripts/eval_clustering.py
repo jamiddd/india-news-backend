@@ -187,8 +187,32 @@ class Params:
         return " ".join(bits)
 
 
-# Reproduces production behaviour as of 2026-09-02. The baseline to beat.
+# Reproduces production behaviour BEFORE the 2026-09-02 clustering rework.
+# Kept as the historical baseline every candidate had to beat — it is no
+# longer what production runs.
 CURRENT_PARAMS = Params()
+
+# What production ACTUALLY runs, read from source (app/services/dedup.py
+# MIN_TITLE_JACCARD/MIN_SHARED_TOKENS, app/services/poller.py
+# CLUSTER_MATCH_WINDOW and its matching loop), not from the handoff doc.
+#
+# This exists because `CURRENT_PARAMS` silently stopped describing production
+# the moment the rework shipped, so a `grid` run reported its baseline against
+# an algorithm nobody was using. Any change to the constants above must be
+# mirrored here, or this harness quietly measures fiction.
+SHIPPED_PARAMS = Params(
+    use_simhash=False,          # simhash dropped as a gate by the rework
+    metric="jaccard",
+    fields="title",             # title tokens only, not title+snippet
+    threshold=0.40,             # dedup.MIN_TITLE_JACCARD
+    min_shared=2,               # dedup.MIN_SHARED_TOKENS
+    same_source_guard=True,     # poller skips same-source members
+    use_blocking=True,          # cluster_tokens index
+    window_hours=48.0,          # poller.CLUSTER_MATCH_WINDOW
+    candidate_limit=None,
+    compare_all_members=True,
+    geo_guard=True,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -692,8 +716,12 @@ def _score_one(args_tuple):
 def _grid(articles: List[dict], labels: Dict[str, str], top: int,
           out_json: Optional[str] = None) -> None:
     base = score(articles, labels, CURRENT_PARAMS)
-    print("\nBASELINE (current production behaviour)")
+    print("\nBASELINE (pre-rework, historical)")
     _print_row(CURRENT_PARAMS.label(), base)
+
+    shipped = score(articles, labels, SHIPPED_PARAMS)
+    print("\nSHIPPED (what production runs today)")
+    _print_row(SHIPPED_PARAMS.label(), shipped)
 
     keys = list(GRID)
     configs = []
