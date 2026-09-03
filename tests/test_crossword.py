@@ -26,7 +26,11 @@ def test_fallback_is_public_11_by_11_and_fully_clued():
 def test_validator_rejects_asymmetric_blocks():
     puzzle = legacy_fallback_puzzle()
     rows = list(puzzle["solution"])
-    rows[0] = ".##########"
+    # "#" for the blocks, not ".". The grid-character check runs BEFORE the
+    # symmetry check, so a "." row failed with "Grid may contain only A-Z
+    # and #" and this test never reached the rule it names — the symmetry
+    # check had no coverage at all while appearing to have some.
+    rows[0] = "A##########"
     with pytest.raises(ValueError, match="symmetry"):
         validate_and_normalize({"rows": rows, "clues": puzzle["clues"]})
 

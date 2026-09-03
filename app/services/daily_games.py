@@ -35,7 +35,15 @@ WORD_LADDERS = [
     ("HEAD", "TAIL", ["HEAD", "HEAL", "TEAL", "TELL", "TALL", "TAIL", "HEAT", "HAIL", "HALL", "TEAM"], 5),
     ("LEAD", "GOLD", ["LEAD", "LOAD", "GOAD", "GOLD", "LORD", "ROAD", "READ", "BEAD", "BOLD", "COLD"], 3),
     ("FOUR", "FIVE", ["FOUR", "FOUL", "FOIL", "FAIL", "FALL", "FILL", "FILE", "FIVE", "FIRE", "FINE", "FIRM"], 7),
-    ("SAME", "COST", ["SAME", "CAME", "CAMP", "COMP", "COOP", "COOT", "COST", "COME", "CAST", "CASE", "MOST"], 6),
+    # optimal_steps was 6, describing the intended SAME-CAME-CAMP-COMP-COOP-
+    # COOT-COST route. But CASE and CAST are in the allowed list as
+    # distractors, and they open a shorter one:
+    #     SAME -> CAME -> CASE -> CAST -> COST
+    # _validate_ladder's BFS re-derives the true optimum and already
+    # overrode this to 4 at runtime (logging a warning every time), so the
+    # constant was the only thing that was wrong. Corrected rather than
+    # removing the distractors, which would change the puzzle's design.
+    ("SAME", "COST", ["SAME", "CAME", "CAMP", "COMP", "COOP", "COOT", "COST", "COME", "CAST", "CASE", "MOST"], 4),
 ]
 
 QUIZ_SETS = [
