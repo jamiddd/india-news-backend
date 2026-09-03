@@ -166,33 +166,94 @@ presentable — on a feed whose whole value is corroborated stories.
 ### E. Delete the doubling gate
 
 `should_reenrich_on_new_outlet()` (thresholds 2, 4, 8, 16) was a cost fix for a
-problem this plan removes. At ~350 qualifying clusters/day, re-enriching on
-**every** new outlet costs ~$0.70/day more and keeps the summary and framing
-comparison correct as coverage grows. Framing that lists 3 outlets when the
-story now has 6 is the staleness bug seen on 2026-09-03.
+problem this plan removes. Framing that lists 3 outlets when the story now has
+6 is the staleness bug seen on 2026-09-03.
 
 Delete the gate; restore per-outlet re-enrichment.
 
+Cost of doing so, corrected 2026-09-03 after measuring full-content tokens:
+average 2.39 sources/cluster means ~1.39 enrichments per cluster (487 calls/day)
+versus ~1.09 with the gate (382 calls/day). That is **~$1.50/day (~$45/month)**,
+not the ~$0.70/day claimed in the first draft of this plan. Still worth paying
+for correct framing, but it is a real trade, not a rounding error — revisit if
+multi-source volume grows past ~700/day.
+
 ### F. Use the article content we already scrape
 
-`enrichment.py` sends `(art.snippet or "")[:250]`. Send `content` (avg ~2,985
-chars, present on 82% of articles), falling back to snippet.
+`enrichment.py` sends `(art.snippet or "")[:250]`. Send `content` instead
+(avg ~2,985 chars, present on 82% of articles), falling back to snippet.
 
-Per-call cost rises (~700 → ~1,450 input tokens) but total falls sharply
-because volume drops 93%. Estimate: **~$85-110/month vs ~$292 today**, with
-summaries built from ~473 words instead of ~40.
+Two caps, and they are the knobs that bound input cost as volume grows:
+`CONTENT_CAP = 1500` chars per article and `MAX_ARTICLES = 6` per cluster —
+without the second, one 29-article cluster dominates a run.
 
-### G. Notifications
+Measured with the `count_tokens` endpoint (free) over 25 real multi-source
+clusters, mean 3.16 articles each after the cap:
+
+| | mean input tokens |
+|---|---|
+| snippet-only (today) | 1,361 |
+| **full content, caps applied** | **2,527** (median 2,069, max 4,519) |
+
+Summaries are then built from ~473 words instead of ~40.
+
+### G. Batch API for enrichment  (decided 2026-09-03)
+
+Enrichment is background work triggered by a timer or the poller, with no user
+waiting on the response, so asynchronous processing costs nothing in product
+terms. The Batch API runs the same requests at **50% of the price**.
+
+This halves whatever the rest of the plan lands on and stacks with every other
+lever, which is why it is part of the plan rather than a follow-up.
+
+Turnaround is asynchronous — usually minutes, up to 24h. A cluster can
+therefore sit corroborated-but-unenriched for a while, showing its original RSS
+headline. Acceptable, but it interacts with §5.D: the *event-driven* path
+should stay synchronous for the 1→2 crossing (that is the story entering the
+feed), and batching applies to the re-enrichment passes at 3, 4, 5... outlets,
+which are refinements nobody is waiting for.
+
+### H. Notifications
 
 `breaking` currently selects on `headline_score`, which is useless at this
 scale (11 of 29,241 clusters score >= 1). It must also require multi-source, or
 it will push exactly the single-source stories the feed hides.
 
-### H. Android client
+### I. Android client
 
 If the API filters, the client needs no query change. It does need:
 - an empty/quiet-period state (feed is ~350/day, not ~4,800)
 - refresh behaviour — see §6
+
+### J. Cost summary
+
+All figures measured 2026-09-03: input tokens via `count_tokens` on 25 real
+clusters, output tokens (369, rounded to 450 for more outlets in the framing
+list) from live calls, volume from the eval replay. Sonnet 5 at $3/$15 per
+MTok, Haiku 4.5 at $1/$5.
+
+Per Sonnet call with full content: 2,527 in + 450 out = **$0.0143**.
+At 487 calls/day (350 clusters x 1.39 enrichments):
+
+| Scenario | $/day | $/month |
+|---|---|---|
+| Today (every singleton, snippets only) | $9.70 | $292 |
+| Plan, Sonnet, full content, per-outlet | $6.98 | $210 |
+| Plan + keep the doubling gate | $5.47 | $164 |
+| **Plan + Batch API  (chosen)** | **$3.49** | **$105** |
+| Plan on Haiku instead of Sonnet | $2.33 | $70 |
+
+**The scaling caveat is the important line here.** These assume ~350
+multi-source clusters/day. This plan deliberately grows that by adding
+overlapping sources, and lifting recall from 0.542 would roughly double it
+again. At 700/day the cost doubles — **~$7/day even with batching**, i.e. back
+to roughly today's spend while serving a far better product. Cost scales with
+exactly the thing the plan is trying to increase, so `CONTENT_CAP`,
+`MAX_ARTICLES` and the model choice should stay configurable.
+
+An earlier draft of this section estimated $85-110/month. That was wrong — it
+predated the token measurement and assumed 250 clusters/day with snippet-sized
+inputs. The real saving versus today is ~64% with batching, not ~70% without.
 
 ---
 
@@ -235,15 +296,21 @@ moves nothing.
 ## 7. Sequencing
 
 1. **B** (`became_multi_source_at` + migration) — everything else orders on it.
-2. **C + F** (gate enrichment, use full content) — cost falls immediately,
-   independent of any client change.
-3. **A** (feed gate, behind config, default off) — flip on when ready.
-4. **D + E** (event-driven enrichment, drop the doubling gate).
-5. **G** (notifications).
-6. **H** (client empty state).
+2. **C + F** (gate enrichment to multi-source, use full content) — this is
+   where the cost drop happens, and it needs no client change.
+3. **G** (Batch API for the re-enrichment passes) — halves whatever 2 lands on.
+4. **A** (feed gate, behind config, default off) — flip on when ready.
+5. **D + E** (event-driven enrichment, drop the doubling gate).
+6. **H** (notifications must require multi-source too, or they push exactly
+   the stories the feed hides).
+7. **I** (client empty state).
 
-Recall work (Phase 2 embeddings) runs in parallel and is the long pole for
-feed density.
+Steps 1-3 are backend-only and independently useful: they cut spend ~64% and
+improve summary quality whether or not the feed gate ever ships. Step 4 is the
+product commitment and the one to think hardest about.
+
+Recall work (Phase 2 embeddings) runs in parallel and is the long pole for feed
+density.
 
 ---
 
@@ -255,6 +322,13 @@ feed density.
   both printed and are the numbers used above. Re-run with fewer workers if a
   better config is wanted; the shipped config was selected by this same grid
   during the rework, so it is unlikely to be beaten by its own sweep.
-- Cost figures in §5.F are estimates from measured per-call token counts
-  (Haiku 707/219, Sonnet 1,143/369) times projected volume — not billing data.
+- Cost figures in §5.J combine measured token counts (`count_tokens` over 25
+  real clusters for input; live calls for output) with projected volume from
+  the eval replay. They are not billing data — the account key is a regular
+  API key, so actual spend has to be read from console.anthropic.com.
+- Output tokens are assumed flat at 450/call as outlet count rises. Framing
+  entries scale with outlets, so this likely under-estimates slightly for
+  large clusters.
+- The 50% Batch API saving is list pricing, not something measured on this
+  workload.
 - Read-rate figures are directional only at 110 reads/week.
