@@ -42,7 +42,7 @@ not the cost problem. Entertainment is only 4.4% of volume.
 
 ## 2. What is live in production right now
 
-Both droplets (`newsapp`, `newsapp-2`) are on **`911db4d`**.
+Both droplets (`newsapp`, `newsapp-2`) are on **`2d89631`** (as of 2026-09-03).
 
 ### Shipped clustering config
 
@@ -85,15 +85,13 @@ exactly, so **the harness can be trusted** for future tuning.
 
 ## 3. START HERE TOMORROW
 
-### a) Deploy the pending commit — `2d89631`
+*All of (a)-(e) completed 2026-09-03. Next: Phase 5 (curated front page) in §4.
+Open threads: 7 unexplained post-fix fabrications; 95.6% vs 91.9%
+singleton-rate gap.*
 
-Pushed but **NOT deployed**. Nothing is broken while it waits.
+### a) Deploy the pending commit — `2d89631` — ✅ DONE (2026-09-03)
 
-```
-cd /root/india-news-backend && git pull
-docker compose -f docker-compose.prod.yml up -d --build
-```
-Same on `newsapp-2`.
+Deployed to both droplets. Production is now on `2d89631`.
 
 **What it fixes:** `enrich_clusters` selects only
 `entities IS NULL OR ai_enriched IS FALSE`, so a cluster enriched while it was
@@ -102,31 +100,103 @@ outlets it later gains. **202 clusters already had fewer framing entries than
 they had sources**, including a 3-outlet story on the front page whose framing
 listed one outlet. Not invented like the old bug, but identical to a user.
 
-### b) Rotate the Anthropic API key — SECURITY
+### b) Rotate the Anthropic API key — SECURITY — ✅ DONE (2026-09-03)
 
-The live key was pasted into the 2026-09-02 session transcript. Treat as
-compromised. Regenerate, update `.env` on **both** droplets, `up -d`.
+Key rotated and `.env` updated on both droplets. The old key was pasted into
+the 2026-09-02 session transcripts (both `e2c9f5d9` and `11ce9c53`) and is
+dead. Never paste a live key into a prompt — export it in the shell instead.
 
-### c) Purge historical fabrications
+### c) Purge historical fabrications — DONE (2026-09-03)
 
-~42,000 rows. Dry run first:
-```
-docker compose -f docker-compose.prod.yml run --rm app python scripts/purge_fabricated_framing.py
-# then --apply
-```
-Deferred deliberately overnight so clustering could first promote singletons
-that now deserve real framing.
+Applied. **47,164 rows nulled**, 536 legitimate multi-outlet framings kept.
 
-**Important:** the purge does NOT fix the 202 stale-framing clusters. Its
-predicate is `<2 distinct sources`; those now legitimately have 2+. They are
-repaired by re-enrichment (item a), not by purging. Two different problems
-that look identical in the app.
+| Check after apply | Result |
+|---|---|
+| Clusters with `framing_comparison` | 47,700 -> **536** |
+| Remaining with <2 distinct sources | **0** |
+| `json_typeof = 'null'` rows | **0** (100 normalised to SQL NULL) |
+| `entities` / `summary` untouched | 48,643 / 50,112 intact |
 
-### d) Re-check the numbers over a full day
+`framing_comparison IS NULL` now means what it says everywhere, so any future
+query can trust it. The 7 post-fix fabrications from (d) were inside the
+predicate and went with them — the question of how they were created is still
+open, but the rows are gone.
 
-Tonight's merge rate came from ~180 articles (~40 min). Re-measure over
-several thousand. The 30-day multi-source count should climb off its 418
-baseline visibly.
+### e) Repair the 199 stale-framing clusters — DONE (2026-09-03)
+
+The purge did NOT cover these (their predicate is 2+ distinct sources, so they
+sat in the 536 kept). Repaired by forced re-enrichment: **199 -> 0**, 0
+failures, ~20 min, all on `claude-sonnet-5`.
+
+**They could never have self-healed.** 197 of 199 had `ai_enriched = True`, so
+the default selection (`entities IS NULL OR ai_enriched IS FALSE`) skipped them
+permanently, and all predated the timer's `since_days=0.5` window. Targeted
+force re-enrichment was the only route.
+
+178 of them carried a *single* framing entry despite 2+ outlets. Worst cases
+were the best stories — id 23914 (Trump/Lake Ontario) had 7 outlets including
+Reuters, BBC, Al Jazeera and the Guardian, and framing for 2. After: 7/7.
+
+**How it was run** (no deploy, no committed code): a one-off script piped into
+the running container over `docker exec -i news_backend_prod python -u -`,
+loading the 199 ids with the same
+`selectinload(...).load_only(title, snippet, source_id)` the timer uses, so it
+did not drag article bodies over metered Supabase egress. `enrich_cluster_with_ai`
+commits per cluster, so a mid-run failure leaves completed work repaired.
+
+**Re-enrichment regenerates headline and summary too**, not just framing. That
+was accepted deliberately — the new values come from better cluster membership
+than the originals had.
+
+**The stale metric has a transient floor — do not chase it to zero.** Nine
+clusters were flagged immediately after the run; all nine were created *during*
+it, all `ai_enriched = False`, carrying rule-based baseline framing while
+waiting for the next 20-min timer pass. Newly-created clusters always look
+"stale" for up to ~20 minutes. Only clusters with `ai_enriched = True` and
+`entries < distinct_source_count` are genuinely broken.
+
+**Note on framing entry shape.** The AI path emits
+`{"outlet", "headline_angle"}`; the older rule-based baseline also wrote
+`headline`. Dropping it is safe and intended — the prompt's output spec has no
+`headline`, the API schema is `Optional[Any]` passthrough, and the Android
+`FramingItem.headline` is nullable and rendered nowhere (StoryDetailScreen
+shows `outlet` + `headlineAngle` only, gated on `distinctOutletCount > 1`).
+
+### d) Re-check the numbers over a full day — DONE (2026-09-03 02:52 UTC)
+
+**Verdict: the clustering fix holds.** Re-measured over 922 articles.
+
+**Measure against the deploy boundary, not a rolling 24h.** The container
+restarted `2026-09-02 18:30:32 UTC`, so a "last 24h" window is ~two-thirds
+pre-fix and makes the results look like a total failure — a naive 24h query
+reports 3,274 single-source clusters carrying framing, of which only **7** are
+actually post-fix. Cut every query at that timestamp.
+
+Post-fix window (8.4h, 922 articles, 572 clusters created):
+
+| Metric | Before | 2026-09-02 spot check | 2026-09-03 |
+|---|---|---|---|
+| Articles landing in multi-article clusters | ~1.4% | 10.4% (n=180) | **17.0%** (157/922) |
+| Clusters with 2+ distinct sources | 0.9% | — | **4.4%** (25/572) |
+| Largest cluster (guard: 60) | — | — | **7** — no blobs |
+| Clusters enriched | — | — | 560/572 |
+
+30-day rollups are still dominated by pre-fix history and will be until the
+purge runs: 50,112 clusters, 98.3% singletons. The multi-source count has
+climbed **418 -> 545**, which is the number to watch.
+
+**Open: 7 post-fix fabrications.** Single-article, single-source, one framing
+entry each, all created 18:37-22:10 UTC and none since. Ruled out: stale code
+in the container (the gate is present at `enrichment.py:349`),
+`distinct_source_count()` (correct), and a stale enrich path (the timer curls
+the same container). Leading hypothesis: they had 2 distinct sources at
+enrichment time and lost an article afterwards - all 7 have
+`last_updated_at == first_seen_at`, i.e. enriched at creation, yet hold one
+article now. 1.2% of the window; not the old failure mode.
+
+**Watch:** the offline grid predicted a 91.9% singleton rate; production is
+running 95.6%. Different denominators, so not alarming - but interrogate this
+gap before spending effort on Phase 2 embeddings.
 
 ---
 
@@ -225,8 +295,8 @@ so `git pull` alone does not update a running container. Use
 | `f79ac02` | `validate_clustering.py` read-only dry run |
 | `0ca7d07` | Framing gate, overwrite-bug fix, timer cap, purge script |
 | `b71c24e` | `none_as_null=True` on JSON columns |
-| `911db4d` | Missing import + poll-cycle containment ← **deployed** |
-| `2d89631` | Re-enrich on new outlet ← **pushed, NOT deployed** |
+| `911db4d` | Missing import + poll-cycle containment |
+| `2d89631` | Re-enrich on new outlet ← **deployed 2026-09-03** |
 
 **Key scripts**
 - `scripts/eval_clustering.py` — `fetch` / `pairs` / `label` / `grid` /
