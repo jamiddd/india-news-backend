@@ -71,6 +71,7 @@ from uuid import uuid4
 from app.services.poller import poll_all_sources
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.feed_gate import apply_feed_gate, gate_cache_marker
 from app.services.related_stories import find_related_clusters
 from scripts.enrich_all_clusters import enrich_clusters
 
@@ -917,7 +918,8 @@ async def search_story_clusters(
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
-    cache_key = f"cache:search:{q}:{limit}:{cursor or ''}"
+    gate = gate_cache_marker()
+    cache_key = f"cache:search:{gate}:{q}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
@@ -934,6 +936,7 @@ async def search_story_clusters(
         )
         .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
     )
+    query = apply_feed_gate(query)
 
     if cursor:
         query = query.where(StoryCluster.id < cursor)
@@ -1019,7 +1022,8 @@ async def list_story_clusters(
     # v3: ArticleListOut gained a truncated `content` preview field — bump
     # the key so caches from before that change don't serve stale null
     # content until their TTL naturally expires.
-    cache_key = f"cache:clusters:v3:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{min_sources or ''}:{source_id or ''}"
+    gate = gate_cache_marker()
+    cache_key = f"cache:clusters:v3:{gate}:{category or 'all'}:{limit}:{cursor or ''}:{source_weights or ''}:{min_sources or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
 
     is_source_filter = source_id is not None
@@ -1044,6 +1048,7 @@ async def list_story_clusters(
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).selectinload(Article.source)
         ).where(_listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
+        query = apply_feed_gate(query)
 
         if min_sources:
             query = query.where(StoryCluster.distinct_source_count >= min_sources)
@@ -1279,13 +1284,16 @@ async def list_for_you_clusters(
     # sources) don't meaningfully benefit from a deeper window, and this
     # halves how many clusters' full articles get hydrated for a request
     # that only returns `limit` (<=50) of them.
-    candidates_result = await db.execute(
+    candidates_query = apply_feed_gate(
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
         .where(
             _listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
             StoryCluster.entities.isnot(None),
         )
+    )
+    candidates_result = await db.execute(
+        candidates_query
         .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
         .limit(100)
     )

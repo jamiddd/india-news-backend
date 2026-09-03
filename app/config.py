@@ -46,6 +46,20 @@ class Settings(BaseSettings):
     # docs/multi-source-feed-plan.md.
     FEED_MIN_DISTINCT_SOURCES: int = 2
 
+    # The feed gate itself: when true, listings show only stories with at
+    # least FEED_MIN_DISTINCT_SOURCES distinct outlets. Default OFF — this
+    # is the product commitment in docs/multi-source-feed-plan.md, not a
+    # backend cleanup, and it wants to be switched on deliberately (and
+    # switched back off in one env var if the feed turns out too thin).
+    #
+    # Everything else keyed on FEED_MIN_DISTINCT_SOURCES — the crossing
+    # stamp, the enrichment gate — runs regardless of this flag, so the data
+    # the gated feed needs is already being produced before it is turned on.
+    #
+    # Detail-by-id is deliberately never gated: an existing deep link,
+    # notification, or saved story must still open.
+    FEED_GATE_ENABLED: bool = False
+
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 

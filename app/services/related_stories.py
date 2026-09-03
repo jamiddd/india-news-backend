@@ -22,6 +22,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy import text
 
 from app.services.entity_graph import canonicalize_entity
+from app.services.feed_gate import gate_cache_marker, gate_min_sources
 from app.redis_client import get_redis_client
 
 DAYS = 60
@@ -73,7 +74,9 @@ class TopicGroup:
 
 
 async def load_clusters(conn, days: int) -> List[Cluster]:
-    cache_key = f"cache:related:clusters:{days}"
+    # Gate state in the key, same reason as the listing caches in main.py.
+    gate = gate_cache_marker()
+    cache_key = f"cache:related:clusters:{gate}:{days}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return [
@@ -96,10 +99,18 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
                    distinct_source_count
             FROM story_clusters
             WHERE first_seen_at >= :cutoff
+              AND distinct_source_count >= :min_sources
             ORDER BY first_seen_at ASC
             """
         ),
-        {"cutoff": cutoff},
+        # Related stories are a listing like any other: with the gate on, a
+        # corroborated story must not link out to single-source ones the
+        # feed itself hides. 1 is the no-op floor when the gate is off,
+        # since distinct_source_count is never below 1.
+        {
+            "cutoff": cutoff,
+            "min_sources": gate_min_sources(),
+        },
     )
     clusters = []
     for row in result:

@@ -15,6 +15,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import StoryCluster, Article, utc_now
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.job_lease import job_lease
 from app.services.enrichment_batch import (
     reconcile_open_batches,
     submit_refinement_batch,
@@ -26,6 +27,17 @@ from app.services.enrichment_batch import (
 # bounded by the window itself, so it uses --limit (default None = no cap)
 # instead of this.
 DEFAULT_BATCH_LIMIT = 50
+
+
+# Both droplets run infra/news-enrich.timer against the same database, so
+# two enrichment runs fire every 20 minutes with nothing between them. That
+# was already a double-spend — two runs selecting the same unenriched
+# clusters and paying for both — and the Batch API path makes it worse in a
+# new way, since each run would submit its own batch for the same clusters.
+# The poller and the notification sender already take a lease for exactly
+# this reason (see app/services/job_lease.py); enrichment was the one paid
+# job that did not.
+ENRICH_LEASE_NAME = "enrich_clusters"
 
 
 async def enrich_clusters(
@@ -55,6 +67,21 @@ async def enrich_clusters(
     is exactly the run where enriching every singleton would be most
     expensive.
     """
+    async with job_lease(ENRICH_LEASE_NAME) as got_lease:
+        if not got_lease:
+            print("Skipping enrich: another enrichment run is already in progress.")
+            return 0
+        return await _enrich_clusters_locked(limit, force_all, since_days)
+
+
+async def _enrich_clusters_locked(
+    limit: int | None,
+    force_all: bool,
+    since_days: float | None,
+) -> int:
+    """The enrichment cycle itself. Split out so the lease wraps the whole
+    body without re-indenting it, and is released by the context manager
+    even on an exception path — same shape as poll_all_sources."""
     async with AsyncSessionLocal() as session:
         # Before submitting anything new, collect whatever finished since the
         # last tick. Doing this first means a batch's results land as soon as
