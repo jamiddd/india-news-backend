@@ -8,6 +8,16 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://news_user:news_password@localhost:5432/news_db"
+
+    # Connection pool sizing. Configurable because the safe value depends on
+    # deployment topology, which the code cannot see — see app/database.py
+    # for the arithmetic. Defaults are sized for the current production
+    # layout (2 droplets x 4 engines against a 15-client Supabase session
+    # pooler), NOT for SQLAlchemy's defaults of 5 + 10, which oversubscribe
+    # that ceiling eightfold.
+    DB_POOL_SIZE: int = 2
+    DB_MAX_OVERFLOW: int = 0
+    DB_POOL_TIMEOUT: int = 30
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

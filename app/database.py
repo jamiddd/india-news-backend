@@ -24,6 +24,34 @@ engine = create_async_engine(
     # carried over here.
     pool_pre_ping=False,
     pool_recycle=1800,
+    # Connection budget. SQLAlchemy's defaults (pool_size=5, max_overflow=10)
+    # let ONE engine demand 15 connections. Every process that imports this
+    # module builds its own engine, and prod runs, per droplet:
+    #
+    #     2 uvicorn workers + crossword_scheduler + poll_scheduler = 4 engines
+    #
+    # across TWO droplets (newsapp, newsapp-2) sharing a single Supabase
+    # session-mode pooler capped at 15 clients total. So the defaults asked
+    # for up to 8 x 15 = 120 connections against a ceiling of 15 — ~8x
+    # oversubscribed before a single request arrives. Observed 2026-09-03,
+    # when a one-off maintenance script could not get a connection at all:
+    #
+    #     asyncpg.exceptions.InternalServerError: (EMAXCONNSESSION)
+    #     max clients reached in session mode
+    #
+    # 8 engines x 2 = 16 steady-state worst case, and the two schedulers are
+    # idle almost all the time, so this fits 15 in practice while leaving
+    # room for admin scripts. max_overflow=0 makes the cap a real cap:
+    # exhaustion queues here for pool_timeout seconds instead of opening
+    # connections the server will refuse.
+    #
+    # These are env-tunable (DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT)
+    # because the right numbers depend on droplet count, worker count, and
+    # the pooler's ceiling — none of which this module can see. Raise them
+    # only alongside a corresponding change to one of those.
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
 )
 
 AsyncSessionLocal = async_sessionmaker(
