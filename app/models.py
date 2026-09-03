@@ -3,6 +3,7 @@ from typing import Optional, List
 from sqlalchemy import (
     Column, Integer, String, Text, BigInteger, Date, DateTime, ForeignKey, Index, JSON, Boolean, Float, UniqueConstraint
 )
+from sqlalchemy import text
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -80,10 +81,41 @@ class NotificationLog(Base):
     mode = Column(String(20), nullable=False)  # "daily" | "breaking"
     daily_slot_utc = Column(String(5), nullable=True)  # "HH:MM", only set when mode == "daily"
     sent_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
+    # UTC calendar day of sent_at, stored rather than derived because the
+    # daily uniqueness index below needs it and date(timestamptz) is STABLE,
+    # not IMMUTABLE — Postgres refuses to index it.
+    sent_date = Column(Date, nullable=True)
 
     __table_args__ = (
         Index("idx_notiflog_user_sent", "user_id", "sent_at"),
         Index("idx_notiflog_user_cluster", "user_id", "cluster_id"),
+        # Dedup is enforced HERE, not by the caller's SELECT-then-INSERT.
+        # send_notifications.py used to check "have we already sent this?"
+        # and then send, with a session-scoped advisory lock as the only
+        # thing serialising two concurrent runs. That lock stopped excluding
+        # anything the moment DATABASE_URL moved to a transaction-mode
+        # pooler (2026-09-03), because the backend is returned to the pool at
+        # every commit — verified in production, a second client acquired the
+        # "held" lock. A check-then-act with no database constraint behind it
+        # sends the same push twice.
+        #
+        # These two partial indexes mirror the two dedup rules exactly:
+        #   breaking -> at most one notification per (user, cluster), ever
+        #   daily    -> at most one per (user, slot, UTC day)
+        # so an ON CONFLICT DO NOTHING claim is now the authority, and
+        # correctness no longer depends on which pooler mode is configured.
+        Index(
+            "uq_notiflog_breaking_user_cluster",
+            "user_id", "cluster_id",
+            unique=True,
+            postgresql_where=text("mode = 'breaking'"),
+        ),
+        Index(
+            "uq_notiflog_daily_user_slot_day",
+            "user_id", "daily_slot_utc", "sent_date",
+            unique=True,
+            postgresql_where=text("mode = 'daily'"),
+        ),
     )
 
 

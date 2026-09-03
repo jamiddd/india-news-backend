@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import select, func, text, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import selectinload
 
 from firebase_admin import messaging
@@ -130,6 +131,35 @@ async def _send(app, token: str, title: str, body: str, cluster_id: int, channel
         return False
 
 
+async def _claim(session, **fields) -> bool:
+    """Atomically claim the right to send one notification.
+
+    Returns True only if THIS caller inserted the row. The partial unique
+    indexes on notification_log (see app/models.py) turn a duplicate into a
+    no-op via ON CONFLICT, so two concurrent runs cannot both claim the same
+    (user, cluster) breaking send or the same (user, slot, day) daily send.
+
+    Claim first, then push. The previous order — check, push, log, commit
+    everything at the end — was a check-then-act race whose only serialisation
+    was a session-scoped advisory lock, and that lock silently stopped
+    excluding anything under transaction-mode pooling. Claiming first can at
+    worst drop a notification if the push then fails; the old order could send
+    the same push twice. For push notifications that trade is the right way
+    round, and it matches the existing behaviour of logging the send even when
+    a device token turns out to be dead.
+
+    Committed immediately and independently: an uncommitted claim is invisible
+    to the other runner and would defeat the whole point.
+    """
+    result = await session.execute(
+        pg_insert(NotificationLog)
+        .values(**fields)
+        .on_conflict_do_nothing()
+    )
+    await session.commit()
+    return result.rowcount > 0
+
+
 async def main():
     async with AsyncSessionLocal() as session:
         got_lock = (await session.execute(select(func.pg_try_advisory_lock(NOTIFY_LOCK_KEY)))).scalar()
@@ -199,7 +229,14 @@ async def main():
                                 .limit(1)
                             )
                         ).scalar_one_or_none()
-                        if candidate is not None:
+                        if candidate is not None and await _claim(
+                            session,
+                            user_id=user.id,
+                            cluster_id=candidate.id,
+                            mode="breaking",
+                            sent_at=now,
+                            sent_date=now.date(),
+                        ):
                             for device in list(user.device_tokens):
                                 ok = await _send(
                                     app, device.fcm_token,
@@ -210,7 +247,6 @@ async def main():
                                 )
                                 if not ok:
                                     await session.delete(device)
-                            session.add(NotificationLog(user_id=user.id, cluster_id=candidate.id, mode="breaking"))
                             breaking_sent += 1
 
                 due_slots = _due_daily_slots(prefs.get("daily_notification_times_utc") or [], now)
@@ -231,6 +267,9 @@ async def main():
                         )
                     ).scalar_one_or_none()
                     if already_sent_for_slot is not None:
+                        # Fast path only — avoids fetching top_story for a
+                        # slot already handled. _claim() below is what
+                        # actually guarantees uniqueness.
                         continue
 
                     if top_story is None:
@@ -240,6 +279,17 @@ async def main():
                             )
                         ).scalar_one_or_none()
                     if top_story is None:
+                        continue
+
+                    if not await _claim(
+                        session,
+                        user_id=user.id,
+                        cluster_id=top_story.id,
+                        mode="daily",
+                        daily_slot_utc=slot,
+                        sent_at=now,
+                        sent_date=now.date(),
+                    ):
                         continue
 
                     for device in list(user.device_tokens):
@@ -252,9 +302,6 @@ async def main():
                         )
                         if not ok:
                             await session.delete(device)
-                    session.add(NotificationLog(
-                        user_id=user.id, cluster_id=top_story.id, mode="daily", daily_slot_utc=slot,
-                    ))
                     daily_sent += 1
 
             await session.commit()
