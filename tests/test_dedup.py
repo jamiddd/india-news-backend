@@ -261,6 +261,50 @@ class TestSharesTopic:
         title = "Nepal flash floods death toll climbs to 903"
         assert shares_topic(title, title)
 
+    def test_thresholds_are_the_grid_selected_pair(self):
+        """The two constants move together, and only via the harness.
+
+        0.30/3 was selected by the grid in scripts/eval_clustering.py
+        (P=0.901 R=0.701), replacing 0.40/2 (P=0.955 R=0.542) once recall
+        became the binding constraint on feed density. Pinning them here
+        means a future change is a deliberate edit to a test that states the
+        trade, not a quiet nudge of a number.
+        """
+        from app.services.dedup import MIN_TITLE_JACCARD, MIN_SHARED_TOKENS
+
+        assert MIN_TITLE_JACCARD == 0.30
+        assert MIN_SHARED_TOKENS == 3
+
+    def test_multi_topic_headline_chains_unrelated_stories(self):
+        """Documents the residual false-merge mode at 0.30, not desired
+        behaviour, and shows that it is NOT a pairwise failure.
+
+        Real headlines from the evaluation fixture, which the shipped config
+        put in one 22-article cluster. Pairwise, the gate is right about all
+        three: the Secretariat story and the temple story do not match each
+        other, and the multi-topic headline matches only the temple one — and
+        only just, at Jaccard 0.308 against a 0.30 floor.
+
+        The cluster forms anyway because matching compares an incoming
+        article against EVERY member (compare_all_members), so a chain of
+        individually-defensible links walks from one story to the other. That
+        is why no threshold fixes this: every link in the chain is above the
+        bar. The fix, if it matters enough, is to require similarity to the
+        cluster as a whole rather than to any one member.
+        """
+        multi_topic = ("Tamil Nadu: Vijay govt eyes new Assembly-Secretariat "
+                       "complex; smartphone ban begins at 52 temples")
+        secretariat = ("Tamil Nadu May Shift Assembly, Secretariat Out of "
+                       "Fort St George")
+        temples = ("Smartphone ban at 52 Tamil Nadu temples with a Rs 5-rule "
+                   "and an exception")
+
+        # The gate is individually correct on every pair here.
+        assert not shares_topic(secretariat, temples)
+        assert not shares_topic(multi_topic, secretariat)
+        # ...except this one, which is the link the chain travels through.
+        assert shares_topic(multi_topic, temples)
+
     def test_min_shared_is_enforced(self):
         # One shared significant token can never be enough, regardless of how
         # short both headlines are.

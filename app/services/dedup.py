@@ -34,14 +34,39 @@ STOPWORDS = frozenset({
 # LLM-labelled article pairs over a real 3-day / 14,087-article fixture
 # (scripts/eval_clustering.py). Measured on that set:
 #
-#   old rule (Jaccard >= 0.25 over title+snippet): precision 1.000, recall 0.027
-#   this rule (Jaccard >= 0.40 over title only):   precision 0.944, recall 0.528
+#   pre-rework (Jaccard >= 0.25, title+snippet):  precision 1.000, recall 0.027
+#   first rework (Jaccard >= 0.40, title, >=2):   precision 0.955, recall 0.542
+#   THIS RULE  (Jaccard >= 0.30, title, >=3):     precision 0.901, recall 0.701
 #
-# i.e. the old gate was not "conservative", it was inert — it found 2.7% of
+# The pre-rework gate was not "conservative", it was inert — it found 2.7% of
 # genuine same-story pairs, which is what drove the 98.5% singleton rate.
-# Re-tune by re-running that script, not by intuition.
-MIN_TITLE_JACCARD = 0.40
-MIN_SHARED_TOKENS = 2
+#
+# Loosened again 2026-09-03 because recall became the binding constraint on
+# the product, not just on this metric: the multi-source feed was running at
+# 254 corroborated clusters/day against the 350 it was designed around
+# (docs/multi-source-feed-plan.md §9). An error analysis of the 215 missed
+# pairs found 85% sitting just under the 0.40 cutoff at a median 0.267, and
+# ZERO with no lexical overlap at all — so the recall was reachable by moving
+# this constant, and did not need embeddings.
+#
+# min_shared moves 2 -> 3 alongside the threshold, not independently: at 0.30
+# a two-token overlap is too easy, and the grid's ranking has the pair moving
+# together.
+#
+# THE COST, stated plainly: precision 0.955 -> 0.901, i.e. roughly one merge
+# in ten is wrong instead of one in twenty-two. Wrong merges feed the framing
+# comparison, so a bad cluster presents outlets as framing one story
+# differently when they are covering different events. The observed residue
+# is "topic blobs" of genuinely related stories (several states' draft
+# electoral rolls; a Tamil Nadu headline that names two unrelated stories at
+# once), not the templated single-outlet mega-merges the same-source guard
+# exists to stop — those stayed absent under inspect.
+#
+# Re-tune by re-running that script, not by intuition. Mirror any change here
+# into SHIPPED_PARAMS in scripts/eval_clustering.py, or the harness measures
+# an algorithm nobody is running.
+MIN_TITLE_JACCARD = 0.30
+MIN_SHARED_TOKENS = 3
 
 
 def significant_tokens(title: str, snippet: Optional[str] = None) -> Set[str]:
