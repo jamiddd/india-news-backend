@@ -186,8 +186,13 @@ def _validate_ladder(payload: dict) -> tuple[str, str, list[str], int]:
         raise ValueError("Start/target must be same-length words of at least 3 letters")
     if not start.isalpha() or not target.isalpha() or start == target:
         raise ValueError("Start and target must be distinct alphabetic words")
-    if not (6 <= len(allowed) <= 15) or len(set(allowed)) != len(allowed):
-        raise ValueError("Need 6-15 unique allowed words")
+    # Upper bound is generous because allowed_words is a hidden whitelist,
+    # not a displayed word bank: the client rejects anything outside it
+    # without ever showing the player what it contains, so a short list just
+    # refuses legitimate words. wordlists passes the entire 4-letter pool
+    # (~1,745 words, ~14 KB of JSON).
+    if not (6 <= len(allowed) <= 5000) or len(set(allowed)) != len(allowed):
+        raise ValueError("Need 6-5000 unique allowed words")
     if any(len(word) != length or not word.isalpha() for word in allowed):
         raise ValueError("Allowed words must all be alphabetic and same length as start/target")
     if not isinstance(claimed_optimal, int) or not (1 <= claimed_optimal <= len(allowed) + 1):

@@ -140,9 +140,20 @@ class TestWordlistBackedPuzzles:
         start, target, allowed, optimal, source = await generate_word_ladder(date(2026, 9, 4))
         assert source == "wordlist"
         assert start != target and len(start) == len(target)
-        assert 6 <= len(allowed) <= 15
-        assert start not in allowed and target not in allowed
         assert optimal >= 1
+        # The whole pool, not a shortlist: the client uses allowed_words as a
+        # hidden whitelist, so anything smaller rejects real words the player
+        # can't know are excluded.
+        assert len(allowed) > 1000
+        assert target in allowed
+
+    async def test_ladder_accepts_ordinary_off_path_words(self):
+        """Regression: FIGS -> FINS -> FINE was rejected on 2026-09-03 because
+        allowed_words had been trimmed to 12 entries, even though all three are
+        real words a letter apart and FINE -> FILE -> FILM finishes."""
+        _, _, allowed, _, _ = await generate_word_ladder(date(2026, 9, 3))
+        for word in ("FIGS", "FINS", "FINE", "FILE", "FILM", "FIRS", "FIRM"):
+            assert word in allowed, word
 
     async def test_consecutive_days_differ(self):
         """The old LLM path returned COLD -> WARM on 8 of 14 days."""

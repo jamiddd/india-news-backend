@@ -15,11 +15,9 @@ repeating: ~3,000 Bee puzzles and 4,000 Ladder pairs.
 from __future__ import annotations
 
 import logging
-from collections import deque
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from string import ascii_lowercase
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +27,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "wordlists"
 # per puzzle, because the pool is one 338 KB file whereas ~3,000 expanded word
 # lists would be several megabytes of near-duplicate data.
 BEE_MIN_LENGTH = 4
-
-# _validate_ladder accepts 6-15 allowed words; the client renders them as a
-# word bank, so this stays comfortably inside that range.
-LADDER_BANK_SIZE = 12
 
 
 def _read(name: str) -> list[str]:
@@ -83,62 +77,25 @@ def spelling_bee_for(puzzle_date: date) -> tuple[list[str], str, list[str]]:
     return sorted(letter.upper() for letter in set(pangram)), centre.upper(), bee_words(pangram, centre)
 
 
-def _shortest_path(start: str, target: str, pool: set[str]) -> list[str]:
-    """One shortest start->target path, inclusive of both ends."""
-    previous: dict[str, str | None] = {start: None}
-    queue = deque([start])
-    while queue:
-        word = queue.popleft()
-        if word == target:
-            break
-        for index in range(len(word)):
-            for char in ascii_lowercase:
-                other = word[:index] + char + word[index + 1:]
-                if other in pool and other not in previous:
-                    previous[other] = word
-                    queue.append(other)
-    if target not in previous:
-        return []
-    path, node = [], target
-    while node is not None:
-        path.append(node)
-        node = previous[node]
-    return path[::-1]
-
-
 def word_ladder_for(puzzle_date: date) -> tuple[str, str, list[str], int]:
-    """(start, target, allowed-word bank, true optimal steps) for the day.
+    """(start, target, allowed words, true optimal steps) for the day.
 
-    The bank is deliberately small — _validate_ladder wants 6-15 words, and
-    the client renders it as a word bank, so the full 1,745-word component
-    can't be handed over. It is one shortest path plus neighbouring
-    distractors, which keeps the puzzle solvable while leaving wrong turns to
-    take. Distractors cannot make the puzzle shorter than the stored optimum:
-    that was computed over the entire component, so no subset beats it.
+    `allowed_words` is the whole 4-letter pool, not a shortlist. The client
+    treats it as a hidden whitelist — DailyGamesViewModels.submit() rejects
+    anything outside it with "That word isn't in today's ladder" and never
+    shows the player what is in it — so anything less than the full pool
+    rejects ordinary English words for no reason the player can see. A
+    12-word bank turned FIGS -> FINS -> FINE into an error even though every
+    one of those is a real word one letter apart, and FINE -> FILE -> FILM
+    finishes the puzzle.
+
+    Handing over the entire component also keeps the stored optimum honest:
+    it was computed by BFS over exactly this pool at build time, so it stays
+    the true shortest path over what the player is allowed to type.
     """
     puzzles = _ladder_puzzles()
     start, target, steps = puzzles[puzzle_date.toordinal() % len(puzzles)]
-    pool = set(_ladder_words())
-
-    path = _shortest_path(start, target, pool)
-    bank = [word for word in path if word not in (start, target)]
-
-    # Deterministic distractors: neighbours of the path that aren't on it,
-    # walked in sorted order so the same date always yields the same puzzle.
-    for word in path:
-        for index in range(len(word)):
-            for char in ascii_lowercase:
-                other = word[:index] + char + word[index + 1:]
-                if other in pool and other not in bank and other not in (start, target):
-                    bank.append(other)
-                if len(bank) >= LADDER_BANK_SIZE:
-                    break
-            if len(bank) >= LADDER_BANK_SIZE:
-                break
-        if len(bank) >= LADDER_BANK_SIZE:
-            break
-
-    return start.upper(), target.upper(), [word.upper() for word in bank], steps
+    return start.upper(), target.upper(), [word.upper() for word in _ladder_words()], steps
 
 
 def available() -> bool:
