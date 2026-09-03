@@ -15,6 +15,10 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import StoryCluster, Article, utc_now
 from app.services.enrichment import enrich_cluster_with_ai
+from app.services.enrichment_batch import (
+    reconcile_open_batches,
+    submit_refinement_batch,
+)
 
 # Cap per run so a cron'd invocation can't burn an unbounded amount of API
 # spend if a large backlog of unenriched clusters ever builds up. Only
@@ -52,6 +56,18 @@ async def enrich_clusters(
     expensive.
     """
     async with AsyncSessionLocal() as session:
+        # Before submitting anything new, collect whatever finished since the
+        # last tick. Doing this first means a batch's results land as soon as
+        # the next run starts, rather than a tick later.
+        reconciled = await reconcile_open_batches(session)
+        if reconciled["checked"]:
+            print(
+                f"[enrich] batches: {reconciled['checked']} open, "
+                f"{reconciled['ended']} ended, "
+                f"{reconciled['succeeded']} applied, "
+                f"{reconciled['errored']} failed"
+            )
+
         # enrich_cluster_with_ai reads title/content/snippet/source.name (see
         # app/services/enrichment.py) — load_only keeps this from also
         # dragging columns nobody in that path reads over the wire, on a
@@ -109,17 +125,40 @@ async def enrich_clusters(
             print("No clusters matched — nothing to do.")
             return 0
 
-        total = len(clusters)
-        print(f"Enriching {total} story cluster(s)...")
-        for i, cluster in enumerate(clusters, 1):
-            await enrich_cluster_with_ai(session, cluster)
-            # Every 10 and on the last one, so `docker logs -f` gives a
-            # live, ETA-able progress readout on long backfills instead of
-            # having to eyeball/count individual "AI Enriched" lines.
-            if i % 10 == 0 or i == total:
-                print(f"[enrich] {i}/{total} clusters done ({i / total:.0%})")
-        print(f"✅ Enriched {total} story clusters with entity tags & framing angles!")
-        return total
+        # Split the work by what is actually waiting on it (§5.G).
+        #
+        # A cluster with no successful pass yet is a story entering the feed
+        # with nothing but its raw RSS headline to show — that goes
+        # synchronously. One that has been enriched before and merely gained
+        # another outlet is a refinement nobody is waiting on, so it goes to
+        # the Batch API at half price. last_enriched_at is the right test and
+        # ai_enriched is not: the poller resets ai_enriched for both cases.
+        first_pass = [c for c in clusters if c.last_enriched_at is None]
+        refinements = [c for c in clusters if c.last_enriched_at is not None]
+
+        total = len(first_pass)
+        if total:
+            print(f"Enriching {total} story cluster(s) synchronously...")
+            for i, cluster in enumerate(first_pass, 1):
+                await enrich_cluster_with_ai(session, cluster)
+                # Every 10 and on the last one, so `docker logs -f` gives a
+                # live, ETA-able progress readout on long backfills instead of
+                # having to eyeball/count individual "AI Enriched" lines.
+                if i % 10 == 0 or i == total:
+                    print(f"[enrich] {i}/{total} clusters done ({i / total:.0%})")
+
+        if refinements:
+            batch_id = await submit_refinement_batch(session, refinements)
+            print(
+                f"[enrich] queued {len(refinements)} refinement(s) "
+                f"to batch {batch_id}"
+            )
+
+        print(
+            f"✅ Enriched {total} cluster(s) now, "
+            f"{len(refinements)} queued for batch."
+        )
+        return total + len(refinements)
 
 
 if __name__ == "__main__":

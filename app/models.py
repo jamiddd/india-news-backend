@@ -456,6 +456,18 @@ class StoryCluster(Base):
     # already uses.
     became_multi_source_at = Column(DateTime(timezone=True), nullable=True)
 
+    # When the last SUCCESSFUL paid enrichment pass landed. Distinct from
+    # ai_enriched, which poller.py resets to False to request a refresh:
+    # last_enriched_at is never reset, so it answers a question ai_enriched
+    # cannot — has this cluster ever been enriched at all?
+    #
+    # That distinction is what routes work between the two paths. NULL means
+    # the story is entering the feed and has no AI summary yet, so it goes
+    # synchronously; non-NULL with ai_enriched False means it merely gained
+    # another outlet, a refinement nobody is waiting on, so it goes to the
+    # Batch API at half price. See app/services/enrichment_batch.py.
+    last_enriched_at = Column(DateTime(timezone=True), nullable=True)
+
     # none_as_null=True on all three: SQLAlchemy's JSON type defaults to
     # none_as_null=False, which persists Python None as the JSON *value*
     # `null` rather than SQL NULL. These three columns are all explicitly set
@@ -676,6 +688,37 @@ class EntityStat(Base):
     baseline_rate = Column(Float, default=0.0, nullable=False)
     last_mentioned_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class EnrichmentBatch(Base):
+    """One submitted Message Batches API job, tracked across timer ticks.
+
+    Refinement enrichments go through the Batch API at 50% of list price
+    (see app/services/enrichment_batch.py). Batches are asynchronous —
+    usually minutes, up to 24 hours — so the submitting process cannot wait
+    for them. This table is the handoff: one tick submits and records the
+    batch id, a later tick reconciles whatever has finished.
+
+    Which clusters a batch covers is NOT stored here. Each request carries
+    its cluster id as its custom_id and the results come back carrying it,
+    so the batch results file is the authoritative mapping; duplicating it
+    into a join table would only create a second copy to drift.
+    """
+
+    __tablename__ = "enrichment_batches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # Anthropic's batch id (msgbatch_...). Unique so a retry or a double
+    # tick cannot record the same batch twice and apply it twice.
+    batch_id = Column(String(128), nullable=False, unique=True, index=True)
+    # "in_progress" until reconciled, then "ended" (results applied),
+    # "canceled", or "expired". Only in_progress rows are polled.
+    status = Column(String(16), nullable=False, default="in_progress")
+    request_count = Column(Integer, nullable=False, default=0)
+    succeeded_count = Column(Integer, nullable=True)
+    errored_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    reconciled_at = Column(DateTime(timezone=True), nullable=True)
 
 
 # Indexes as defined in handoff doc

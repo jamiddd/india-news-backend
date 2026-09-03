@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
-from app.models import StoryCluster, Article
+from app.models import StoryCluster, Article, utc_now
 from app.services.content_cleaner import decode_entities
 
 logger = logging.getLogger(__name__)
@@ -272,8 +272,14 @@ def select_articles_for_prompt(
     return selected
 
 
-async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
-    """Enrich a story cluster using Anthropic API or fallback rule-based engine."""
+def apply_baseline_enrichment(cluster: StoryCluster) -> bool:
+    """Write the free rule-based enrichment onto the cluster.
+
+    Always runs before the paid call, on every path (sync and batch), so a
+    cluster is never left with nothing if the API pass fails. Returns
+    can_compare_framing — whether this cluster has enough distinct outlets
+    for a framing comparison to be real rather than invented.
+    """
     articles = cluster.articles or []
     full_text = f"{cluster.headline} " + " ".join([f"{a.title} {a.snippet or ''}" for a in articles])
 
@@ -304,135 +310,179 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
     # pass fails to produce a new one.
     cluster.framing_comparison = None
 
-    # Enrichment is the premium tier's core feature, so every cluster —
-    # singletons included — gets the paid AI pass, not just multi-source
-    # ones. This used to be gated at len(articles) >= 2 as a cost guardrail
-    # (99.7% of clusters were singletons per 2026-08-09 production data), but
-    # that made singleton stories — the majority of the feed — permanently
-    # stuck on the free rule-based baseline, which isn't good enough for a
-    # feature customers pay for. Singletons still get a real AI summary and
-    # neutral headline; the prompt is told to return an empty
-    # framing_comparison for them instead of inventing a cross-outlet
-    # comparison that doesn't exist.
+    return can_compare_framing
+
+
+def build_enrichment_request(cluster: StoryCluster, can_compare_framing: bool) -> Dict[str, Any]:
+    """The Messages API request body for one cluster.
+
+    Shared verbatim by the synchronous path and the Batch API path — a batch
+    request's `params` is exactly this object. Keeping one builder is what
+    guarantees the two paths can't drift into producing different summaries
+    for the same story depending on which queue it happened to go through.
+    """
+    articles = cluster.articles or []
+    # Send the article body we already scrape, not the 250-char RSS stub.
+    # 82% of articles carry >400 chars of `content` (avg ~2,985) — the old
+    # payload paid an LLM to paraphrase a snippet while the real text sat
+    # unused in the same row. Falls back to snippet for the 18% with no
+    # scraped body.
+    articles_data = [
+        {
+            "outlet": art.source.name if art.source else "Outlet",
+            "headline": art.title,
+            "article_text": (art.content or art.snippet or "")[:CONTENT_CAP],
+        }
+        for art in select_articles_for_prompt(articles)
+    ]
+    # claude-sonnet-5 thinks adaptively whether or not we ask it to, and
+    # those tokens are billed. This is a short structured extraction over a
+    # handful of headlines, not a reasoning problem, so cap the depth rather
+    # than pay the default "high" effort on every multi-source cluster.
+    # Raise this if framing quality measurably suffers — it is the tuning
+    # knob, not the model.
+    #
+    # Deliberately NOT sent on the SINGLE_SOURCE_MODEL path:
+    # output_config.effort is rejected by claude-haiku-4-5.
+    effort_config = (
+        {"output_config": {"effort": "low"}} if can_compare_framing else {}
+    )
+    return {
+        "model": (
+            MULTI_SOURCE_MODEL if can_compare_framing else SINGLE_SOURCE_MODEL
+        ),
+        "max_tokens": 1000,
+        # cache_control turns this static system prompt into a cache-eligible
+        # block — it's identical on every single enrichment call, so caching
+        # it directly cuts input token cost on the repeated portion instead
+        # of paying full price to re-send the same ~200 tokens every time.
+        # Verify after deploy via the response's
+        # usage.cache_read_input_tokens/cache_creation_input_tokens fields
+        # actually showing non-zero values, not just assuming this took
+        # effect.
+        "system": [
+            {
+                "type": "text",
+                "text": ENRICHMENT_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}",
+            }
+        ],
+        **effort_config,
+    }
+
+
+def apply_ai_response(
+    cluster: StoryCluster, data: Dict[str, Any], can_compare_framing: bool
+) -> None:
+    """Write one Messages API response onto the cluster.
+
+    `data` is the raw response body — identical in shape whether it came
+    from a synchronous call or from a line of a batch's results file, which
+    is why both paths land here. Raises on a malformed response so the
+    caller can decide whether to leave the baseline in place (sync) or log
+    and continue with the rest of the batch.
+    """
+    raw_text = extract_text(data)
+    if not raw_text:
+        raise ValueError(
+            f"No text block in response "
+            f"(stop_reason={data.get('stop_reason')!r}, "
+            f"block types="
+            f"{[b.get('type') for b in data.get('content', [])]})"
+        )
+
+    try:
+        structured = parse_json_response(raw_text)
+    except Exception as parse_err:
+        # Log exactly what came back so a parsing failure is
+        # diagnosable from the logs alone, not just "it failed".
+        logger.warning(
+            f"[Anthropic JSON parse failed] Cluster #{cluster.id} "
+            f"stop_reason={data.get('stop_reason')!r} "
+            f"raw_text={raw_text[:500]!r} — {parse_err}"
+        )
+        raise
+
+    # decode_entities as a backstop: every other write path to
+    # these fields (poller.py's RSS ingestion) decodes entities
+    # as its last step, but the model occasionally echoes a
+    # literal "&amp;"-style entity from a source title it saw in
+    # the prompt, and nothing else here would catch that.
+    cluster.headline = decode_entities(structured.get("neutral_headline", cluster.headline))
+    bullets = structured.get("summary_bullets", [])
+    if bullets:
+        cluster.summary = "\n• " + "\n• ".join(decode_entities(b) for b in _clamp_bullets(bullets))
+    if structured.get("entities"):
+        cluster.entities = _sanitize_entities(structured.get("entities"))
+    if structured.get("topics"):
+        cluster.topics = structured.get("topics")
+    # THE fabrication bug, and it is subtle. The system prompt
+    # explicitly instructs the model to return an EMPTY
+    # framing_comparison for a single-outlet story. The model
+    # complies and returns []. `if structured.get(...)` is falsy
+    # on [], so the assignment was skipped — leaving the
+    # rule-based single-outlet baseline written earlier in place.
+    # The code punished the model for being correct, which is how
+    # 47,018 clusters ended up with a framing comparison when only
+    # 418 had two sources to compare.
+    #
+    # Test presence, not truthiness, so an explicit [] is honoured
+    # as the answer it is. And never accept framing for a cluster
+    # that cannot have one, whatever the model returns.
+    if not can_compare_framing:
+        cluster.framing_comparison = None
+    elif "framing_comparison" in structured:
+        cluster.framing_comparison = structured["framing_comparison"] or None
+    cluster.ai_enriched = True
+    # Distinct from ai_enriched, which the poller resets to False to request
+    # a refresh. last_enriched_at is never reset, so it answers a question
+    # ai_enriched cannot: has this cluster EVER had a successful paid pass?
+    # That is what separates a story entering the feed (needs a summary now,
+    # goes synchronously) from one merely gaining another outlet (a
+    # refinement nobody is waiting for, goes to the Batch API at half
+    # price). See app/services/enrichment_batch.py.
+    cluster.last_enriched_at = utc_now()
+
+    logger.info(f"[Anthropic AI Enriched] Cluster #{cluster.id}")
+
+
+async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
+    """Enrich a story cluster synchronously, falling back to the rule-based
+    baseline if the paid call fails.
+
+    This is the path for a cluster entering the feed, where something is
+    waiting on the result. Refinement passes go through
+    app/services/enrichment_batch.py instead.
+    """
+    articles = cluster.articles or []
+    can_compare_framing = apply_baseline_enrichment(cluster)
+
+    # Every cluster reaching this function gets the paid pass — the
+    # multi-source gate lives in the *selection* (scripts/enrich_all_clusters.py
+    # and the poller's crossing), not here, so a caller that hands over a
+    # cluster deliberately (the admin re-enrich endpoint, a backfill script)
+    # still gets what it asked for.
     if settings.ANTHROPIC_API_KEY and len(articles) >= 1:
         try:
-            # Send the article body we already scrape, not the 250-char RSS
-            # stub. 82% of articles carry >400 chars of `content` (avg
-            # ~2,985) — the old payload paid an LLM to paraphrase a snippet
-            # while the real text sat unused in the same row. Falls back to
-            # snippet for the 18% with no scraped body.
-            articles_data = [
-                {
-                    "outlet": art.source.name if art.source else "Outlet",
-                    "headline": art.title,
-                    "article_text": (art.content or art.snippet or "")[:CONTENT_CAP],
-                }
-                for art in select_articles_for_prompt(articles)
-            ]
-            # claude-sonnet-5 thinks adaptively whether or not we ask it to,
-            # and those tokens are billed. This is a short structured
-            # extraction over a handful of headlines, not a reasoning problem,
-            # so cap the depth rather than pay the default "high" effort on
-            # every multi-source cluster. Raise this if framing quality
-            # measurably suffers — it is the tuning knob, not the model.
-            #
-            # Deliberately NOT sent on the SINGLE_SOURCE_MODEL path:
-            # output_config.effort is rejected by claude-haiku-4-5.
-            effort_config = (
-                {"output_config": {"effort": "low"}} if can_compare_framing else {}
-            )
-
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
                         "x-api-key": settings.ANTHROPIC_API_KEY,
                         "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
+                        "content-type": "application/json",
                     },
-                    json={
-                        "model": (
-                            MULTI_SOURCE_MODEL if can_compare_framing
-                            else SINGLE_SOURCE_MODEL
-                        ),
-                        "max_tokens": 1000,
-                        # cache_control turns this static system prompt into a
-                        # cache-eligible block — it's identical on every single
-                        # enrichment call, so caching it directly cuts input
-                        # token cost on the repeated portion instead of paying
-                        # full price to re-send the same ~200 tokens every
-                        # time. Verify after deploy via the response's
-                        # usage.cache_read_input_tokens/cache_creation_input_tokens
-                        # fields actually showing non-zero values, not just
-                        # assuming this took effect.
-                        "system": [
-                            {
-                                "type": "text",
-                                "text": ENRICHMENT_SYSTEM_PROMPT,
-                                "cache_control": {"type": "ephemeral"}
-                            }
-                        ],
-                        "messages": [{"role": "user", "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}"}],
-                        **effort_config,
-                    },
-                    timeout=15.0
+                    json=build_enrichment_request(cluster, can_compare_framing),
+                    timeout=15.0,
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                raw_text = extract_text(data)
-                if not raw_text:
-                    raise ValueError(
-                        f"No text block in response "
-                        f"(stop_reason={data.get('stop_reason')!r}, "
-                        f"block types="
-                        f"{[b.get('type') for b in data.get('content', [])]})"
-                    )
-
-                try:
-                    structured = parse_json_response(raw_text)
-                except Exception as parse_err:
-                    # Log exactly what came back so a parsing failure is
-                    # diagnosable from the logs alone, not just "it failed".
-                    logger.warning(
-                        f"[Anthropic JSON parse failed] Cluster #{cluster.id} "
-                        f"stop_reason={data.get('stop_reason')!r} "
-                        f"raw_text={raw_text[:500]!r} — {parse_err}"
-                    )
-                    raise
-
-                # decode_entities as a backstop: every other write path to
-                # these fields (poller.py's RSS ingestion) decodes entities
-                # as its last step, but the model occasionally echoes a
-                # literal "&amp;"-style entity from a source title it saw in
-                # the prompt, and nothing else here would catch that.
-                cluster.headline = decode_entities(structured.get("neutral_headline", cluster.headline))
-                bullets = structured.get("summary_bullets", [])
-                if bullets:
-                    cluster.summary = "\n• " + "\n• ".join(decode_entities(b) for b in _clamp_bullets(bullets))
-                if structured.get("entities"):
-                    cluster.entities = _sanitize_entities(structured.get("entities"))
-                if structured.get("topics"):
-                    cluster.topics = structured.get("topics")
-                # THE fabrication bug, and it is subtle. The system prompt
-                # explicitly instructs the model to return an EMPTY
-                # framing_comparison for a single-outlet story. The model
-                # complies and returns []. `if structured.get(...)` is falsy
-                # on [], so the assignment was skipped — leaving the
-                # rule-based single-outlet baseline written earlier in place.
-                # The code punished the model for being correct, which is how
-                # 47,018 clusters ended up with a framing comparison when only
-                # 418 had two sources to compare.
-                #
-                # Test presence, not truthiness, so an explicit [] is honoured
-                # as the answer it is. And never accept framing for a cluster
-                # that cannot have one, whatever the model returns.
-                if not can_compare_framing:
-                    cluster.framing_comparison = None
-                elif "framing_comparison" in structured:
-                    cluster.framing_comparison = structured["framing_comparison"] or None
-                cluster.ai_enriched = True
-
-                logger.info(f"[Anthropic AI Enriched] Cluster #{cluster.id}")
+                apply_ai_response(cluster, resp.json(), can_compare_framing)
         except Exception as e:
             logger.warning(f"[Anthropic API Skipped/Failed] Using rule-based enrichment: {e}")
 
