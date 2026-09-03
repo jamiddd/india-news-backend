@@ -42,34 +42,53 @@ not the cost problem. Entertainment is only 4.4% of volume.
 
 ## 2. What is live in production right now
 
-Both droplets (`newsapp`, `newsapp-2`) are on **`2d89631`** (as of 2026-09-03).
+Both droplets (`newsapp`, `newsapp-2`) are on **`d69bfc1`**, deployed
+2026-09-03 ~16:30 UTC.
 
 ### Shipped clustering config
 
 Chosen by grid search over 288 candidates against the labelled pair set —
-re-tune with the harness, never by intuition.
+re-tune with the harness, never by intuition. Mirror any change into
+`SHIPPED_PARAMS` in `scripts/eval_clustering.py` in the same commit, or the
+harness measures an algorithm nobody is running.
 
 ```
 metric:        Jaccard over TITLE tokens only   (was: title+snippet)
-threshold:     0.40                             (was: 0.25)
-min_shared:    2
+threshold:     0.30                             (was: 0.40, was: 0.25)
+min_shared:    3                                (was: 2)
 simhash:       REMOVED as a gate                (was: hard veto at <= 18)
 candidates:    cluster_tokens index, 48h window (was: 100 most-recent clusters)
 comparison:    all cluster members              (was: representative only)
 same-source:   blocked
+geo guard:     on
 ```
 
 ### Verified results
 
-| | Before | After |
-|---|---|---|
-| Precision (labelled pairs) | 1.000 | 0.944 |
-| Recall (labelled pairs) | 0.027 | **0.528** |
-| Merge rate, live production | ~1.4% | **10.4%** |
-| Front page composition | ~98.5% singletons | 25/25 multi-article |
+| | Pre-rework | First rework | **Live now** |
+|---|---|---|---|
+| Precision (labelled pairs) | 1.000 | 0.955 | **0.901** |
+| Recall (labelled pairs) | 0.027 | 0.542 | **0.701** |
+| Singleton rate (offline) | 98.4% | 91.7% | **88.5%** |
+| Largest cluster (offline) | 10 | 29 | **59** |
 
-Live merge rate (10.4%) matched the offline dry-run prediction (10.0%) almost
-exactly, so **the harness can be trusted** for future tuning.
+The first rework's live merge rate (10.4%) matched its offline prediction
+(10.0%) almost exactly, so **the harness can be trusted** for tuning.
+
+The 0.30/3 retune deployed 2026-09-03 16:30 UTC. It affects only newly
+ingested articles — existing clusters are not re-clustered — so the effect
+appears over the following day. **Not yet confirmed against live data.**
+Baseline to beat: 254 corroborated clusters/day at an 8.1% multi-source
+rate; the fixture predicts ~320-340/day. Measure with a deploy-anchored
+window that excludes the last 6 hours (median lag to a second outlet is
+~238 min, so recent clusters are censored and read as failures).
+
+The cost of the retune is precision 0.955 -> 0.901: roughly one merge in
+ten wrong instead of one in twenty-two. Wrong merges feed the framing
+comparison. The observed residue on the fixture is topic blobs of
+related-but-distinct stories, not the templated single-outlet mega-merges
+the same-source guard stops. See `dedup.py` for the full rationale and
+`multi-source-feed-plan.md` §9 for the error analysis that motivated it.
 
 ### Also live
 
@@ -209,7 +228,7 @@ Full plan: `~/.claude/plans/encapsulated-humming-firefly.md`
 | 0 — eval harness | **DONE** | `scripts/eval_clustering.py` |
 | 1 — clustering fix | **DONE, verified** | |
 | 2 — embeddings | not started | **Recommend NOT doing this next (2026-09-03).** Recall IS the constraint now — the multi-source feed runs at 254 clusters/day against a predicted 350 — but the error analysis says embeddings are the wrong tool for it. Of 215 missed pairs, **zero** score below 0.05 jaccard; 85% are near-misses under the threshold. See `multi-source-feed-plan.md` §9, including the sampling caveat that keeps this from being a proof. |
-| 2b — **recall retune** | **RECOMMENDED NEXT** | The grid already found it (see below): recall 0.542 → ~0.71 by changing two constants, for precision 0.955 → ~0.90. Gate on an `inspect` pass — both candidates sit at `max cluster` 55–59 against a cap of 60. |
+| 2b — **recall retune** | **DEPLOYED 2026-09-03** (`d69bfc1`) | `jaccard/title>=0.30 shared>=3`. Recall 0.542 → 0.701 offline, for precision 0.955 → 0.901. Chosen over `idf_overlap/0.5/3` (R=0.719) because `inspect` showed that config keeping a 25-article blob of several states' draft electoral rolls. **Live effect not yet confirmed** — see §2. |
 | 3 — framing honesty | **DONE, verified** | |
 | 4 — batch summaries | not started | Cost work. Less urgent now the timer cap stopped the bleeding. |
 | 5 — curated front page | not started | **Recommended next.** This is what the user actually asked for: "trendy, debated, headliners upfront, very curated." Was impossible before (only 418 qualifying clusters); now viable. `entity_boost` is already computed and sitting unused (`poller.py`, never read by `/clusters`). |
