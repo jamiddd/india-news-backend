@@ -644,6 +644,139 @@ def score(articles: List[dict], labels: Dict[str, str], p: Params) -> dict:
     }
 
 
+def _diagnose_miss(a: dict, b: dict, p: Params, idf: Dict[str, float],
+                   common: Set[str], geo: frozenset, field: str) -> Tuple[str, float]:
+    """Why this related pair was not merged, and how close it came.
+
+    Checks run in pipeline order, so the reason reported is the FIRST gate
+    that would have rejected the pair — the one worth fixing. The returned
+    score is the config's own similarity metric, which is what says whether
+    a miss is a near-thing or a different planet.
+    """
+    ta, tb = a[field], b[field]
+    shared = ta & tb
+    metric_score = (
+        0.0 if not ta or not tb
+        else overlap_coefficient(ta, tb) if p.metric == "overlap"
+        else idf_overlap(ta, tb, idf) if p.metric == "idf_overlap"
+        else jaccard(ta, tb)
+    )
+
+    if not ta or not tb:
+        return "empty_tokens", metric_score
+
+    # Blocking comes first in the real pipeline: a pair that shares too few
+    # DISTINCTIVE tokens is never even compared, whatever its similarity. The
+    # high-document-frequency tokens excluded here are exactly the ones that
+    # make two unrelated headlines look superficially alike.
+    if p.use_blocking:
+        distinctive = {t for t in shared if t not in common}
+        if len(distinctive) < p.min_shared:
+            return "blocking_missed", metric_score
+
+    if p.window_hours is not None:
+        gap_hours = abs((a["_dt"] - b["_dt"]).total_seconds()) / 3600.0
+        if gap_hours > p.window_hours:
+            return "outside_window", metric_score
+
+    if p.same_source_guard and a["source_id"] == b["source_id"]:
+        return "same_source", metric_score
+
+    if len(shared) < p.min_shared:
+        return "min_shared", metric_score
+
+    if p.geo_guard:
+        ca, cb = a["source_category"], b["source_category"]
+        if ca in geo and cb in geo and ca != cb:
+            return "geo_guard", metric_score
+
+    if metric_score < p.threshold:
+        return "below_threshold", metric_score
+
+    # Every direct gate passes, so the pair was separated by the replay's
+    # order-dependence: first match wins, and one of the two joined some
+    # other cluster before it ever saw the other. Not a tuning problem —
+    # a consequence of greedy single-pass assignment.
+    return "lost_to_ordering", metric_score
+
+
+def _errors(articles: List[dict], labels: Dict[str, str], p: Params,
+            samples: int) -> None:
+    """Error analysis over the false negatives: WHERE recall is lost.
+
+    Precision/recall say how much is missed. This says why, which is the
+    only thing that tells you whether the next win is a cheaper lexical fix
+    or genuinely needs semantics. The decisive line is the share of misses
+    whose similarity is ~0: those pairs share almost no title vocabulary, so
+    no threshold on this metric can ever reach them.
+    """
+    assignment = replay(articles, p)
+    by_id = {a["id"]: a for a in articles}
+    field = "_tok_title" if p.fields == "title" else "_tok_both"
+    _, common = _blocking_index(articles, field)
+    idf = compute_idf(articles, field)
+    geo = _geo_categories()
+
+    reasons: Dict[str, List[Tuple[float, int, int]]] = {}
+    considered = merged = 0
+
+    for key, verdict in labels.items():
+        if verdict != "same":
+            continue
+        x, y = (int(v) for v in key.split("-"))
+        if x not in assignment or y not in assignment:
+            continue
+        considered += 1
+        if assignment[x] == assignment[y]:
+            merged += 1
+            continue
+        reason, sc = _diagnose_miss(by_id[x], by_id[y], p, idf, common, geo, field)
+        reasons.setdefault(reason, []).append((sc, x, y))
+
+    missed = considered - merged
+    print(f"\nConfig: {p.label()}")
+    print(f"Labelled 'same' pairs both present in replay: {considered}")
+    print(f"  merged: {merged}   missed: {missed} "
+          f"(recall {merged / considered:.3f})" if considered else "  no pairs")
+    if not missed:
+        return
+
+    print("\nWhy the misses were missed")
+    print("-" * 64)
+    for reason, items in sorted(reasons.items(), key=lambda kv: -len(kv[1])):
+        scores = [s for s, _, _ in items]
+        print(f"  {reason:<18} {len(items):>4}  ({len(items) / missed:>5.1%})  "
+              f"median {p.metric}={sorted(scores)[len(scores) // 2]:.3f}")
+
+    # The ceiling question. A pair sharing no distinctive vocabulary cannot be
+    # recovered by moving a threshold on a lexical metric, at any setting —
+    # it needs a representation that knows two different phrasings mean the
+    # same event. A pair sitting just under the threshold is the opposite:
+    # free recall, paid for in precision, and the grid can price it.
+    all_scores = sorted(s for items in reasons.values() for s, _, _ in items)
+    bins = [(0.0, 0.05), (0.05, 0.15), (0.15, 0.25), (0.25, 0.40), (0.40, 1.01)]
+    print("\nSimilarity of the missed pairs "
+          f"(threshold is {p.threshold})")
+    print("-" * 64)
+    for lo, hi in bins:
+        n = sum(1 for s in all_scores if lo <= s < hi)
+        bar = "#" * int(40 * n / missed) if missed else ""
+        print(f"  {lo:.2f}-{hi:.2f}  {n:>4} ({n / missed:>5.1%}) {bar}")
+
+    unreachable = sum(1 for s in all_scores if s < 0.05)
+    print(f"\n  {unreachable} of {missed} misses ({unreachable / missed:.1%}) "
+          f"score below 0.05 — unreachable by ANY threshold on {p.metric}.")
+
+    for reason, items in sorted(reasons.items(), key=lambda kv: -len(kv[1])):
+        print(f"\nSample misses — {reason}")
+        print("-" * 64)
+        for sc, x, y in sorted(items, key=lambda t: -t[0])[:samples]:
+            a, b = by_id[x], by_id[y]
+            print(f"  [{p.metric}={sc:.3f}]")
+            print(f"    A ({a['source_name']}) {a['title'][:96]}")
+            print(f"    B ({b['source_name']}) {b['title'][:96]}")
+
+
 def _print_row(name: str, s: dict) -> None:
     print(f"{name:<58} P={s['precision']:.3f} R={s['recall']:.3f} "
           f"F1={s['f1']:.3f}  single={s['singleton_rate']:.1%} "
@@ -805,6 +938,19 @@ def main() -> None:
     ev.add_argument("--fixture", required=True)
     ev.add_argument("--labels", required=True)
 
+    er = sub.add_parser(
+        "errors",
+        help="error analysis: WHY the shipped config misses the pairs it misses",
+    )
+    er.add_argument("--fixture", required=True)
+    er.add_argument("--labels", required=True)
+    er.add_argument("--baseline", action="store_true",
+                    help="analyse PRE-REWORK behaviour instead of what ships today")
+    er.add_argument("--samples", type=int, default=6,
+                    help="example pairs printed per failure reason")
+    er.add_argument("--threshold", type=float,
+                    help="override the threshold to see what a retune would reach")
+
     gr = sub.add_parser("grid", help="sweep configs and rank them")
     gr.add_argument("--fixture", required=True)
     gr.add_argument("--labels", required=True)
@@ -882,6 +1028,13 @@ def main() -> None:
     articles = load_fixture(args.fixture)
     with open(args.labels) as fh:
         labels = json.load(fh)["labels"]
+
+    if args.mode == "errors":
+        p = CURRENT_PARAMS if args.baseline else SHIPPED_PARAMS
+        if args.threshold is not None:
+            p = replace(p, threshold=args.threshold)
+        _errors(articles, labels, p, args.samples)
+        return
 
     if args.mode == "eval":
         print("\nCURRENT PRODUCTION CONFIG")
