@@ -34,10 +34,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
-from app.config import settings
+from app.database import admin_engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,7 +60,7 @@ WHERE a.mode = 'daily' AND b.mode = 'daily'
 
 
 async def main(dry_run: bool) -> None:
-    engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+    engine = admin_engine()
     try:
         async with engine.begin() as conn:
             await conn.execute(text(

@@ -31,21 +31,17 @@ timer's window will actually be revisited; older ones simply stop showing a
 fabricated "Media framing" section, which is the point — the client already
 hides the section when framing_comparison is null.
 
-CONNECTIONS — this script deliberately does NOT import app.database.engine.
-That engine is sized for the long-lived web app (SQLAlchemy's default
-QueuePool: pool_size=5 + max_overflow=10 = up to 15 connections, per uvicorn
-worker), and prod points at a Supabase session-mode pooler capped at 15
-clients total. A one-off admin script that borrowed that engine just queued
-behind the app and died with:
+CONNECTIONS — uses app.database.admin_engine(), not the module-level engine.
+That engine is sized for the long-lived web app; a one-off script that
+borrowed it just queued behind the app and died with:
 
     asyncpg.exceptions.InternalServerError: (EMAXCONNSESSION)
     max clients reached in session mode
 
-So it builds its own NullPool engine instead: exactly one connection, opened
-for the statement and closed straight after, no pool retained. If the pooler
-is still saturated by the app, set ADMIN_DATABASE_URL to Supabase's DIRECT
-connection string (port 5432, not the pooler's 6543) to bypass the pooler
-entirely — which is what one-off maintenance should use regardless.
+admin_engine() gives a NullPool connection instead, and — equally important
+— carries the pgbouncer connect args when DB_PGBOUNCER is set. A script that
+hand-rolled its own create_async_engine() silently lacked those and failed
+against the transaction pooler with "prepared statement ... does not exist".
 
 Usage:
     python3 scripts/clear_rulebased_framing.py           # apply
@@ -63,10 +59,8 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
-from app.config import settings
+from app.database import admin_engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -88,14 +82,8 @@ MATCH_PREDICATE = """
 """
 
 
-def _admin_engine():
-    """One connection, no pool retained. See the CONNECTIONS note above."""
-    url = os.environ.get("ADMIN_DATABASE_URL") or settings.DATABASE_URL
-    return create_async_engine(url, poolclass=NullPool, echo=False)
-
-
 async def main(dry_run: bool) -> None:
-    engine = _admin_engine()
+    engine = admin_engine()
     try:
         await _run(engine, dry_run)
     finally:

@@ -108,3 +108,27 @@ async def get_db():
             yield session
         finally:
             await session.close()
+
+
+def admin_engine():
+    """A single-connection engine for one-off maintenance scripts.
+
+    NullPool: one connection, opened for the statement and closed straight
+    after, so a script never queues behind the web app's pool. Borrowing the
+    module-level `engine` above is what made a maintenance script die with
+    EMAXCONNSESSION on 2026-09-03.
+
+    Crucially this reuses _PGBOUNCER_CONNECT_ARGS. A script that built its own
+    create_async_engine() by hand silently lacked them and failed against the
+    transaction pooler with "prepared statement ... does not exist" — the
+    settings must not be duplicated per script, or the next one written will
+    miss them the same way.
+    """
+    from sqlalchemy.pool import NullPool
+
+    return create_async_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        echo=False,
+        connect_args=_PGBOUNCER_CONNECT_ARGS if settings.DB_PGBOUNCER else {},
+    )
