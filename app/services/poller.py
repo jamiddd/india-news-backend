@@ -26,6 +26,7 @@ from app.services.dedup import (
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url
 from app.services.content_cleaner import decode_entities, clean_extracted_text
+from app.services.job_lease import job_lease
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -547,15 +548,19 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
     logger.info(f"Source [{source.name}] ingestion complete: {new_articles_count} new articles.")
     return new_articles_count
 
-# Arbitrary fixed key identifying "a poll_all_sources cycle is running" as a
-# Postgres advisory lock. Cross-process by design: cron invokes the poller
-# as a brand-new `docker exec ... python3 scripts/run_poller_now.py` process
-# every 15 minutes, sharing no memory with the FastAPI app or any prior
-# invocation, so an in-process asyncio.Lock can't see across runs — only a
-# lock the DB itself arbitrates can. Session-scoped: Postgres releases it
-# automatically if the holding connection drops (crash, timeout), so there's
-# no stale-lock cleanup to worry about.
-POLL_LOCK_KEY = 872459123
+# Names the "a poll_all_sources cycle is running" lease. Cross-process by
+# design: the poller runs as a brand-new process every 20 minutes, sharing no
+# memory with the FastAPI app or any prior invocation, so an in-process
+# asyncio.Lock cannot see across runs — only the DB can arbitrate.
+#
+# This was a session-scoped pg_advisory_lock, chosen partly because Postgres
+# released it automatically when the holding connection dropped. That stopped
+# working when DATABASE_URL moved to a transaction-mode pooler on 2026-09-03:
+# the backend is returned to the pool at every commit, so the lock was not
+# held across the poll run and this guard silently became a no-op.
+# app/services/job_lease.py keeps the crash-release property via a TTL plus
+# heartbeat rather than via connection lifetime.
+POLL_LEASE_NAME = "poll_all_sources"
 
 # --- Feed ranking redesign, piece 1: global importance (entity_stats) ---
 # See app/services/entity_graph.py for canonicalization and the "Feed
@@ -661,11 +666,17 @@ async def _recompute_entity_stats(session: AsyncSession) -> None:
 
 
 async def poll_all_sources(session: AsyncSession) -> int:
-    got_lock = (await session.execute(select(func.pg_try_advisory_lock(POLL_LOCK_KEY)))).scalar()
-    if not got_lock:
-        logger.warning("Skipping poll: another poll_all_sources cycle is already running.")
-        return 0
+    async with job_lease(POLL_LEASE_NAME) as got_lease:
+        if not got_lease:
+            logger.warning("Skipping poll: another poll_all_sources cycle is already running.")
+            return 0
+        return await _poll_all_sources_locked(session)
 
+
+async def _poll_all_sources_locked(session: AsyncSession) -> int:
+    """The poll cycle itself. Split out so the lease wraps the whole body
+    without re-indenting it, and so the lease is released by the context
+    manager even on an exception path."""
     try:
         res = await session.execute(select(Source))
         sources = res.scalars().all()
@@ -738,7 +749,8 @@ async def poll_all_sources(session: AsyncSession) -> int:
         return total_new
     finally:
         # Defensive: if something above raised outside the per-source
-        # try/except, the session's transaction could still be aborted here,
-        # and an aborted session would reject even the unlock query itself.
+        # try/except, the session's transaction could still be aborted here.
+        # The lease is released on its own session (see job_lease), so it no
+        # longer depends on this one being usable — but leaving the caller's
+        # session clean is still correct.
         await session.rollback()
-        await session.execute(select(func.pg_advisory_unlock(POLL_LOCK_KEY)))

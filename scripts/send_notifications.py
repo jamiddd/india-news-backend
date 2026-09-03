@@ -28,6 +28,7 @@ Usage:
     python3 scripts/send_notifications.py
 """
 import asyncio
+import contextlib
 import logging
 import os
 import sys
@@ -44,6 +45,7 @@ from firebase_admin import messaging
 from app.database import AsyncSessionLocal
 from app.models import User, DeviceToken, NotificationLog, StoryCluster, utc_now
 from app.services.firebase_auth import _get_firebase_app
+from app.services.job_lease import job_lease
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,7 +63,7 @@ DAILY_WINDOW_MINUTES = 7
 # Arbitrary fixed key for this job's Postgres advisory lock — same pattern as
 # POLL_LOCK_KEY in poller.py, guarding against overlapping cron runs
 # double-sending if one invocation runs long.
-NOTIFY_LOCK_KEY = 872459124
+NOTIFY_LEASE_NAME = "send_notifications"
 
 
 def _minutes_since_midnight(hhmm: str) -> int:
@@ -162,16 +164,28 @@ async def _claim(session, **fields) -> bool:
 
 async def main():
     async with AsyncSessionLocal() as session:
-        got_lock = (await session.execute(select(func.pg_try_advisory_lock(NOTIFY_LOCK_KEY)))).scalar()
-        if not got_lock:
+        # Was pg_try_advisory_lock, which stopped excluding anything under
+        # transaction-mode pooling (2026-09-03) — see app/services/job_lease.
+        # Correctness no longer rests on this: the partial unique indexes on
+        # notification_log are what guarantee no duplicate send. The lease is
+        # an efficiency measure, stopping two runs doing identical work and
+        # racing each other's ON CONFLICT claims.
+        #
+        # Driven through an AsyncExitStack rather than `async with` purely so
+        # the long body below keeps its existing indentation — the release
+        # happens in the same finally that used to hold the unlock.
+        stack = contextlib.AsyncExitStack()
+        got_lease = await stack.enter_async_context(job_lease(NOTIFY_LEASE_NAME))
+        if not got_lease:
             logger.warning("Skipping: another send_notifications run is already in progress.")
+            await stack.aclose()
             return
 
         try:
             app = _get_firebase_app()
         except RuntimeError as e:
             logger.error(f"Firebase not configured, aborting: {e}")
-            await session.execute(select(func.pg_advisory_unlock(NOTIFY_LOCK_KEY)))
+            await stack.aclose()
             return
 
         try:
@@ -308,8 +322,10 @@ async def main():
             logger.info(f"[Notifications sent] breaking={breaking_sent} daily={daily_sent} (users checked={len(users)})")
         finally:
             await session.rollback()
-            await session.execute(select(func.pg_advisory_unlock(NOTIFY_LOCK_KEY)))
             await session.commit()
+            # Releases the lease on its own session, so it does not depend on
+            # this one being usable after an aborted transaction.
+            await stack.aclose()
 
 
 if __name__ == "__main__":

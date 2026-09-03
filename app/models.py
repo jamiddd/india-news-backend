@@ -119,6 +119,35 @@ class NotificationLog(Base):
     )
 
 
+class JobLease(Base):
+    """Cross-process mutual exclusion for singleton background jobs.
+
+    Replaces session-scoped pg_advisory_lock. That worked until DATABASE_URL
+    moved to a transaction-mode pooler (2026-09-03): the pooler returns the
+    backend at every commit, so a lock taken in one transaction is not held
+    in the next, and a second client can acquire a lock another believes it
+    holds — verified in production. Anything spanning more than one
+    transaction cannot rely on a session-scoped lock.
+
+    A lease is a row, so it is pooler-agnostic. Acquisition is a single
+    INSERT ... ON CONFLICT DO UPDATE ... WHERE expires_at < now(), which
+    Postgres evaluates atomically, so exactly one caller can win.
+
+    The cost of a row lease is that a crashed holder no longer releases
+    instantly the way a dropped connection did — hence expires_at plus the
+    heartbeat in app/services/job_lease.py, which together bound stale-lock
+    time to roughly the TTL rather than to the job's full duration.
+    """
+    __tablename__ = "job_lease"
+
+    job_name = Column(String(64), primary_key=True)
+    # Random per acquisition, so a release can only ever clear OUR lease and
+    # never one a later run has since taken over after we expired.
+    owner = Column(String(64), nullable=False)
+    acquired_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class GameSession(Base):
     """One row per (user, game_type, puzzle_date): tracks whether that day's
     puzzle was opened ("attempted") and/or finished ("completed"). Upserted
