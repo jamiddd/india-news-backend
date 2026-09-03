@@ -208,7 +208,8 @@ Full plan: `~/.claude/plans/encapsulated-humming-firefly.md`
 |---|---|---|
 | 0 — eval harness | **DONE** | `scripts/eval_clustering.py` |
 | 1 — clustering fix | **DONE, verified** | |
-| 2 — embeddings | not started | Recall headroom (0.53 → higher). **Recommend waiting** — see whether 10.4% is actually the constraint before adding an ONNX model to a 3.8GB box. |
+| 2 — embeddings | not started | **Recommend NOT doing this next (2026-09-03).** Recall IS the constraint now — the multi-source feed runs at 254 clusters/day against a predicted 350 — but the error analysis says embeddings are the wrong tool for it. Of 215 missed pairs, **zero** score below 0.05 jaccard; 85% are near-misses under the threshold. See `multi-source-feed-plan.md` §9, including the sampling caveat that keeps this from being a proof. |
+| 2b — **recall retune** | **RECOMMENDED NEXT** | The grid already found it (see below): recall 0.542 → ~0.71 by changing two constants, for precision 0.955 → ~0.90. Gate on an `inspect` pass — both candidates sit at `max cluster` 55–59 against a cap of 60. |
 | 3 — framing honesty | **DONE, verified** | |
 | 4 — batch summaries | not started | Cost work. Less urgent now the timer cap stopped the bleeding. |
 | 5 — curated front page | not started | **Recommended next.** This is what the user actually asked for: "trendy, debated, headliners upfront, very curated." Was impossible before (only 418 qualifying clusters); now viable. `entity_boost` is already computed and sitting unused (`poller.py`, never read by `/clusters`). |
@@ -300,15 +301,27 @@ so `git pull` alone does not update a running container. Use
 
 **Key scripts**
 - `scripts/eval_clustering.py` — `fetch` / `pairs` / `label` / `grid` /
-  `inspect`. `inspect` needs no API credit and is the fastest way to sanity-
-  check a config. Labelling 1,020 pairs costs **$0.21** via Haiku Batch.
+  `inspect` / `errors`. `inspect` and `errors` need no API credit and no DB;
+  only `fetch` touches the pooler. `errors` explains WHERE recall is lost
+  rather than how much (added 2026-09-03 — see `multi-source-feed-plan.md`
+  §9). Labelling 1,020 pairs costs **$0.21** via Haiku Batch.
+  Note `label` needs the `anthropic` package, which is in
+  `requirements-dev.txt` and NOT in the production image — build the test
+  stage for it: `docker build --target test -t news-eval .`
 - `scripts/add_cluster_tokens_table.py` — migration + backfill (idempotent).
 - `scripts/validate_clustering.py` — read-only dry run against live data.
 - `scripts/purge_fabricated_framing.py` — dry run by default.
 
-**Session artifacts** (scratch, may be gone): fixture/pairs/labels/grid JSON
-under the 2026-09-02 job scratchpad. Regenerate with `fetch` + `pairs` +
-`label` for ~$0.21 if needed.
+**Session artifacts** — NOT gone, and worth knowing where they are before
+paying to rebuild them. On `newsapp`: `/root/evalrun/` holds `fixture.json`,
+`pairs.json`, `labels.json` and `grid.out` from 2026-09-02/03. That
+fixture+labels pair is the one that produced the 0.542 recall, so it is the
+set to use for anything meant to compare against that number. Mount it read
+into a container (`-v /root/evalrun:/eval`) rather than regenerating.
+
+Anything written inside a `run --rm` container without a host mount is lost
+on the next rebuild — that is how the first copy of these went missing.
+Regenerating costs ~$0.21 plus a batch turnaround.
 
 ---
 
