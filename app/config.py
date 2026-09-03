@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 2
     DB_MAX_OVERFLOW: int = 0
     DB_POOL_TIMEOUT: int = 30
+
+    # Set true when DATABASE_URL points at a TRANSACTION-mode pooler
+    # (Supabase port 6543) rather than session mode (6543's session
+    # equivalent) or a direct connection (5432). Transaction mode hands each
+    # transaction a different backend, which breaks server-side prepared
+    # statements — see app/database.py for what this switches on. Wrong
+    # value is not silently tolerated in either direction: true against a
+    # direct connection merely costs a little per-query planning, false
+    # against a transaction pooler raises DuplicatePreparedStatementError
+    # under concurrency.
+    DB_PGBOUNCER: bool = False
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -1,6 +1,36 @@
+import uuid
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
 from app.config import settings
+
+# Transaction-mode pooling (Supabase port 6543 / pgbouncer) multiplexes many
+# clients onto few backend connections and can hand each transaction a
+# DIFFERENT backend. Server-side prepared statements are per-backend, so the
+# defaults break in two distinct ways:
+#
+#   1. asyncpg prepares every statement and caches it by name. A cached
+#      statement created on backend A is invalid when the next transaction
+#      lands on backend B -> InvalidSQLStatementNameError.
+#   2. asyncpg's default names are sequential (__asyncpg_stmt_1__, ...), so
+#      two clients sharing a backend collide ->
+#      DuplicatePreparedStatementError. This one only appears under
+#      concurrency, which is exactly when you don't want to discover it.
+#
+# All three settings below are needed; the first two are consumed by
+# SQLAlchemy's asyncpg adapter (it pops them from the connect kwargs), the
+# third by asyncpg.connect itself. Session mode and direct connections do not
+# need any of this — a dedicated backend per client makes prepared statements
+# safe — so it is gated on DB_PGBOUNCER rather than always-on. Verified
+# against SQLAlchemy 2.0.52: AsyncAdapt_asyncpg_dbapi.connect() pops
+# prepared_statement_cache_size and prepared_statement_name_func, so they
+# belong in connect_args; passing them to create_async_engine() as top-level
+# kwargs forwards them to asyncpg.connect() and raises TypeError.
+_PGBOUNCER_CONNECT_ARGS = {
+    "prepared_statement_cache_size": 0,
+    "prepared_statement_name_func": lambda: f"__asyncpg_{uuid.uuid4()}__",
+    "statement_cache_size": 0,
+}
 
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -49,9 +79,17 @@ engine = create_async_engine(
     # because the right numbers depend on droplet count, worker count, and
     # the pooler's ceiling — none of which this module can see. Raise them
     # only alongside a corresponding change to one of those.
+    #
+    # Against a TRANSACTION pooler these numbers can go up substantially —
+    # that pooler's whole purpose is tolerating many short-lived clients, and
+    # its client ceiling is far above session mode's 15. Raise DB_POOL_SIZE
+    # once DB_PGBOUNCER is on and you have confirmed the new ceiling; the
+    # defaults here stay sized for the stricter session-mode case so that
+    # flipping one setting can never overcommit the other.
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
+    connect_args=_PGBOUNCER_CONNECT_ARGS if settings.DB_PGBOUNCER else {},
 )
 
 AsyncSessionLocal = async_sessionmaker(

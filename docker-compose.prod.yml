@@ -13,6 +13,8 @@ services:
       - DB_POOL_SIZE=${DB_POOL_SIZE:-2}
       - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-0}
       - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      # true ONLY when DATABASE_URL is the transaction pooler (6543).
+      - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
       - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY:-}
@@ -56,6 +58,8 @@ services:
       - DB_POOL_SIZE=${DB_POOL_SIZE:-2}
       - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-0}
       - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      # true ONLY when DATABASE_URL is the transaction pooler (6543).
+      - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
       - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       # This container also pre-generates sudoku/word search/spelling bee/
@@ -78,6 +82,8 @@ services:
       - DB_POOL_SIZE=${DB_POOL_SIZE:-2}
       - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-0}
       - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      # true ONLY when DATABASE_URL is the transaction pooler (6543).
+      - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ADMIN_USER_EMAIL=${ADMIN_USER_EMAIL:-}
       - ADMIN_POLL_REVIEW_URL=${ADMIN_POLL_REVIEW_URL:-https://openindiannews.com/admin/polls}
