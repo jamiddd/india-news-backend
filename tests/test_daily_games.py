@@ -9,9 +9,14 @@ from app.services.daily_games import (
     _validate_bee,
     _validate_ladder,
     _validate_quiz,
+    WORDLE_FALLBACKS,
+    WORDLE_LENGTH,
+    _validate_wordle,
     generate_spelling_bee,
     generate_word_ladder,
+    generate_wordle,
 )
+from app.services import wordlists
 
 
 def test_spelling_bee_words_use_only_letters_and_center():
@@ -166,3 +171,48 @@ class TestWordlistBackedPuzzles:
             ladders.add((start, target))
         assert len(bees) == 30
         assert len(ladders) == 30
+
+    async def test_wordle_comes_from_the_wordlist(self):
+        answer, source = await generate_wordle(date(2026, 9, 4))
+        assert source == "wordlist"
+        assert len(answer) == WORDLE_LENGTH and answer.isalpha() and answer.isupper()
+
+    async def test_wordle_answer_is_always_typeable(self):
+        """The client validates guesses against accepted_guesses. An answer
+        outside that set would make the solution impossible to enter."""
+        accepted = set(wordlists.accepted_guesses())
+        for offset in range(60):
+            answer, _ = await generate_wordle(date(2026, 9, 4) + timedelta(days=offset))
+            assert answer in accepted, answer
+
+    async def test_wordle_consecutive_days_are_not_alphabetical_neighbours(self):
+        """wordle_answers.txt is written sorted, unlike the shuffled bee and
+        ladder files, so a +1 daily walk would leak the next day's answer to
+        anyone who plays daily. wordlists.WORDLE_STRIDE is what prevents it."""
+        answers = [
+            (await generate_wordle(date(2026, 9, 4) + timedelta(days=offset)))[0]
+            for offset in range(30)
+        ]
+        assert len(set(answers)) == 30
+        assert not any(a[:3] == b[:3] for a, b in zip(answers, answers[1:]))
+
+
+def test_wordle_walk_covers_the_whole_pool_before_repeating():
+    """The stride must stay coprime with the pool size across rebuilds --
+    a shared factor would silently shrink the rotation to a fraction of it."""
+    pool_size = len(wordlists._wordle_answers())
+    seen = {wordlists.wordle_for(date.fromordinal(o))[0] for o in range(739_000, 739_000 + pool_size)}
+    assert len(seen) == pool_size
+
+
+def test_wordle_fallbacks_are_valid_answers():
+    accepted = wordlists.accepted_guesses()
+    for word in WORDLE_FALLBACKS:
+        assert _validate_wordle(word, accepted) == word
+
+
+def test_validate_wordle_rejects_untypeable_answers():
+    with pytest.raises(ValueError):
+        _validate_wordle("CRANES", wordlists.accepted_guesses())
+    with pytest.raises(ValueError):
+        _validate_wordle("ZZZZZ", wordlists.accepted_guesses())
