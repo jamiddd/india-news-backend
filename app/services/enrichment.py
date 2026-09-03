@@ -86,6 +86,29 @@ OUTPUT FORMAT: Return strictly valid JSON with keys:
 organizations/locations above — do not introduce new names there.
 """
 
+def extract_text(data: Dict[str, Any]) -> str:
+    """Concatenate the response's text blocks.
+
+    NOT content[0]["text"]. claude-sonnet-5 runs adaptive extended thinking by
+    default — omitting the `thinking` parameter does not disable it — so the
+    first content block is a `thinking` block, which has no "text" key. The
+    old indexing raised KeyError: 'text' on every multi-source enrichment from
+    the moment Sonnet routing shipped (0ca7d07, 2026-09-02 22:54). The
+    exception was swallowed by the caller's broad `except`, so each call paid
+    for Sonnet input, output AND thinking tokens, discarded the whole
+    response, left ai_enriched False, and got retried by the timer forever.
+    Measured 2026-09-03: 134 clusters stuck in that loop.
+
+    Blocks other than `text` (thinking, tool_use) carry no response text and
+    are skipped rather than indexed into.
+    """
+    return "".join(
+        block.get("text", "")
+        for block in data.get("content", [])
+        if block.get("type") == "text"
+    )
+
+
 def parse_json_response(text: str) -> Dict[str, Any]:
     """Parse the model's JSON reply. Despite the prompt asking for strictly
     raw JSON, claude-haiku-4-5 in practice wraps it in ```json ... ``` and
@@ -244,6 +267,19 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                 }
                 for art in articles
             ]
+            # claude-sonnet-5 thinks adaptively whether or not we ask it to,
+            # and those tokens are billed. This is a short structured
+            # extraction over a handful of headlines, not a reasoning problem,
+            # so cap the depth rather than pay the default "high" effort on
+            # every multi-source cluster. Raise this if framing quality
+            # measurably suffers — it is the tuning knob, not the model.
+            #
+            # Deliberately NOT sent on the SINGLE_SOURCE_MODEL path:
+            # output_config.effort is rejected by claude-haiku-4-5.
+            effort_config = (
+                {"output_config": {"effort": "low"}} if can_compare_framing else {}
+            )
+
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
@@ -274,14 +310,21 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
                                 "cache_control": {"type": "ephemeral"}
                             }
                         ],
-                        "messages": [{"role": "user", "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}"}]
+                        "messages": [{"role": "user", "content": f"Story Articles:\n{json.dumps(articles_data, indent=2)}"}],
+                        **effort_config,
                     },
                     timeout=15.0
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                content_blocks = data.get("content", [])
-                raw_text = content_blocks[0]["text"] if content_blocks else ""
+                raw_text = extract_text(data)
+                if not raw_text:
+                    raise ValueError(
+                        f"No text block in response "
+                        f"(stop_reason={data.get('stop_reason')!r}, "
+                        f"block types="
+                        f"{[b.get('type') for b in data.get('content', [])]})"
+                    )
 
                 try:
                     structured = parse_json_response(raw_text)

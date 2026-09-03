@@ -12,6 +12,7 @@ from app.services.enrichment import (
     parse_json_response,
     extract_entities_rule_based,
     distinct_source_count,
+    extract_text,
 )
 from app.services.poller import should_reenrich_on_new_outlet
 
@@ -180,3 +181,38 @@ class TestShouldReenrichOnNewOutlet:
 
     def test_a_sixteen_outlet_story_costs_four_passes_not_fifteen(self):
         assert sum(should_reenrich_on_new_outlet(n) for n in range(2, 17)) == 4
+
+
+class TestExtractText:
+    """Regression tests for the KeyError: 'text' that broke every
+    multi-source enrichment from 2026-09-02 22:54 onward. claude-sonnet-5
+    runs adaptive thinking by default, so content[0] is a thinking block."""
+
+    def test_skips_leading_thinking_block(self):
+        # The exact shape that raised KeyError: 'text' in production.
+        data = {"content": [
+            {"type": "thinking", "thinking": "Let me compare these outlets..."},
+            {"type": "text", "text": '{"neutral_headline": "x"}'},
+        ]}
+        assert extract_text(data) == '{"neutral_headline": "x"}'
+
+    def test_plain_text_only_response_still_works(self):
+        data = {"content": [{"type": "text", "text": "hello"}]}
+        assert extract_text(data) == "hello"
+
+    def test_concatenates_multiple_text_blocks(self):
+        data = {"content": [
+            {"type": "text", "text": '{"a":'},
+            {"type": "text", "text": ' 1}'},
+        ]}
+        assert extract_text(data) == '{"a": 1}'
+
+    def test_no_text_block_returns_empty_not_keyerror(self):
+        # Caller turns this into an explicit, diagnosable ValueError rather
+        # than feeding "" to the JSON parser.
+        data = {"content": [{"type": "thinking", "thinking": "..."}]}
+        assert extract_text(data) == ""
+
+    def test_empty_content_returns_empty(self):
+        assert extract_text({"content": []}) == ""
+        assert extract_text({}) == ""
