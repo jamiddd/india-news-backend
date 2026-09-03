@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import pytest
 
 from app.services.daily_games import (
@@ -7,6 +9,8 @@ from app.services.daily_games import (
     _validate_bee,
     _validate_ladder,
     _validate_quiz,
+    generate_spelling_bee,
+    generate_word_ladder,
 )
 
 
@@ -117,3 +121,37 @@ def test_quiz_validator_rejects_unsafe_question():
     payload["questions"][0]["question"] = "How many people were killed in the crash?"
     with pytest.raises(ValueError, match="Unsafe"):
         _validate_quiz(payload)
+
+
+class TestWordlistBackedPuzzles:
+    """Spelling Bee and Word Ladder now come from the committed SCOWL lists
+    (app/data/wordlists), which are enumerated at build time so that only
+    playable puzzles exist. These guard the wiring; tests/test_wordlists.py
+    covers the data files themselves."""
+
+    async def test_spelling_bee_comes_from_the_wordlist(self):
+        letters, centre, words, source = await generate_spelling_bee(date(2026, 9, 4))
+        assert source == "wordlist"
+        assert len(letters) == 7 and centre in letters
+        assert any(set(word) == set(letters) for word in words), "puzzle has no pangram"
+        assert all(centre in word and set(word) <= set(letters) for word in words)
+
+    async def test_word_ladder_comes_from_the_wordlist(self):
+        start, target, allowed, optimal, source = await generate_word_ladder(date(2026, 9, 4))
+        assert source == "wordlist"
+        assert start != target and len(start) == len(target)
+        assert 6 <= len(allowed) <= 15
+        assert start not in allowed and target not in allowed
+        assert optimal >= 1
+
+    async def test_consecutive_days_differ(self):
+        """The old LLM path returned COLD -> WARM on 8 of 14 days."""
+        bees, ladders = set(), set()
+        for offset in range(30):
+            day = date(2026, 9, 4) + timedelta(days=offset)
+            letters, _, _, _ = await generate_spelling_bee(day)
+            start, target, _, _, _ = await generate_word_ladder(day)
+            bees.add("".join(letters))
+            ladders.add((start, target))
+        assert len(bees) == 30
+        assert len(ladders) == 30

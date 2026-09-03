@@ -9,6 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyQuiz, DailySpellingBee, DailyWordLadder
+from app.services import wordlists
 from app.services.apiverve_client import call_apiverve
 
 logger = logging.getLogger(__name__)
@@ -89,8 +90,11 @@ def _validate_bee(payload: dict) -> tuple[list[str], str, list[str]]:
         raise ValueError("Need exactly 7 unique letters")
     if center not in letters:
         raise ValueError("Center letter must be one of the 7 letters")
-    if not (8 <= len(words) <= 20) or len(set(words)) != len(words):
-        raise ValueError("Need 8-20 unique words")
+    # Upper bound matches BEE_MAX_WORDS in scripts/build_wordlists.py. A
+    # richer word list makes a better puzzle; 20 was only ever what an LLM
+    # could be relied on to produce in one response.
+    if not (8 <= len(words) <= 40) or len(set(words)) != len(words):
+        raise ValueError("Need 8-40 unique words")
     letter_set = set(letters)
     for word in words:
         if len(word) < 4 or not word.isalpha():
@@ -104,31 +108,32 @@ def _validate_bee(payload: dict) -> tuple[list[str], str, list[str]]:
     return letters, center, words
 
 
-async def _apiverve_bee() -> tuple[list[str], str, list[str]] | None:
-    """The `words[]` valid-word list is a Premium-only field — on the free
-    tier APIVerve returns letters but no words, which isn't a playable
-    puzzle (the client can't validate guesses), so treat that as a miss and
-    let the caller fall through to the curated bank."""
-    data = await call_apiverve("spellingbee", {"difficulty": "medium"})
-    if data is None:
-        return None
-    payload = {
-        "letters": data.get("allLetters"),
-        "center_letter": data.get("centerLetter"),
-        "words": [item.get("word") for item in (data.get("words") or []) if isinstance(item, dict)],
-    }
-    try:
-        return _validate_bee(payload)
-    except Exception as exc:
-        logger.info("APIVerve spelling bee unusable (likely free-tier, no words[]): %s", exc)
-        return None
-
-
 async def generate_spelling_bee(puzzle_date: date) -> tuple[list[str], str, list[str], str]:
-    apiverve_bee = await _apiverve_bee()
-    if apiverve_bee is not None:
-        letters, center, words = apiverve_bee
-        return letters, center, words, "apiverve"
+    """Straight from the committed SCOWL word lists.
+
+    The APIVerve call this replaced could never work: `words[]` is a
+    Premium-only field, so the free tier returns letters with no valid-word
+    list, which isn't a playable puzzle. Confirmed again 2026-09-03 —
+    `"words": null` on every response. Dropping it also gives the games that
+    DO get APIVerve data (crossword, word search, quiz) back one request a
+    day against a shared rate limit that has produced 429s in production.
+
+    wordlists picks from ~3,000 puzzles that were proven playable at build
+    time, so unlike the old AI path there is nothing here to fail — the
+    curated bank below only covers the data files not shipping at all.
+    """
+    if wordlists.available():
+        try:
+            letters, center, words = wordlists.spelling_bee_for(puzzle_date)
+            # Same shape check the old sources went through — the puzzle was
+            # verified at build time, so a failure here means the data files
+            # and this code have drifted apart, which is worth a loud log.
+            letters, center, words = _validate_bee(
+                {"letters": letters, "center_letter": center, "words": words}
+            )
+            return letters, center, words, "wordlist"
+        except Exception as exc:
+            logger.error("Committed spelling bee list failed validation: %s", exc)
     letters, center, words = _fallback_bee(puzzle_date)
     return letters, center, words, "curated"
 
@@ -203,37 +208,30 @@ def _validate_ladder(payload: dict) -> tuple[str, str, list[str], int]:
     return start, target, allowed, true_optimal
 
 
-async def _apiverve_ladder() -> tuple[str, str, list[str], int] | None:
-    """APIVerve gives start/end/steps on the free tier but gates the actual
-    `solution`/word-pool behind Premium, so there's no way to build a
-    verifiably-solvable `allowed_words` pool from a free-tier response —
-    this will consistently miss until upgrading, same situation as spelling
-    bee's words[]."""
-    data = await call_apiverve("wordladder", {"difficulty": "medium", "count": 1})
-    if data is None:
-        return None
-    puzzles = data.get("puzzles") or []
-    if not puzzles or not isinstance(puzzles[0], dict):
-        return None
-    puzzle = puzzles[0]
-    payload = {
-        "start_word": puzzle.get("startWord"),
-        "target_word": puzzle.get("endWord"),
-        "allowed_words": puzzle.get("solution"),
-        "optimal_steps": puzzle.get("steps"),
-    }
-    try:
-        return _validate_ladder(payload)
-    except Exception as exc:
-        logger.info("APIVerve word ladder unusable (likely free-tier, no solution[]): %s", exc)
-        return None
-
-
 async def generate_word_ladder(puzzle_date: date) -> tuple[str, str, list[str], int, str]:
-    apiverve_ladder = await _apiverve_ladder()
-    if apiverve_ladder is not None:
-        start, target, allowed, optimal = apiverve_ladder
-        return start, target, allowed, optimal, "apiverve"
+    """Straight from the committed SCOWL word lists.
+
+    Replaces both the APIVerve call (whose `solution` word pool is
+    Premium-only — re-confirmed 2026-09-03 as `null` on every response) and,
+    before it, an LLM that returned COLD -> WARM on 8 of 14 days because it
+    is the textbook example of a word ladder.
+
+    Pairs come from the largest connected component of the 4-letter pool with
+    a verified 3-6 step path, so _validate_ladder's BFS re-derivation here is
+    a consistency check rather than a gate.
+    """
+    if wordlists.available():
+        try:
+            start, target, allowed, steps = wordlists.word_ladder_for(puzzle_date)
+            start, target, allowed, optimal = _validate_ladder({
+                "start_word": start,
+                "target_word": target,
+                "allowed_words": allowed,
+                "optimal_steps": steps,
+            })
+            return start, target, allowed, optimal, "wordlist"
+        except Exception as exc:
+            logger.error("Committed word ladder list failed validation: %s", exc)
     start, target, allowed, optimal = _fallback_ladder(puzzle_date)
     return start, target, allowed, optimal, "curated"
 
