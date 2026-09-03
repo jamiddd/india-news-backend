@@ -13,6 +13,8 @@ from app.services.enrichment import (
     extract_entities_rule_based,
     distinct_source_count,
     extract_text,
+    select_articles_for_prompt,
+    MAX_ARTICLES,
 )
 from app.services.poller import should_reenrich_on_new_outlet
 
@@ -23,8 +25,10 @@ class _StubSource:
 
 
 class _StubArticle:
-    def __init__(self, title, source_name, source_id=None):
+    def __init__(self, title, source_name, source_id=None, content=None, snippet=None):
         self.title = title
+        self.content = content
+        self.snippet = snippet
         self.source = _StubSource(source_name) if source_name else None
         # Defaults to hashing the name so existing tests that don't care
         # about source identity still get one distinct id per outlet.
@@ -216,3 +220,50 @@ class TestExtractText:
     def test_empty_content_returns_empty(self):
         assert extract_text({"content": []}) == ""
         assert extract_text({}) == ""
+
+
+class TestSelectArticlesForPrompt:
+    """The MAX_ARTICLES cap has to stay outlet-diverse. Taking articles in
+    list order would let one prolific outlet fill the cap on its own, which
+    is both a worse summary and a framing comparison with nothing to
+    compare. See docs/multi-source-feed-plan.md §5.F."""
+
+    def test_keeps_everything_under_the_cap(self):
+        articles = [_StubArticle(f"A{i}", f"Outlet{i}", source_id=i) for i in range(3)]
+        assert len(select_articles_for_prompt(articles)) == 3
+
+    def test_caps_at_max_articles(self):
+        articles = [_StubArticle(f"A{i}", f"Outlet{i}", source_id=i) for i in range(20)]
+        assert len(select_articles_for_prompt(articles)) == MAX_ARTICLES
+
+    def test_one_prolific_outlet_cannot_fill_the_cap(self):
+        # 10 articles from one outlet, 2 from others. The naive "first six"
+        # would send six articles from Outlet1 and no comparison at all.
+        articles = [_StubArticle(f"A{i}", "Outlet1", source_id=1) for i in range(10)]
+        articles.append(_StubArticle("B", "Outlet2", source_id=2))
+        articles.append(_StubArticle("C", "Outlet3", source_id=3))
+
+        selected = select_articles_for_prompt(articles)
+        assert len(selected) == MAX_ARTICLES
+        assert {a.source_id for a in selected} == {1, 2, 3}
+        # One per outlet before any outlet repeats.
+        assert [a.source_id for a in selected[:3]] == [1, 2, 3]
+
+    def test_a_multi_source_cluster_never_narrows_to_one_outlet(self):
+        # The cap must not contradict can_compare_framing, which is computed
+        # on the cluster's full article list.
+        articles = [_StubArticle(f"A{i}", "Outlet1", source_id=1) for i in range(50)]
+        articles.append(_StubArticle("Z", "Outlet2", source_id=2))
+        selected = select_articles_for_prompt(articles)
+        assert distinct_source_count(selected) >= 2
+
+    def test_prefers_the_longer_body_within_an_outlet(self):
+        # An RSS stub is less use than a real scraped body from the same
+        # outlet, and only one of the two survives the round-robin.
+        stub = _StubArticle("stub", "Outlet1", source_id=1, snippet="short")
+        full = _StubArticle("full", "Outlet1", source_id=1, content="x" * 2000)
+        selected = select_articles_for_prompt([stub, full], max_articles=1)
+        assert selected == [full]
+
+    def test_empty(self):
+        assert select_articles_for_prompt([]) == []

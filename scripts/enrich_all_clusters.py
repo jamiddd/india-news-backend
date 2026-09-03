@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from sqlalchemy import desc, or_, and_
 
+from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models import StoryCluster, Article, utc_now
 from app.services.enrichment import enrich_cluster_with_ai
@@ -32,23 +33,47 @@ async def enrich_clusters(
     days (by last_updated_at) and/or forced to re-enrich regardless of
     current ai_enriched state. Returns the number of clusters processed.
 
-    Singletons are included in AI enrichment now that it's a premium,
-    customer-facing feature (see enrich_cluster_with_ai) — this script no
-    longer needs to special-case them; the only remaining singleton-specific
-    logic is in the *default* (non-forced, non-windowed) selection query
-    below, which still can't use ai_enriched to detect "needs enrichment"
-    for clusters that permanently fail the paid call.
+    Only clusters with at least FEED_MIN_DISTINCT_SOURCES distinct outlets
+    are selected. Singletons keep their original RSS headline and are never
+    sent to an LLM.
+
+    This reverses the earlier decision to enrich singletons too. That was
+    made when enrichment was framed as a premium feature owed to every
+    story; the measurement that changed it is that 97.5% of clusters are a
+    single RSS item, and paraphrasing each one's 250-char snippet cost
+    ~$238/month to restate text already on screen. Demand drops from
+    ~4,800/day to ~350/day. A singleton that later earns a second outlet is
+    enriched then — the poller clears ai_enriched at that crossing — so this
+    defers enrichment rather than denying it. See
+    docs/multi-source-feed-plan.md §5.C.
+
+    The gate applies to --all and --since-days runs too: a forced backfill
+    is exactly the run where enriching every singleton would be most
+    expensive.
     """
     async with AsyncSessionLocal() as session:
-        # enrich_cluster_with_ai only ever reads title/snippet/source.name
-        # (see app/services/enrichment.py) — load_only stops this from also
-        # dragging every article's full scraped body over the wire, on a
+        # enrich_cluster_with_ai reads title/content/snippet/source.name (see
+        # app/services/enrichment.py) — load_only keeps this from also
+        # dragging columns nobody in that path reads over the wire, on a
         # remote (Supabase) Postgres where that's metered egress, every time
         # this runs (every 20 min via infra/news-enrich.timer).
+        #
+        # Article.content is now part of that set and it is the big column.
+        # It has to be loaded here: leaving it out does not save the egress,
+        # it just moves it to a lazy load per article inside the enrichment
+        # call — which on an AsyncSession raises rather than silently
+        # emitting the query. The gate below is what actually bounds the
+        # cost, by cutting the row count ~14x.
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).load_only(
-                Article.title, Article.snippet, Article.source_id
+                Article.title, Article.content, Article.snippet, Article.source_id
             ).selectinload(Article.source)
+        )
+
+        # The multi-source gate (§5.C). Applied before every other filter and
+        # in every mode, forced runs included.
+        query = query.where(
+            StoryCluster.distinct_source_count >= settings.FEED_MIN_DISTINCT_SOURCES
         )
 
         if since_days is not None:

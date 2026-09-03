@@ -39,12 +39,17 @@ KNOWN_ENTITIES = {
 
 ENRICHMENT_SYSTEM_PROMPT = """
 You are an expert news synthesis engine for an Indian news aggregation platform.
-Your job is to analyze headline and snippet pairs from one or more news outlets
-covering the SAME story event. Sometimes only a single outlet is provided —
-treat that as a single-source story, not an error.
+Your job is to analyze headline and article-text pairs from one or more news
+outlets covering the SAME story event. Sometimes only a single outlet is
+provided — treat that as a single-source story, not an error.
+
+Each article_text is the outlet's own reporting, capped at a fixed length, so
+it may end mid-sentence. That is truncation, not the end of the story — never
+treat a cut-off clause as a fact about what happened, and never remark on it.
 
 CRITICAL CONSTRAINTS:
-1. Summarize ONLY from the provided headlines and snippets. Do NOT invent outside facts.
+1. Summarize ONLY from the provided headlines and article texts. Do NOT invent
+   outside facts.
 2. Generate a neutral, objective, matter-of-fact headline (free of clickbait or bias).
 3. Generate a concise summary of AT MOST 3 bullet points. Each bullet must be
    ONE grammatically complete sentence of 35 words or fewer — never merge
@@ -215,6 +220,58 @@ def distinct_source_count(articles: List[Article]) -> int:
     return len({a.source_id for a in articles if a.source_id is not None})
 
 
+# The two knobs that bound input cost as multi-source volume grows. Measured
+# 2026-09-03 with the count_tokens endpoint over 25 real multi-source
+# clusters: snippet-only averaged 1,361 input tokens, full content under
+# these caps averaged 2,527 (median 2,069, max 4,519) — so summaries are
+# built from ~473 words instead of ~40 at roughly 1.9x the input cost.
+#
+# MAX_ARTICLES matters more than it looks: without it a single 29-article
+# cluster dominates a whole run. Keep both configurable-by-editing here —
+# the plan grows multi-source volume deliberately, and cost scales with it.
+# See docs/multi-source-feed-plan.md §5.F.
+CONTENT_CAP = 1500
+MAX_ARTICLES = 6
+
+
+def select_articles_for_prompt(
+    articles: List[Article], max_articles: int = MAX_ARTICLES
+) -> List[Article]:
+    """Pick at most `max_articles`, one per outlet before any outlet repeats.
+
+    Taking articles in list order would let one prolific outlet fill the
+    whole cap — six articles from a single source, which is both a worse
+    summary and a framing comparison with nothing to compare. Round-robin by
+    outlet instead: every distinct source contributes before any contributes
+    twice. This also keeps the cap consistent with can_compare_framing, which
+    is computed on the cluster's full article list — a cluster that qualifies
+    as multi-source can never be narrowed to one outlet by the cap.
+
+    Within an outlet, longer content first: the article with a real scraped
+    body is more use than the one that only has an RSS stub.
+    """
+    by_source: Dict[Any, List[Article]] = {}
+    for art in articles:
+        by_source.setdefault(art.source_id, []).append(art)
+    for group in by_source.values():
+        group.sort(key=lambda a: len(a.content or a.snippet or ""), reverse=True)
+
+    selected: List[Article] = []
+    rank = 0
+    while len(selected) < max_articles:
+        round_took_one = False
+        for group in by_source.values():
+            if rank < len(group):
+                selected.append(group[rank])
+                round_took_one = True
+                if len(selected) >= max_articles:
+                    break
+        if not round_took_one:
+            break
+        rank += 1
+    return selected
+
+
 async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -> Dict[str, Any]:
     """Enrich a story cluster using Anthropic API or fallback rule-based engine."""
     articles = cluster.articles or []
@@ -259,13 +316,18 @@ async def enrich_cluster_with_ai(session: AsyncSession, cluster: StoryCluster) -
     # comparison that doesn't exist.
     if settings.ANTHROPIC_API_KEY and len(articles) >= 1:
         try:
+            # Send the article body we already scrape, not the 250-char RSS
+            # stub. 82% of articles carry >400 chars of `content` (avg
+            # ~2,985) — the old payload paid an LLM to paraphrase a snippet
+            # while the real text sat unused in the same row. Falls back to
+            # snippet for the 18% with no scraped body.
             articles_data = [
                 {
                     "outlet": art.source.name if art.source else "Outlet",
                     "headline": art.title,
-                    "snippet": (art.snippet or "")[:250]
+                    "article_text": (art.content or art.snippet or "")[:CONTENT_CAP],
                 }
-                for art in articles
+                for art in select_articles_for_prompt(articles)
             ]
             # claude-sonnet-5 thinks adaptively whether or not we ask it to,
             # and those tokens are billed. This is a short structured
