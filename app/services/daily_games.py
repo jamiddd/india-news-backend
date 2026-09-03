@@ -92,9 +92,10 @@ def _validate_bee(payload: dict) -> tuple[list[str], str, list[str]]:
         raise ValueError("Center letter must be one of the 7 letters")
     # Upper bound matches BEE_MAX_WORDS in scripts/build_wordlists.py. A
     # richer word list makes a better puzzle; 20 was only ever what an LLM
-    # could be relied on to produce in one response.
-    if not (8 <= len(words) <= 40) or len(set(words)) != len(words):
-        raise ValueError("Need 8-40 unique words")
+    # could be relied on to produce in one response, and 40 was the ceiling
+    # while accepted words came from the same SCOWL level as the letters.
+    if not (8 <= len(words) <= 80) or len(set(words)) != len(words):
+        raise ValueError("Need 8-80 unique words")
     letter_set = set(letters)
     for word in words:
         if len(word) < 4 or not word.isalpha():

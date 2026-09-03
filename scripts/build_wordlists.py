@@ -25,6 +25,9 @@ both lists we need:
     general audience recognises.
   * validity (<= VALIDITY_LEVEL) -- what the app accepts as a guess. Bigger,
     so a player is not told a word they know is not a word.
+  * bee accepted (<= BEE_ACCEPT_LEVEL) -- between the two: the Bee picks its
+    letters from the answers tier but counts words from this one, so ordinary
+    finds like EATERY and TEARY score instead of being refused.
 Note this is a speller's notion of common ("a spellchecker accepts it"), not
 a frequency one. If puzzles feel obscure, lower ANSWER_LEVEL to 20.
 
@@ -63,10 +66,18 @@ SCOWL_SHA256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc
 LEVELS = [10, 20, 35, 40, 50, 55, 60, 70, 80, 95]
 ANSWER_LEVEL = 35
 VALIDITY_LEVEL = 70
+# Bee accepted words sit between the two. The letters and pangram must be
+# recognisable, so they come from ANSWER_LEVEL; the list of words that COUNT
+# should be as generous as the puzzle can bear, because anything valid but
+# missing reads to the player as "good word, but not in today's list".
+# Building both from <=35 shipped 29 words for ADEIRTY/Y while <=50 has 40,
+# missing ARTY, DRAY, DYER, EATERY, REEDY and TEARY among them. <=70 goes too
+# far the other way: median 57 words and 419 puzzles above 80.
+BEE_ACCEPT_LEVEL = 50
 
 # Bee puzzles must land in a size band: too few words is unplayable, too many
-# is a slog. Mirrors the 8-20 that _validate_bee enforces, with headroom.
-BEE_MIN_WORDS, BEE_MAX_WORDS = 8, 40
+# is a slog. Measured over BEE_ACCEPT_LEVEL: median 38 words, max 74.
+BEE_MIN_WORDS, BEE_MAX_WORDS = 8, 80
 LADDER_MIN_STEPS, LADDER_MAX_STEPS = 3, 6
 LADDER_MAX_PAIRS = 4000
 
@@ -156,7 +167,7 @@ def _spread(rows: list) -> list:
     return shuffled
 
 
-def build_bee(answers: set[str]) -> list[tuple[str, str, int]]:
+def build_bee(pangram_pool: set[str], accepted: set[str]) -> list[tuple[str, str, int]]:
     """Precompute every playable (pangram, centre) pair.
 
     Deriving the letters *from* a pangram is what guarantees a pangram
@@ -164,7 +175,7 @@ def build_bee(answers: set[str]) -> list[tuple[str, str, int]]:
     than at runtime means an unplayable puzzle can never reach a user.
     """
     by_mask: dict[int, list[str]] = {}
-    for word in answers:
+    for word in accepted:
         if len(word) < 4:
             continue
         mask = _mask(word)
@@ -176,7 +187,7 @@ def build_bee(answers: set[str]) -> list[tuple[str, str, int]]:
     # letters would come round several times in a year.
     puzzles: list[tuple[str, str, int]] = []
     seen_letters: set[frozenset[str]] = set()
-    candidates = sorted(w for w in answers if len(set(w)) == 7 and 7 <= len(w) <= 9)
+    candidates = sorted(w for w in pangram_pool if len(set(w)) == 7 and 7 <= len(w) <= 9)
     for pangram in candidates:
         if frozenset(pangram) in seen_letters:
             continue
@@ -289,12 +300,14 @@ def main() -> int:
             final_dir = fetch_scowl(tmp)
 
         answers = load_level(final_dir, ANSWER_LEVEL)
+        bee_accepted = load_level(final_dir, BEE_ACCEPT_LEVEL)
         validity = load_level(final_dir, VALIDITY_LEVEL)
         print(f"\nSCOWL <= {ANSWER_LEVEL}: {len(answers)} answer words")
+        print(f"SCOWL <= {BEE_ACCEPT_LEVEL}: {len(bee_accepted)} bee-accepted words")
         print(f"SCOWL <= {VALIDITY_LEVEL}: {len(validity)} validity words")
 
         print("\nSpelling Bee")
-        bee = build_bee(answers)
+        bee = build_bee(answers, bee_accepted)
         print(f"  {len(bee)} playable (pangram, centre) pairs -> {len(bee) / 365:.1f} years of daily puzzles")
 
         print("\nWord Ladder")
@@ -303,8 +316,8 @@ def main() -> int:
         print(f"  {len(pairs)} start/target pairs at {LADDER_MIN_STEPS}-{LADDER_MAX_STEPS} steps")
 
         print("\nWriting" + (" (dry run)" if args.dry_run else ""))
-        write_list(OUT_DIR / "bee_answers.txt", sorted(w for w in answers if len(w) >= 4),
-                   "Spelling Bee: words the puzzle may contain", args.dry_run)
+        write_list(OUT_DIR / "bee_answers.txt", sorted(w for w in bee_accepted if len(w) >= 4),
+                   f"Spelling Bee: words that count as answers (SCOWL <= {BEE_ACCEPT_LEVEL})", args.dry_run)
         write_list(OUT_DIR / "bee_puzzles.txt", [f"{p} {c} {n}" for p, c, n in bee],
                    "Spelling Bee: pangram, centre letter, valid-word count", args.dry_run)
         write_list(OUT_DIR / "ladder_words.txt", pool,

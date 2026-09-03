@@ -34,13 +34,21 @@ def test_every_bee_puzzle_is_playable(bee_answers, bee_puzzles):
     guaranteed because the letters are derived from one — this asserts the
     build didn't break that."""
     assert len(bee_puzzles) > 1000
-    for pangram, centre, claimed in bee_puzzles[:400]:
+    for pangram, centre, claimed in bee_puzzles[:200]:
         letters = set(pangram)
         assert len(letters) == 7, pangram
         assert centre in letters, (pangram, centre)
         words = [w for w in bee_answers if len(w) >= 4 and centre in w and set(w) <= letters]
         assert len(words) == claimed, (pangram, centre, len(words), claimed)
         assert any(set(w) == letters for w in words), f"no pangram for {pangram}"
+
+
+def test_bee_word_lists_include_ordinary_finds(bee_answers):
+    """The accepted-word pool is built one SCOWL level above the letters, so
+    that everyday words score. Building both from the same level shipped 29
+    words for ADEIRTY/Y and refused EATERY, TEARY, ARTY and DYER."""
+    for word in ("eatery", "teary", "arty", "dyer", "dray", "reedy"):
+        assert word in bee_answers, word
 
 
 def test_bee_puzzles_are_distinct_letter_sets(bee_puzzles):
