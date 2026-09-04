@@ -1,12 +1,23 @@
 [Unit]
-Description=Run story-cluster AI enrichment every 20 minutes
+Description=Run story-cluster AI enrichment hourly (safety net)
 
 [Timer]
 # Offset from news-poll.timer's OnBootSec so enrichment tends to run a
 # little after a poll cycle has had time to create new clusters, not
 # concurrently with it.
 OnBootSec=5min
-OnUnitActiveSec=20min
+# 20min -> 60min, 2026-09-04 (multi-source-feed-plan.md §5.D). The poller now
+# runs an enrichment cycle itself the moment a story becomes corroborated, so
+# this timer is no longer the path a story entering the feed waits on — it is
+# the safety net for crossings whose event-driven run failed or was skipped
+# because the lease was held, plus the refinement passes at the 3rd, 4th, 5th
+# outlet, which go to the Batch API and which nobody is waiting on.
+#
+# Batch reconciliation is unaffected in practice: reconcile_open_batches()
+# runs at the start of every enrichment cycle, and the poller triggers one
+# each 20-minute poll that produces a crossing, so results still land at
+# roughly the old cadence.
+OnUnitActiveSec=60min
 Persistent=true
 
 [Install]

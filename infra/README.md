@@ -37,9 +37,21 @@ to bring Caddy under real config management first.
   backup for reference, not something a script re-applies automatically.
 
 - `news-enrich.service` / `news-enrich.timer` — same pattern, added
-  2026-08-22, calling `POST /api/v1/ingest/enrich?since_days=2` every 20
-  minutes (offset 5min into the cycle so it tends to run after a poll has
-  landed new clusters, not concurrently). Deliberately **no** `force_all`
+  2026-08-22, calling `POST /api/v1/ingest/enrich?since_days=2` **hourly**
+  (offset 5min into the cycle so it tends to run after a poll has
+  landed new clusters, not concurrently).
+
+  **Was every 20 minutes until 2026-09-04.** The poller now runs an
+  enrichment cycle itself as soon as a story becomes corroborated
+  (`multi-source-feed-plan.md` §5.D), so this timer is no longer what a
+  story entering the feed waits on. It is the safety net: crossings whose
+  event-driven run failed or was skipped on a held lease, plus the
+  refinement passes at the 3rd/4th/5th outlet, which go to the Batch API
+  and which nobody is waiting on. **If the event-driven trigger is ever
+  reverted, put this back to 20min** — at hourly on its own, a corroborated
+  story could sit up to 60 minutes showing its raw RSS headline.
+
+  Deliberately **no** `force_all`
   on the recurring timer — it only enriches clusters missing `entities` or
   never successfully `ai_enriched`, so it doesn't re-bill the same
   already-enriched clusters every cycle. Also installed on `newsapp` only,

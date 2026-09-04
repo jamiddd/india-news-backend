@@ -6,9 +6,9 @@ After=docker.service
 Type=oneshot
 # since_days=2 bounds the selection query to recent clusters (cheap even at
 # scale) without needing an index on ai_enriched. force_all is deliberately
-# NOT set here: this timer fires every 20 min, and force-re-enriching every
-# cluster in the window on every single cycle would re-bill the same
-# clusters ~70x/day for no new information. Default (force_all=false) only
+# NOT set here: this timer fires hourly, and force-re-enriching every
+# cluster in the window on every cycle would re-bill the same clusters for
+# no new information. Default (force_all=false) only
 # enriches clusters that are missing entities or never got a successful AI
 # pass — new singletons/clusters as they appear, plus retries of prior
 # failures — which is what "going forward" actually needs. The one-time
