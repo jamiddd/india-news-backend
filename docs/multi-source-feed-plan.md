@@ -163,6 +163,12 @@ Rationale: with timer-only enrichment, a 40m poll plus a 40m enrich tick means
 up to **80 minutes** between a story becoming corroborated and being
 presentable — on a feed whose whole value is corroborated stories.
 
+**Measured 2026-09-04, and the case got stronger.** Median lag from first
+article to second outlet is now **150 min** (p90 531), down from the 238 min
+this plan was written against — the 0.30/3 retune corroborates faster. So the
+80-minute worst case is now over half of the total time-to-presentable, a worse
+ratio than when D was specified. D is the largest remaining latency lever.
+
 ### E. Delete the doubling gate
 
 `should_reenrich_on_new_outlet()` (thresholds 2, 4, 8, 16) was a cost fix for a
@@ -177,6 +183,21 @@ versus ~1.09 with the gate (382 calls/day). That is **~$1.50/day (~$45/month)**,
 not the ~$0.70/day claimed in the first draft of this plan. Still worth paying
 for correct framing, but it is a real trade, not a rounding error — revisit if
 multi-source volume grows past ~700/day.
+
+**Measured against live post-retune data 2026-09-04 — and it is cheaper than
+the above.** Observed avg 2.57 outlets/cluster over 63 multi-source clusters:
+
+| | calls/day | $/month (Batch) |
+|---|---|---|
+| Per-outlet (drop the gate) | ~500 | ~$107 |
+| Keep the doubling gate | ~370 | ~$79 |
+
+The prediction of 487 vs 382 was close. The delta for deleting the gate is
+**~$0.93/day (~$28/month)**, not $1.50/day. Volume is ~325 multi-source
+clusters/day, so the ~700/day revisit trigger is not near.
+
+Caveat: 2.57 comes from one overnight window, and daytime skews toward larger
+stories with more outlets, so this may run slightly low.
 
 ### F. Use the article content we already scrape
 
@@ -308,6 +329,14 @@ moves nothing.
 Steps 1-3 are backend-only and independently useful: they cut spend ~64% and
 improve summary quality whether or not the feed gate ever ships. Step 4 is the
 product commitment and the one to think hardest about.
+
+**Status 2026-09-04.** B, C, F, G, A and H are shipped (A is shipped dark —
+`FEED_GATE_ENABLED` defaults False). D, E and I remain.
+
+Before flipping A on, re-measure multi-source volume against a **full 24h**
+post-retune window. The current ~325/day rests on a single overnight sample;
+that is ~14/hour through waking hours, which is the number the empty-state
+work in I has to be designed around.
 
 Recall work (Phase 2 embeddings) runs in parallel and is the long pole for feed
 density.

@@ -77,11 +77,32 @@ The first rework's live merge rate (10.4%) matched its offline prediction
 
 The 0.30/3 retune deployed 2026-09-03 16:30 UTC. It affects only newly
 ingested articles — existing clusters are not re-clustered — so the effect
-appears over the following day. **Not yet confirmed against live data.**
-Baseline to beat: 254 corroborated clusters/day at an 8.1% multi-source
-rate; the fixture predicts ~320-340/day. Measure with a deploy-anchored
-window that excludes the last 6 hours (median lag to a second outlet is
-~238 min, so recent clusters are censored and read as failures).
+appears over the following day.
+
+**CONFIRMED LIVE 2026-09-04** against the first post-deploy window (8.6h,
+overnight IST). Measured ~325 corroborated clusters/day after correcting
+for censoring — inside the fixture's predicted 320-340/day band, against a
+254/day baseline. Corroboration within 6h, on matched nightly slots with
+identical censoring applied to every day, went from a 0.68-1.53% band
+(Aug 27 - Sep 1) to **5.77% on Sep 3**. Sep 2 already read 3.04% before the
+retune, so part of the gain predates `d69bfc1`; the Sep 3 step lands on the
+deploy. Median lag to a second outlet is now **150 min, not 238**.
+
+Sample is 63 multi-source clusters over one overnight window — re-measure
+against a full 24h before treating the volume figure as settled.
+
+**How to measure it, and the two traps.** Use a deploy-anchored window
+excluding the last 6 hours (recent clusters are censored and read as
+failures). Then:
+
+- *Do not extrapolate a night window by 24/hours.* The 16:30-01:04 UTC slot
+  carries only **24.3%** of daily clusters despite being 36% of the clock.
+  The scale factor is **4.116**, not 2.80. Getting this wrong understates
+  volume by ~35%.
+- *Do not compare an overnight post-deploy window against a daytime
+  pre-deploy one.* That comparison is confounded on both volume and
+  maturity and reads as a regression (8.14% vs 9.05%) when the effect is
+  strongly positive. Compare matched clock slots with equal censoring.
 
 The cost of the retune is precision 0.955 -> 0.901: roughly one merge in
 ten wrong instead of one in twenty-two. Wrong merges feed the framing
