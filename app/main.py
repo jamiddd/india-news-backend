@@ -1570,7 +1570,12 @@ async def record_read_event(
         dwell_ms=payload.dwell_ms, scroll_depth_pct=payload.scroll_depth_pct,
         event_type=payload.event_type,
     ).on_conflict_do_update(
-        constraint="uq_read_events_user_event",
+        # Was constraint="uq_read_events_user_event", which Postgres rejects:
+        # ReadEvent declares a unique Index, not a UniqueConstraint, so every
+        # call to this endpoint raised and returned 500. The client swallows
+        # the failure (NewsApiClient.recordReadEvent catches and returns
+        # false), so it went unnoticed — no read event has ever been stored.
+        index_elements=["user_id", "event_id"],
         set_={
             "dwell_ms": payload.dwell_ms, "scroll_depth_pct": payload.scroll_depth_pct,
             "event_type": payload.event_type, "updated_at": utc_now(),
@@ -1672,7 +1677,11 @@ async def razorpay_webhook(request: Request, db: AsyncSession = Depends(get_db))
         provider="razorpay",
         provider_payment_id=payment.provider_payment_id,
         status="captured",
-    ).on_conflict_do_nothing(constraint="uq_donations_provider_payment_id")
+    # index_elements, not constraint=: uniqueness here is a plain unique index
+    # (see Donation.__table_args__), and Postgres only accepts ON CONFLICT ON
+    # CONSTRAINT for a real constraint — naming an index there raises
+    # "constraint does not exist" at execution time, not at import.
+    ).on_conflict_do_nothing(index_elements=["provider_payment_id"])
     await db.execute(statement)
     await db.commit()
     return {"message": "Recorded"}
