@@ -1,3 +1,4 @@
+import contextlib
 from datetime import date
 from types import SimpleNamespace
 
@@ -124,3 +125,26 @@ async def test_prewarm_does_not_fall_back(provider_down):
         await horoscope.get_or_create_horoscope(
             FakeSession(), date(2026, 8, 10), "leo", allow_fallback=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_prewarm_skips_the_provider_when_another_droplet_holds_the_lease(monkeypatch):
+    monkeypatch.setattr(horoscope.settings, "ASTROJSON_API_KEY", "test-key")
+    monkeypatch.setattr(horoscope.settings, "HOROSCOPE_ENABLED", True)
+
+    @contextlib.asynccontextmanager
+    async def _lease_taken(name, ttl_seconds=None):
+        yield False
+
+    async def _boom(*args, **kwargs):
+        raise AssertionError("must not call the provider without the lease")
+
+    async def _stored(session_factory, forecast_date):
+        return 12
+
+    monkeypatch.setattr(horoscope, "job_lease", _lease_taken)
+    monkeypatch.setattr(horoscope, "get_or_create_horoscope", _boom)
+    monkeypatch.setattr(horoscope, "_count_stored", _stored)
+
+    ready, total = await horoscope.prewarm_horoscopes(None, date(2026, 8, 10))
+    assert (ready, total) == (12, 12)

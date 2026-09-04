@@ -4,11 +4,12 @@ from datetime import date, timedelta
 
 import httpx
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import DailyHoroscope
+from app.services.job_lease import job_lease
 
 
 logger = logging.getLogger(__name__)
@@ -169,21 +170,49 @@ async def get_or_create_horoscope(
     return row
 
 
+# Twelve sequential fetches at a 20s timeout is 240s worst case, well past
+# the lease default of 180s — a lease that expires mid-run would let the
+# other droplet start a duplicate set of paid calls, which is the whole
+# thing this lease exists to prevent.
+_PREWARM_LEASE_TTL_SECONDS = 600
+
+
+async def _count_stored(session_factory, forecast_date: date) -> int:
+    async with session_factory() as session:
+        return await session.scalar(
+            select(func.count()).select_from(DailyHoroscope).where(
+                DailyHoroscope.forecast_date == forecast_date
+            )
+        ) or 0
+
+
 async def prewarm_horoscopes(session_factory, forecast_date: date) -> tuple[int, int]:
     """Fetch and store all twelve signs for a date. Never raises.
 
-    Returns (stored_or_present, total). A partial result is normal when the
-    provider has not rolled over to forecast_date yet — the caller is expected
-    to try again later rather than treat it as a failure.
+    Returns (stored, total). A partial result is normal when the provider has
+    not rolled over to forecast_date yet — the caller is expected to try again
+    later rather than treat it as a failure.
+
+    Both droplets run this scheduler, so the work is taken under a lease: the
+    row check inside get_or_create_horoscope would stop a duplicate *write*,
+    but only after both runs had already paid for the HTTP call.
     """
     if not settings.HOROSCOPE_ENABLED or not settings.ASTROJSON_API_KEY:
         return (0, len(SIGNS))
-    ready = 0
-    for sign in sorted(SIGNS):
-        try:
-            async with session_factory() as session:
-                await get_or_create_horoscope(session, forecast_date, sign, allow_fallback=False)
-            ready += 1
-        except Exception as exc:  # noqa: BLE001 - a prewarm must never take the loop down
-            logger.info("Horoscope prewarm skipped %s for %s: %s", sign, forecast_date, exc)
-    return (ready, len(SIGNS))
+
+    lease_name = f"horoscope_prewarm:{forecast_date.isoformat()}"
+    async with job_lease(lease_name, ttl_seconds=_PREWARM_LEASE_TTL_SECONDS) as got_lease:
+        if not got_lease:
+            logger.info("Horoscope prewarm for %s is already running elsewhere", forecast_date)
+            # Report what is actually on disk rather than a bare 0, so the
+            # droplet that loses the race does not log a false failure.
+            return (await _count_stored(session_factory, forecast_date), len(SIGNS))
+        ready = 0
+        for sign in sorted(SIGNS):
+            try:
+                async with session_factory() as session:
+                    await get_or_create_horoscope(session, forecast_date, sign, allow_fallback=False)
+                ready += 1
+            except Exception as exc:  # noqa: BLE001 - a prewarm must never take the loop down
+                logger.info("Horoscope prewarm skipped %s for %s: %s", sign, forecast_date, exc)
+        return (ready, len(SIGNS))
