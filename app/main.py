@@ -817,6 +817,21 @@ async def privacy_policy(request: Request):
 async def terms_of_service(request: Request):
     return (STATIC_DIR / "terms.html").read_text()
 
+# Both pages below are required for Razorpay merchant activation, which checks
+# that the business website publishes a refund/cancellation policy and
+# reachable contact details. They also cover the equivalent Play listing
+# expectations.
+
+@app.get("/refunds", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def refund_policy(request: Request):
+    return (STATIC_DIR / "refunds.html").read_text()
+
+@app.get("/contact", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def contact_us(request: Request):
+    return (STATIC_DIR / "contact.html").read_text()
+
 @app.post(f"{settings.API_V1_STR}/account/delete", status_code=204)
 @limiter.limit("5/hour")
 async def delete_account(request: Request, payload: AccountDeleteRequest, db: AsyncSession = Depends(get_db)):
