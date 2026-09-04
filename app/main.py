@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+from functools import lru_cache
 from datetime import date, datetime, time, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -110,6 +111,20 @@ from app.admin_home import router as admin_home_router
 from app.story_reports_admin import router as story_reports_admin_router
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+@lru_cache(maxsize=None)
+def static_page(name: str) -> str:
+    """Reads one of the static HTML pages, once per process.
+
+    These files are baked into the image and cannot change while the container
+    is running, so re-reading them from disk on every request buys nothing. It
+    matters most for "/": the load balancer health-checks it every 10 seconds,
+    which was 8,640 pointless disk reads a day to return a page that never
+    changes. A deploy replaces the container, so the cache cannot go stale.
+    """
+    return (STATIC_DIR / name).read_text()
+
 
 # Short-TTL read cache for the hot list endpoints (/clusters, /search).
 # Redis was already provisioned for rate limiting (see `limiter` below) but
@@ -532,7 +547,7 @@ async def home(request: Request):
     evidence a product existed. The JSON moved to /status; /health (below) was
     already the real health check and is unchanged.
     """
-    return (STATIC_DIR / "home.html").read_text()
+    return static_page("home.html")
 
 @app.get("/status")
 @limiter.exempt
@@ -824,12 +839,12 @@ async def reveal_daily_crossword(
 @app.get("/privacy", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def privacy_policy(request: Request):
-    return (STATIC_DIR / "privacy.html").read_text()
+    return static_page("privacy.html")
 
 @app.get("/terms", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def terms_of_service(request: Request):
-    return (STATIC_DIR / "terms.html").read_text()
+    return static_page("terms.html")
 
 # Both pages below are required for Razorpay merchant activation, which checks
 # that the business website publishes a refund/cancellation policy and
@@ -839,12 +854,12 @@ async def terms_of_service(request: Request):
 @app.get("/refunds", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def refund_policy(request: Request):
-    return (STATIC_DIR / "refunds.html").read_text()
+    return static_page("refunds.html")
 
 @app.get("/contact", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def contact_us(request: Request):
-    return (STATIC_DIR / "contact.html").read_text()
+    return static_page("contact.html")
 
 @app.post(f"{settings.API_V1_STR}/account/delete", status_code=204)
 @limiter.limit("5/hour")
