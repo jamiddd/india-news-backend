@@ -50,3 +50,25 @@ def test_different_dates_produce_different_shapes_or_answers():
     first = algorithmic_fallback_puzzle(date(2026, 8, 9))
     second = algorithmic_fallback_puzzle(date(2026, 8, 10))
     assert first["solution"] != second["solution"]
+
+
+class TestUpgradeRetryIsBounded:
+    """A stored algorithmic puzzle never becomes non-algorithmic on its own,
+    so an unconditional upgrade retry fires a billed APIVerve call on every
+    request for that day, forever. Only the nightly scheduler may retry."""
+
+    def test_user_requests_do_not_opt_into_upgrades(self):
+        import inspect
+        from app.services.crossword import get_or_create_puzzle
+        signature = inspect.signature(get_or_create_puzzle)
+        assert signature.parameters["allow_upgrade"].default is False
+
+    def test_only_the_scheduler_passes_allow_upgrade(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        callers = []
+        for path in list((root / "app").rglob("*.py")) + list((root / "scripts").rglob("*.py")):
+            text = path.read_text()
+            if "allow_upgrade=True" in text:
+                callers.append(path.name)
+        assert callers == ["run_crossword_scheduler.py"], callers

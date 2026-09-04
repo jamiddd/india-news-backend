@@ -306,6 +306,12 @@ class DailyQuiz(Base):
     questions = Column(JSON, nullable=False)
     source = Column(String(30), nullable=False, default="ai")
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    # Review gate, mirroring DailyPoll: an AI-drafted quiz is only served once
+    # a human approves it. Existing rows were backfilled to 'approved' by
+    # scripts/add_quiz_review_columns.py.
+    status = Column(String(20), nullable=False, default="approved", index=True)
+    publish_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class DailyEditorial(Base):

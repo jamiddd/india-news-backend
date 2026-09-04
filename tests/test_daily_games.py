@@ -216,3 +216,54 @@ def test_validate_wordle_rejects_untypeable_answers():
         _validate_wordle("CRANES", wordlists.accepted_guesses())
     with pytest.raises(ValueError):
         _validate_wordle("ZZZZZ", wordlists.accepted_guesses())
+
+
+class TestQuizReviewGate:
+    """An AI-drafted quiz is not publishable until a human approves it."""
+
+    @pytest.mark.asyncio
+    async def test_ai_draft_is_marked_ai(self, monkeypatch):
+        import app.services.daily_games as dg
+
+        async def _fake_claude(*_, **__):
+            return {"questions": [
+                {"question": f"Q{i}?", "options": ["A", "B", "C", "D"],
+                 "correct_index": 0, "explanation": "Because."}
+                for i in range(5)
+            ]}
+
+        monkeypatch.setattr(dg, "call_claude_json", _fake_claude)
+        questions, source = await dg.generate_quiz(date(2026, 9, 5))
+        assert source == "ai"
+        assert len(questions) == 5
+        assert [q["id"] for q in questions] == [1, 2, 3, 4, 5]
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_curated_when_claude_is_unavailable(self, monkeypatch):
+        import app.services.daily_games as dg
+
+        async def _no_claude(*_, **__):
+            return None
+
+        monkeypatch.setattr(dg, "call_claude_json", _no_claude)
+        questions, source = await dg.generate_quiz(date(2026, 9, 5))
+        assert source == "curated"
+        assert len(questions) == 5
+
+    @pytest.mark.asyncio
+    async def test_invalid_claude_output_falls_back_rather_than_shipping(self, monkeypatch):
+        import app.services.daily_games as dg
+
+        async def _bad_claude(*_, **__):
+            return {"questions": [{"question": "only one", "options": ["A", "B"], "correct_index": 0}]}
+
+        monkeypatch.setattr(dg, "call_claude_json", _bad_claude)
+        questions, source = await dg.generate_quiz(date(2026, 9, 5))
+        assert source == "curated"
+
+    def test_publish_at_is_midnight_ist_on_the_puzzle_date(self):
+        from app.services.daily_games import quiz_publish_at
+        published = quiz_publish_at(date(2026, 9, 5))
+        assert published.date() == date(2026, 9, 5)
+        assert (published.hour, published.minute) == (0, 0)
+        assert published.utcoffset().total_seconds() == 5.5 * 3600

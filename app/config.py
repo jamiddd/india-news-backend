@@ -73,9 +73,15 @@ class Settings(BaseSettings):
     ASTROJSON_API_KEY: Optional[str] = None
     HOROSCOPE_ENABLED: bool = True
 
-    # Daily games (crossword, sudoku, word search, spelling bee, word
-    # ladder, quiz) content provider. Absent key = each game falls through
-    # to its existing curated/algorithmic generator, same as before.
+    # Content provider for the crossword word/clue bank and Quote of the Day
+    # — the only two consumers left. Sudoku, word search, spelling bee, word
+    # ladder and Wordle generate locally; the quiz is drafted by Claude and
+    # human-reviewed. Absent key = both fall through to their existing
+    # algorithmic/curated generators, same as before.
+    #
+    # Credits bill on successful responses only, and the account this runs on
+    # allows ~100/month, so the two survivors are budgeted at one call a day
+    # each (~62/month). See apiverve_client.CREDIT_FLOOR.
     APIVERVE_API_KEY: Optional[str] = None
 
     # Human-reviewed AI daily poll. All secrets are backend-only.

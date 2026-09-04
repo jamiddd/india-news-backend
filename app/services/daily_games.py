@@ -1,18 +1,27 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
-from datetime import date
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailyQuiz, DailySpellingBee, DailyWordle, DailyWordLadder
 from app.services import wordlists
-from app.services.apiverve_client import call_apiverve
+from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def quiz_publish_at(puzzle_date: date) -> datetime:
+    """Approved quizzes go live at midnight IST on their own date — the quiz
+    is the day's puzzle, so unlike the 9am daily poll it should be there when
+    the date turns over."""
+    return datetime.combine(puzzle_date, time(0), tzinfo=IST)
 
 # Same content filter used for the daily poll (app/services/polls.py) — keep
 # game content (quiz questions especially) away from sensitive subjects.
@@ -93,7 +102,7 @@ def _fallback_wordle(puzzle_date: date) -> str:
     return WORDLE_FALLBACKS[puzzle_date.toordinal() % len(WORDLE_FALLBACKS)]
 
 
-def _fallback_quiz_questions(puzzle_date: date) -> list[dict]:
+def fallback_quiz_questions(puzzle_date: date) -> list[dict]:
     return [
         {"id": index + 1, "question": question, "options": options, "correct_index": correct, "explanation": explanation}
         for index, (question, options, correct, explanation) in enumerate(QUIZ_SETS[puzzle_date.toordinal() % len(QUIZ_SETS)])
@@ -324,59 +333,53 @@ def _validate_quiz(payload: dict) -> list[dict]:
     return result
 
 
-_OPTION_LABEL_RE = re.compile(r"^[A-Za-z]\s+")
+QUIZ_SYSTEM = (
+    "You write the daily general-knowledge quiz for an Indian news app. "
+    "Return JSON only: {\"questions\": [{\"question\": str, \"options\": [4 strings], "
+    "\"correct_index\": int 0-3, \"explanation\": str}]} with exactly 5 questions.\n"
+    "Rules:\n"
+    "- Exactly 4 options per question, all plausible, exactly one correct.\n"
+    "- Write for a general Indian readership. Mix Indian and world subjects; "
+    "do not make every question about the US or Europe.\n"
+    "- Timeless general knowledge, not this week's news — the quiz is reviewed "
+    "before it publishes and must not go stale.\n"
+    "- Avoid death, disaster, crime and communal subjects entirely.\n"
+    "- One sentence of explanation per question, saying why the answer is right."
+)
 
 
-def _parse_trivia_question(data: dict) -> dict | None:
-    """One APIVerve /trivia response -> our question shape, or None if it
-    doesn't fit (e.g. a true/false question with only 2 options — the
-    client's quiz UI is a fixed 4-option layout)."""
-    question = str(data.get("question") or "").strip()
-    answer = str(data.get("answer") or "").strip().casefold()
-    raw_options = [str(option).strip() for option in data.get("options") or []]
-    # Options can come back letter-prefixed, e.g. "A Yes" — strip that label
-    # before comparing against `answer` or displaying to the user.
-    options = [_OPTION_LABEL_RE.sub("", option).strip() for option in raw_options]
-    if not question or len(options) != 4 or len({o.casefold() for o in options}) != 4:
+async def _ai_quiz(puzzle_date: date) -> list[dict] | None:
+    """Draft 5 questions with Claude.
+
+    Replaces the APIVerve /trivia path, which could not fit any sane budget:
+    trivia has no batch endpoint, so one quiz cost 5 credits at its floor and
+    up to 15 in practice (~465/month) because most `general` draws come back
+    as 2-option true/false and are rejected by the 4-option client layout
+    *after* being billed. Confirmed unaffordable 2026-09-04.
+
+    Unlike the wordlist games, a quiz is not a set-filtering problem with a
+    verifiable answer, so there is no algorithm to check Claude's facts —
+    which is exactly why the output lands as a draft for human review rather
+    than going straight to readers."""
+    payload = await call_claude_json(
+        QUIZ_SYSTEM,
+        f"Write the quiz for {puzzle_date.isoformat()}.",
+        max_tokens=2000,
+    )
+    if payload is None:
         return None
-    correct = next((i for i, o in enumerate(options) if o.casefold() == answer), None)
-    if correct is None or UNSAFE.search(question):
+    try:
+        return _validate_quiz(payload)
+    except Exception as exc:
+        logger.warning("Claude quiz failed validation: %s", exc)
         return None
-    return {"question": question, "options": options, "correct_index": correct, "explanation": ""}
-
-
-async def _apiverve_quiz() -> list[dict] | None:
-    seen_questions: set[str] = set()
-    questions: list[dict] = []
-    # Free-tier trivia questions are single, unrelated draws with no
-    # built-in "give me 5" batch mode, and not every draw fits our fixed
-    # 4-option layout (see _parse_trivia_question) — so over-fetch and keep
-    # the first 5 that validate, capped so a bad run can't loop forever.
-    # Spaced out — firing all 15 back-to-back trips APIVerve's rate limit
-    # (429) well before the monthly credit cap.
-    for attempt in range(15):
-        if len(questions) >= 5:
-            break
-        if attempt > 0:
-            await asyncio.sleep(0.5)
-        data = await call_apiverve("trivia", {"category": "general"})
-        if data is None:
-            continue
-        parsed = _parse_trivia_question(data)
-        if parsed is None or parsed["question"].casefold() in seen_questions:
-            continue
-        seen_questions.add(parsed["question"].casefold())
-        questions.append(parsed)
-    if len(questions) < 5:
-        return None
-    return [{"id": index + 1, **item} for index, item in enumerate(questions[:5])]
 
 
 async def generate_quiz(puzzle_date: date) -> tuple[list[dict], str]:
-    apiverve_questions = await _apiverve_quiz()
-    if apiverve_questions is not None:
-        return apiverve_questions, "apiverve"
-    return _fallback_quiz_questions(puzzle_date), "curated"
+    questions = await _ai_quiz(puzzle_date)
+    if questions is not None:
+        return questions, "ai"
+    return fallback_quiz_questions(puzzle_date), "curated"
 
 
 # ---------------------------------------------------------------------------
@@ -408,7 +411,17 @@ async def get_or_create_daily_games(session: AsyncSession, puzzle_date: date):
     quiz = (await session.execute(select(DailyQuiz).where(DailyQuiz.puzzle_date == puzzle_date))).scalar_one_or_none()
     if quiz is None:
         questions, source = await generate_quiz(puzzle_date)
-        quiz = DailyQuiz(puzzle_date=puzzle_date, questions=questions, source=source)
+        # An AI draft waits for a human; the deterministic curated fallback has
+        # already been reviewed (it is a committed constant) so it publishes
+        # straight away. Without that distinction a day where Claude is
+        # unreachable would serve nothing at all.
+        quiz = DailyQuiz(
+            puzzle_date=puzzle_date,
+            questions=questions,
+            source=source,
+            status="draft" if source == "ai" else "approved",
+            publish_at=quiz_publish_at(puzzle_date),
+        )
         session.add(quiz)
 
     await session.commit()

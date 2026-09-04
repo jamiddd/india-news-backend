@@ -360,10 +360,25 @@ async def generate_puzzle(puzzle_date: date) -> tuple[dict[str, Any], str]:
     return algorithmic_fallback_puzzle(puzzle_date), "algorithmic"
 
 
-async def get_or_create_puzzle(session: AsyncSession, puzzle_date: date) -> DailyCrossword:
+async def get_or_create_puzzle(
+    session: AsyncSession, puzzle_date: date, *, allow_upgrade: bool = False
+) -> DailyCrossword:
+    """Return the day's crossword, generating it if this is the first ask.
+
+    `allow_upgrade` controls one specific behaviour: re-attempting APIVerve for
+    a day that already has an *algorithmic* puzzle stored, to replace it with
+    better clues. Only the nightly scheduler passes it.
+
+    It has to be off for user requests. A stored algorithmic puzzle never
+    becomes non-algorithmic on its own, so an unconditional upgrade retry fires
+    a fresh APIVerve call on *every* request for that day, forever — and each
+    one that succeeds bills a credit. On the ~60-credit monthly budget this
+    backend runs on, one failed generation could drain the month in an hour of
+    ordinary traffic. Bounded here to a single attempt per day, from the
+    scheduler, where a failure costs one credit and waits until tomorrow."""
     result = await session.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
-    if existing and existing.source != "algorithmic":
+    if existing and (not allow_upgrade or existing.source != "algorithmic"):
         return existing
 
     # Serializes first-request generation across all four Uvicorn workers.
@@ -371,7 +386,7 @@ async def get_or_create_puzzle(session: AsyncSession, puzzle_date: date) -> Dail
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
     result = await session.execute(select(DailyCrossword).where(DailyCrossword.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
-    if existing and existing.source != "algorithmic":
+    if existing and (not allow_upgrade or existing.source != "algorithmic"):
         return existing
 
     generated, source = await generate_puzzle(puzzle_date)

@@ -16,7 +16,9 @@ IST = ZoneInfo("Asia/Kolkata")
 
 async def ensure(day):
     async with AsyncSessionLocal() as session:
-        puzzle = await get_or_create_puzzle(session, day)
+        # The one place an algorithmic puzzle is re-attempted against APIVerve
+        # for better clues — once a night, never from a user request.
+        puzzle = await get_or_create_puzzle(session, day, allow_upgrade=True)
         print(f"Crossword ready for {day} ({puzzle.source})", flush=True)
     async with AsyncSessionLocal() as session:
         await get_or_create_sudoku(session, day)

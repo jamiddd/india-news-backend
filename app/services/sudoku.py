@@ -8,7 +8,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DailySudoku
-from app.services.apiverve_client import call_apiverve
 
 logger = logging.getLogger(__name__)
 
@@ -154,26 +153,6 @@ def _extract_grid(section) -> list[int] | None:
     return _parse_grid(section)
 
 
-async def _apiverve_sudoku() -> tuple[list[int], list[int]] | None:
-    """The free tier gives the puzzle grid but the `solution` field is
-    Premium-gated (comes back None) — we don't actually need APIVerve for
-    that part, since a well-formed sudoku has exactly one solution and
-    _solve already exists (originally for the algorithmic generator's own
-    uniqueness check), so solve the puzzle locally instead."""
-    data = await call_apiverve("sudoku", {"difficulty": "medium"})
-    if data is None:
-        return None
-    puzzle = _extract_grid(data.get("puzzle"))
-    if puzzle is None:
-        logger.warning("APIVerve sudoku response had an unrecognized puzzle grid shape: %r", data)
-        return None
-    solution = _solve(puzzle)
-    if solution is None:
-        logger.warning("APIVerve sudoku puzzle grid has no solution: %r", puzzle)
-        return None
-    return puzzle, solution
-
-
 async def get_or_create_sudoku(session: AsyncSession, puzzle_date: date) -> DailySudoku:
     result = await session.execute(select(DailySudoku).where(DailySudoku.puzzle_date == puzzle_date))
     existing = result.scalar_one_or_none()
@@ -187,8 +166,13 @@ async def get_or_create_sudoku(session: AsyncSession, puzzle_date: date) -> Dail
     if existing:
         return existing
 
-    fetched = await _apiverve_sudoku()
-    puzzle, solution = fetched if fetched is not None else generate_daily_sudoku(puzzle_date)
+    # Fully local: generate_daily_sudoku digs holes from a shuffled solved
+    # grid, reverting any removal that leaves more than one solution, so every
+    # puzzle is guaranteed uniquely solvable. APIVerve was dropped here because
+    # its `solution` field is Premium-gated and came back null, meaning we
+    # already solved its grid ourselves with _solve — a paid credit for a grid
+    # this function produces for free.
+    puzzle, solution = generate_daily_sudoku(puzzle_date)
     row = DailySudoku(puzzle_date=puzzle_date, puzzle=puzzle, solution=solution)
     session.add(row)
     await session.commit()

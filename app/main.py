@@ -89,7 +89,7 @@ from scripts.send_notifications import main as run_send_notifications
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
-from app.services.daily_games import get_or_create_daily_games, WORDLE_MAX_GUESSES
+from app.services.daily_games import get_or_create_daily_games, fallback_quiz_questions, WORDLE_MAX_GUESSES
 from app.services import wordlists
 from app.services.editorial_features import get_or_create_editorial
 from app.services.horoscope import get_or_create_horoscope
@@ -101,6 +101,7 @@ from app.services.firebase_auth import (
     delete_firebase_user,
 )
 from app.poll_admin import router as poll_admin_router
+from app.quiz_admin import router as quiz_admin_router
 from app.story_reports_admin import router as story_reports_admin_router
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -303,6 +304,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 app.include_router(poll_admin_router)
+app.include_router(quiz_admin_router)
 app.include_router(story_reports_admin_router)
 
 # Every JSON response — cluster lists especially, with full article bodies
@@ -658,7 +660,13 @@ async def daily_wordle(request: Request, date: str | None = Query(None), db: Asy
 @app.get(f"{settings.API_V1_STR}/quiz/daily", response_model=DailyQuizOut)
 @limiter.limit("30/minute")
 async def daily_quiz(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
-    _, _, quiz, _ = await get_or_create_daily_games(db, resolve_puzzle_date(date))
+    puzzle_date = resolve_puzzle_date(date)
+    _, _, quiz, _ = await get_or_create_daily_games(db, puzzle_date)
+    # An AI draft is not publishable content until a human has approved it, so
+    # an unapproved (or rejected) quiz serves the reviewed curated set instead
+    # of leaking the draft. See app/quiz_admin.py.
+    if quiz.status != "approved":
+        return {"date": puzzle_date, "questions": fallback_quiz_questions(puzzle_date)}
     return {"date": quiz.puzzle_date, "questions": quiz.questions}
 
 
