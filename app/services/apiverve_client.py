@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -18,6 +21,8 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.apiverve.com/v1"
+
+IST = ZoneInfo("Asia/Kolkata")
 
 # APIVerve reports the account's remaining monthly credits on every response,
 # including the 429 that says they ran out. Stop calling before the balance
@@ -29,6 +34,12 @@ CREDIT_FLOOR = 5
 # deliberately not treated as exhausted, or a fresh worker could never make its
 # first call.
 _remaining_credits: int | None = None
+_max_credits: int | None = None
+# Unix timestamp of the next quota reset, from x-api-renewal. APIVerve renews on
+# the *signup anniversary*, not the 1st of the month — the free plan's renewal
+# for this account is 2026-10-02, so "it'll come back next month" is the wrong
+# mental model and the date has to be read, never assumed.
+_renewal_at: int | None = None
 
 
 def remaining_credits() -> int | None:
@@ -37,15 +48,54 @@ def remaining_credits() -> int | None:
     return _remaining_credits
 
 
+def credit_status() -> dict[str, object]:
+    """Everything the last response said about the credit budget. Exposed so
+    ops can read it without a live call burning one."""
+    return {
+        "remaining": _remaining_credits,
+        "max": _max_credits,
+        "renewal_at": _renewal_at,
+        "renews_in_days": _days_until_renewal(),
+    }
+
+
+def _days_until_renewal() -> float | None:
+    if _renewal_at is None:
+        return None
+    return round((_renewal_at - time.time()) / 86400, 1)
+
+
+def _renewal_phrase() -> str:
+    """Human-readable tail for exhaustion logs: the single most useful fact
+    when the games have gone quiet is *when they come back*."""
+    if _renewal_at is None:
+        return "renewal date unknown"
+    when = datetime.fromtimestamp(_renewal_at, timezone.utc).astimezone(IST)
+    days = _days_until_renewal()
+    return f"renews {when:%Y-%m-%d %H:%M} IST, in {days} days"
+
+
 def _record_credits(response: httpx.Response) -> None:
-    global _remaining_credits
-    raw = response.headers.get("x-api-remaining-credits")
-    if raw is None:
-        return
-    try:
-        _remaining_credits = int(raw)
-    except ValueError:
-        logger.warning("APIVerve sent an unparseable credit balance: %r", raw)
+    """Capture the whole credit picture, not just the balance.
+
+    APIVerve reports `x-api-remaining-credits`, `x-api-max-credits` and
+    `x-api-renewal` on every response, including the 429 that says the quota
+    is gone. Reading only the balance is what made an exhausted account look
+    like a generic rate limit in the logs for over a week.
+    """
+    global _remaining_credits, _max_credits, _renewal_at
+    for header, name in (
+        ("x-api-remaining-credits", "_remaining_credits"),
+        ("x-api-max-credits", "_max_credits"),
+        ("x-api-renewal", "_renewal_at"),
+    ):
+        raw = response.headers.get(header)
+        if raw is None:
+            continue
+        try:
+            globals()[name] = int(raw)
+        except ValueError:
+            logger.warning("APIVerve sent an unparseable %s: %r", header, raw)
 
 
 def _quota_exhausted(payload_error: object, response: httpx.Response) -> bool:
@@ -90,8 +140,8 @@ async def call_apiverve(
         return None
     if _remaining_credits is not None and _remaining_credits <= CREDIT_FLOOR:
         logger.warning(
-            "APIVerve %s skipped: %s credits remaining, at or below floor of %s",
-            endpoint, _remaining_credits, CREDIT_FLOOR,
+            "APIVerve %s skipped: %s/%s credits remaining, at or below floor of %s (%s)",
+            endpoint, _remaining_credits, _max_credits, CREDIT_FLOOR, _renewal_phrase(),
         )
         return None
     for attempt in range(rate_limit_retries + 1):
@@ -113,8 +163,9 @@ async def call_apiverve(
                         error = response.text[:200]
                     if _quota_exhausted(error, response):
                         logger.error(
-                            "APIVerve %s: monthly credits exhausted (%s remaining) — %s",
-                            endpoint, response.headers.get("x-api-remaining-credits"), error,
+                            "APIVerve %s: monthly credits exhausted (%s/%s used, %s) — %s",
+                            endpoint, _max_credits and (_max_credits - (_remaining_credits or 0)),
+                            _max_credits, _renewal_phrase(), error,
                         )
                         return None
                     if attempt < rate_limit_retries:
