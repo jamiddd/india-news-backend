@@ -84,6 +84,24 @@ class Settings(BaseSettings):
     # each (~62/month). See apiverve_client.CREDIT_FLOOR.
     APIVERVE_API_KEY: Optional[str] = None
 
+    # Donations. Collected through an external Razorpay payment page (a UPI
+    # link opened in a browser tab, no in-app payment SDK) because the payment
+    # unlocks nothing — see app/models.py's Donation. The webhook secret is
+    # what makes POST /payments/razorpay/webhook trustworthy; without it set,
+    # the endpoint refuses every request rather than recording unverified
+    # payments. All three are backend-only and must never reach the app.
+    #
+    # The key pair mints one Payment Link per donation (POST /donations/link)
+    # rather than pointing the app at a static hosted Payment Page: a Payment
+    # Page cannot carry `notes`, so donations made through one arrive with no
+    # way to attribute them. The webhook secret is separate from the key
+    # secret — it's a value you choose in Dashboard > Settings > Webhooks —
+    # and without it POST /payments/razorpay/webhook refuses every request
+    # rather than recording unverified payments.
+    RAZORPAY_KEY_ID: Optional[str] = None
+    RAZORPAY_KEY_SECRET: Optional[str] = None
+    RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
+
     # Human-reviewed AI daily poll. All secrets are backend-only.
     POLL_ADMIN_USERNAME: str = "admin"
     POLL_ADMIN_PASSWORD: Optional[str] = None

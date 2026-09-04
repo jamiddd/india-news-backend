@@ -25,6 +25,12 @@ services:
       - POLL_ADMIN_PASSWORD=${POLL_ADMIN_PASSWORD:-}
       - POLL_SESSION_SECRET=${POLL_SESSION_SECRET:-}
       - POLL_VOTER_HASH_SECRET=${POLL_VOTER_HASH_SECRET:-}
+      # Donations. Absent keys make POST /api/v1/donations/link return 503;
+      # an absent webhook secret makes the webhook refuse everything rather
+      # than record unverified payments. Only the `app` service needs these.
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID:-}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET:-}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
       # Optional — error tracking is a no-op until this is actually set in

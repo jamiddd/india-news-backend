@@ -389,6 +389,26 @@ class ReadEventRequest(BaseModel):
     cluster_id: int
     dwell_ms: Optional[int] = Field(default=None, ge=0)
     scroll_depth_pct: Optional[int] = Field(default=None, ge=0, le=100)
+    # "read" (default, and what every pre-monetization client sends by
+    # omitting the field), "framing_view" or "summary_expand". Only "read"
+    # events feed user_entity_affinity — opening the framing panel says
+    # something about interest, not about topic affinity.
+    event_type: Literal["read", "framing_view", "summary_expand"] = "read"
+
+
+class DonationLinkRequest(BaseModel):
+    # Paise, matching Razorpay. Bounds are enforced again in
+    # app/services/donations.py — this is the client-facing guard, that one is
+    # the guard on the money.
+    amount_paise: int = Field(ge=100, le=10_000_00)
+    # The backend user id (usr_xxx), when the donor happens to be signed in.
+    # Donating signed-out is expected, so this is optional and an unrecognised
+    # id is dropped rather than rejected.
+    user_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class DonationLinkResponse(BaseModel):
+    url: str
 
 
 class SaveStoryRequest(BaseModel):

@@ -638,6 +638,11 @@ class ReadEvent(Base):
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
     event_id = Column(String(64), nullable=False)
+    # "read" (a story view), "framing_view" (the media-framing panel opened) or
+    # "summary_expand". Server-defaulted so rows written by clients predating
+    # the column, and older app versions that still omit the field, keep
+    # landing as plain reads. Only "read" rows feed affinity.
+    event_type = Column(String(32), nullable=False, default="read", server_default="read", index=True)
     opened_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     dwell_ms = Column(Integer, nullable=True)
     scroll_depth_pct = Column(Integer, nullable=True)
@@ -745,3 +750,34 @@ Index("idx_articles_published_at", Article.published_at.desc())
 Index("idx_articles_source_published", Article.source_id, Article.published_at.desc())
 Index("idx_clusters_last_updated", StoryCluster.last_updated_at.desc())
 Index("idx_clusters_headline_score", StoryCluster.headline_score.desc(), StoryCluster.id.desc())
+
+
+class Donation(Base):
+    """One captured donation, recorded purely so we can read demand.
+
+    Deliberately grants nothing. There is no tier/plan column on User and no
+    entitlement table anywhere, and that absence is load-bearing: donations
+    are collected through an external UPI/Razorpay payment page rather than
+    Play Billing, which is only permissible while the payment unlocks no app
+    functionality. Keep this table read-only from the app's perspective —
+    nothing in the client may branch on it.
+
+    user_id is nullable and SET NULL on delete: a donor may pay without being
+    signed in, and deleting an account must not erase the revenue record.
+    """
+    __tablename__ = "donations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    amount_paise = Column(Integer, nullable=False)
+    currency = Column(String(8), nullable=False, default="INR")
+    provider = Column(String(32), nullable=False, default="razorpay")
+    provider_payment_id = Column(String(128), nullable=False)
+    status = Column(String(32), nullable=False, default="captured")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        # The idempotency key: Razorpay retries webhooks, so the same payment
+        # id must never produce a second row. Upserted on in app/main.py.
+        Index("uq_donations_provider_payment_id", "provider_payment_id", unique=True),
+    )

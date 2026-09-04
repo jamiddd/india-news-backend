@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import logging
 import random
 from datetime import date, datetime, time, timedelta
@@ -46,7 +47,8 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, utc_now
+from app.admin_session import session_csrf
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
@@ -60,6 +62,7 @@ from app.schemas import (
     WordOfTheDayOut, QuoteOfTheDayOut, OnThisDayOut, DailyHoroscopeOut, DailyPollOut, PollVoteRequest,
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
     ReadEventRequest,
+    DonationLinkRequest, DonationLinkResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     StarredSourcesOut,
     BlockedSourcesOut,
@@ -78,6 +81,7 @@ from app.services.feed_gate import (
     listing_age_anchor,
 )
 from app.services.related_stories import find_related_clusters
+from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from scripts.enrich_all_clusters import enrich_clusters
 
 # Per-run ceiling for the recurring news-enrich.timer. At a 20-minute cadence
@@ -1564,9 +1568,13 @@ async def record_read_event(
     statement = pg_insert(ReadEvent).values(
         user_id=user_id, cluster_id=payload.cluster_id, event_id=payload.event_id,
         dwell_ms=payload.dwell_ms, scroll_depth_pct=payload.scroll_depth_pct,
+        event_type=payload.event_type,
     ).on_conflict_do_update(
         constraint="uq_read_events_user_event",
-        set_={"dwell_ms": payload.dwell_ms, "scroll_depth_pct": payload.scroll_depth_pct, "updated_at": utc_now()},
+        set_={
+            "dwell_ms": payload.dwell_ms, "scroll_depth_pct": payload.scroll_depth_pct,
+            "event_type": payload.event_type, "updated_at": utc_now(),
+        },
     )
     await db.execute(statement)
 
@@ -1575,11 +1583,168 @@ async def record_read_event(
     # dwell-relative-to-article-length formula isn't built yet — that's the
     # explore-slot bandit's job, not this endpoint's. See the "Feed ranking
     # redesign" design memory and app.services.affinity.
-    if payload.dwell_ms is not None:
+    # Framing-panel opens and summary expansions are measured, not scored:
+    # they say the reader is curious about how a story is being covered, which
+    # isn't the same signal as topic affinity and shouldn't steer the feed.
+    if payload.dwell_ms is not None and payload.event_type == "read":
         await record_engagement(db, user_id, cluster, engagement_weight=1.0)
 
     await db.commit()
     return {"message": "Recorded"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Donations
+#
+# The app opens an external Razorpay payment page in a browser tab; Razorpay
+# calls the webhook below when a payment is captured. Nothing here grants
+# anything — there is no entitlement to grant, by design. See app/models.py's
+# Donation, and keep it that way: the moment a donation unlocks app
+# functionality, this stops being a donation and has to move to Play Billing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@app.post(f"{settings.API_V1_STR}/donations/link", response_model=DonationLinkResponse)
+@limiter.limit("10/minute")
+async def create_donation_link(
+    request: Request,
+    payload: DonationLinkRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mints a Razorpay Payment Link for a donation and hands back its URL.
+
+    Rate limited hard: each call hits Razorpay's API and creates a real object
+    in our account, so this is the one donation path an anonymous caller can
+    make us do work on.
+    """
+    donor_id = payload.user_id
+    if donor_id:
+        known = await db.execute(select(User.id).where(User.id == donor_id))
+        if known.scalar_one_or_none() is None:
+            donor_id = None
+
+    url = await create_payment_link(payload.amount_paise, donor_id)
+    if url is None:
+        raise HTTPException(status_code=503, detail="Could not start a donation right now")
+    return DonationLinkResponse(url=url)
+
+
+@app.post("/payments/razorpay/webhook", status_code=200)
+@limiter.limit("120/minute")
+async def razorpay_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    """Records a captured payment.
+
+    The signature is checked against the raw body before anything is parsed —
+    an unverified body is attacker-controlled input, so it must not reach the
+    JSON parser, let alone the database. Idempotent on provider_payment_id
+    because Razorpay retries until it gets a 2xx, and a retry must not double
+    count the money.
+    """
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Donations are not configured")
+
+    raw = await request.body()
+    if not signature_matches(raw, request.headers.get("X-Razorpay-Signature", ""), settings.RAZORPAY_WEBHOOK_SECRET):
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        payment = parse_captured_payment(json.loads(raw))
+    except MalformedWebhook:
+        raise HTTPException(status_code=400, detail="Malformed payment entity")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Malformed payload")
+    if payment is None:
+        return {"message": "Ignored"}
+
+    # An unknown or stale donor id is stored as NULL rather than rejected:
+    # losing attribution is a much smaller problem than losing the record of
+    # a payment that has already been taken.
+    donor_id = payment.user_id
+    if donor_id:
+        known = await db.execute(select(User.id).where(User.id == donor_id))
+        if known.scalar_one_or_none() is None:
+            donor_id = None
+
+    statement = pg_insert(Donation).values(
+        user_id=donor_id,
+        amount_paise=payment.amount_paise,
+        currency=payment.currency,
+        provider="razorpay",
+        provider_payment_id=payment.provider_payment_id,
+        status="captured",
+    ).on_conflict_do_nothing(constraint="uq_donations_provider_payment_id")
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Recorded"}
+
+
+def _require_admin(request: Request) -> None:
+    """Reuses the existing admin cookie session (app/admin_session.py) rather
+    than adding a second credential path for two read-only JSON endpoints."""
+    if session_csrf(request) is None:
+        raise HTTPException(status_code=403, detail="Admin sign-in required")
+
+
+@app.get("/admin/donations")
+async def admin_donations(request: Request, db: AsyncSession = Depends(get_db)):
+    """Donation totals, all-time and last 30 days."""
+    _require_admin(request)
+    cutoff = utc_now() - timedelta(days=30)
+
+    async def totals(*where):
+        result = await db.execute(
+            select(func.count(Donation.id), func.coalesce(func.sum(Donation.amount_paise), 0))
+            .where(Donation.status == "captured", *where)
+        )
+        count, paise = result.one()
+        return {"count": count, "total_inr": round((paise or 0) / 100, 2)}
+
+    return {
+        "all_time": await totals(),
+        "last_30_days": await totals(Donation.created_at >= cutoff),
+        "distinct_donors": (await db.execute(
+            select(func.count(func.distinct(Donation.user_id)))
+            .where(Donation.status == "captured", Donation.user_id.isnot(None))
+        )).scalar_one(),
+    }
+
+
+@app.get("/admin/engagement")
+async def admin_engagement(request: Request, db: AsyncSession = Depends(get_db)):
+    """Weekly framing-panel engagement, the other half of the donation signal.
+
+    Donations alone can't distinguish "readers don't value the framing angle"
+    from "they value it but won't pay for news" — those point at opposite
+    strategies. Pairing conversion with how many active readers actually open
+    the framing panel is what separates them.
+    """
+    _require_admin(request)
+    week = func.date_trunc("week", ReadEvent.opened_at).label("week")
+
+    result = await db.execute(
+        select(
+            week,
+            func.count(func.distinct(ReadEvent.user_id)).label("active_users"),
+            func.count(func.distinct(
+                case((ReadEvent.event_type == "framing_view", ReadEvent.user_id))
+            )).label("framing_users"),
+            func.count(case((ReadEvent.event_type == "framing_view", 1))).label("framing_views"),
+        )
+        .where(ReadEvent.opened_at >= utc_now() - timedelta(days=84))
+        .group_by(week).order_by(desc(week))
+    )
+    return {
+        "weeks": [
+            {
+                "week": row.week.date().isoformat(),
+                "active_users": row.active_users,
+                "framing_users": row.framing_users,
+                "framing_views": row.framing_views,
+                "framing_reach_pct": round(100 * row.framing_users / row.active_users, 1) if row.active_users else 0.0,
+            }
+            for row in result
+        ]
+    }
 
 
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", status_code=200)
