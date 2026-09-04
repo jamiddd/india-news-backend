@@ -18,7 +18,8 @@ from sqlalchemy import select, text
 
 from app.database import AsyncSessionLocal, Base, engine
 from app.models import DailyPoll
-from app.services.polls import IST, activate_poll, generate_draft, notify_admin_draft_ready, seed_fallbacks
+from app.services.admin_notify import notify_admin_reviews_ready
+from app.services.polls import IST, activate_poll, generate_draft, seed_fallbacks
 
 
 async def prepare(day):
@@ -28,22 +29,34 @@ async def prepare(day):
             poll = await generate_draft(session, day)
             print(f"Poll draft ready for {day}", flush=True)
             if not already_existed:
-                await notify_admin_draft_ready(session, poll)
+                # One push for both reviews. The quiz draft for today was
+                # written at 23:55 last night, so it is already here to
+                # report on. See app/services/admin_notify.py.
+                sent = await notify_admin_reviews_ready(session, day)
+                print(f"Admin review push {'sent' if sent else 'not sent'} for {day}", flush=True)
         except Exception as exc:
             print(f"Poll draft failed for {day}: {exc}", flush=True)
 
 
 async def notify_test():
+    """Fire the real review push for today, reporting today's real state.
+
+    Deliberately not a synthetic message: the thing worth testing is whether
+    the push reflects what is actually outstanding, and a stand-in poll would
+    test only FCM delivery.
+    """
     async with AsyncSessionLocal() as session:
         today = datetime.now(IST).date()
-        poll = await session.scalar(select(DailyPoll).where(DailyPoll.poll_date == today))
-        if poll is None:
-            # Not persisted — notify_admin_draft_ready only reads .question,
-            # so a throwaway in-memory stand-in is enough to test delivery
-            # without touching real poll data.
-            poll = DailyPoll(question="[Test] Is this notification working?")
-        await notify_admin_draft_ready(session, poll)
-        print(f"Sent test notification (poll question: {poll.question!r})", flush=True)
+        from app.admin_home import pending_reviews
+        from app.services.admin_notify import compose
+        tasks = await pending_reviews(session, today)
+        composed = compose(tasks)
+        if composed is None:
+            print(f"Nothing waiting for {today} — no push would be sent.", flush=True)
+            print(f"State: {[(k, v['status']) for k, v in tasks.items()]}", flush=True)
+            return
+        sent = await notify_admin_reviews_ready(session, today)
+        print(f"{'Sent' if sent else 'Composed but not sent'}: {composed[0]!r} / {composed[1]!r}", flush=True)
 
 
 async def publish(day):

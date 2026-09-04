@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     # Absent email = feature no-ops (no admin account to notify).
     ADMIN_USER_EMAIL: Optional[str] = None
     ADMIN_POLL_REVIEW_URL: str = "https://openindiannews.com/admin/polls"
+    # Landing page for the single daily review push — lists both the poll and
+    # the quiz, so one notification covers both tasks. See app/admin_home.py.
+    ADMIN_REVIEW_URL: str = "https://openindiannews.com/admin"
 
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
