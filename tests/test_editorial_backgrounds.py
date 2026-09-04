@@ -75,6 +75,25 @@ async def test_listing_failure_falls_back_to_no_image(monkeypatch):
     assert await bg.pick_background(date(2026, 9, 4)) is None
 
 
+@pytest.mark.parametrize(
+    "configured_url",
+    [
+        "https://proj.supabase.co",
+        "https://proj.supabase.co/",
+        # What the dashboard's Data API page actually gives you.
+        "https://proj.supabase.co/rest/v1",
+        "https://proj.supabase.co/rest/v1/",
+        "https://proj.supabase.co/storage/v1",
+    ],
+)
+def test_project_base_url_strips_api_suffixes(monkeypatch, configured_url):
+    monkeypatch.setattr(settings, "SUPABASE_URL", configured_url, raising=False)
+    assert bg.project_base_url() == "https://proj.supabase.co"
+    assert bg.public_url("a.jpg") == (
+        "https://proj.supabase.co/storage/v1/object/public/editorial-backgrounds/a.jpg"
+    )
+
+
 @pytest.mark.asyncio
 async def test_unconfigured_makes_no_outbound_call(monkeypatch):
     monkeypatch.setattr(settings, "SUPABASE_SERVICE_KEY", None, raising=False)

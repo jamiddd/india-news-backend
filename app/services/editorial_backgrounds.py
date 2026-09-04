@@ -47,18 +47,35 @@ def _configured() -> bool:
     return bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY)
 
 
+def project_base_url() -> str:
+    """The bare project origin, e.g. https://abc.supabase.co.
+
+    Tolerates the value the dashboard's Data API page actually hands you,
+    which is the REST endpoint (".../rest/v1"). Storage lives at
+    /storage/v1 — a sibling of /rest/v1, not a child — so leaving the
+    suffix on produces /rest/v1/storage/v1/... and a 404."""
+    if not settings.SUPABASE_URL:
+        return ""
+    base = settings.SUPABASE_URL.strip().rstrip("/")
+    for suffix in ("/rest/v1", "/storage/v1", "/auth/v1"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    return base.rstrip("/")
+
+
 def public_url(name: str) -> str:
     """The public read url for one object. Returns "" when storage is not
     configured, so callers comparing against it as a prefix treat every
     existing value as already-current instead of churning on it."""
-    if not settings.SUPABASE_URL:
+    base = project_base_url()
+    if not base:
         return ""
-    base = settings.SUPABASE_URL.rstrip("/")
     return f"{base}/storage/v1/object/public/{settings.EDITORIAL_BACKGROUND_BUCKET}/{name}"
 
 
 async def _fetch_object_names() -> list[str]:
-    base = settings.SUPABASE_URL.rstrip("/")
+    base = project_base_url()
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             f"{base}/storage/v1/object/list/{settings.EDITORIAL_BACKGROUND_BUCKET}",
