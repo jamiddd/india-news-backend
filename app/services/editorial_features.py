@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import date, timedelta
@@ -9,24 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import DailyEditorial
 from app.services.apiverve_client import call_apiverve
+from app.services.editorial_backgrounds import pick_background, public_url
 from app.services.llm_gen import call_claude_json
 
 logger = logging.getLogger(__name__)
-
-# Rotated by date ordinal so the Quote of the Day background varies day to
-# day without needing to parse the quote text for a topic. Kept deliberately
-# mood/abstract rather than literal — it's a backdrop behind text, not
-# illustration of the quote's content.
-BACKGROUND_QUERIES = [
-    "moody nature landscape",
-    "dark abstract texture",
-    "night sky stars",
-    "misty mountains",
-    "ocean waves dark",
-    "minimalist shadow",
-    "forest silhouette",
-    "city lights night",
-]
 
 WORDS = [
     {"word":"SERENDIPITY","pronunciation":"seh-ruhn-DIP-uh-tee","part_of_speech":"noun","definition":"The fortunate discovery of something valuable or interesting by chance.","example":"Finding the quiet bookshop was a moment of pure serendipity.","origin":"Coined by Horace Walpole in 1754 from the tale The Three Princes of Serendip."},
@@ -67,33 +55,6 @@ async def _fetch_events(day: date) -> list[dict]:
     if not events:
         raise RuntimeError("Wikimedia returned no historical events")
     return events
-
-
-async def _fetch_background_image(query: str) -> dict | None:
-    """Best-effort — returns None (no key, request failure, no results) and
-    the app falls back to a plain gradient background. Attribution links
-    carry Unsplash's required utm params; on-screen photographer credit is
-    the app's responsibility (Unsplash API guidelines), not this function's."""
-    if not settings.UNSPLASH_ACCESS_KEY:
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(
-                "https://api.unsplash.com/photos/random",
-                params={"query": query, "orientation": "portrait", "content_filter": "high"},
-                headers={"Authorization": f"Client-ID {settings.UNSPLASH_ACCESS_KEY}", "Accept-Version": "v1"},
-            )
-            response.raise_for_status()
-            data = response.json()
-        return {
-            "url": data["urls"]["regular"],
-            "photographer": data["user"]["name"],
-            "photographer_url": f"{data['user']['links']['html']}?utm_source=openindiannews&utm_medium=referral",
-            "unsplash_url": f"{data['links']['html']}?utm_source=openindiannews&utm_medium=referral",
-        }
-    except Exception as exc:
-        logger.warning("Unsplash background fetch failed: %s", exc)
-        return None
 
 
 def _validate_word(word: dict) -> dict:
@@ -331,20 +292,25 @@ async def generate_word_and_quote(
     return word, quote, source
 
 
-async def _retry_missing_background(session: AsyncSession, row: DailyEditorial, feature_date: date) -> DailyEditorial:
-    """The initial fetch is best-effort and its result gets cached on the
-    row forever, so a transient failure (rate limit, missing key at the
-    time, network blip) previously meant no background image for that date
-    ever again. Retry once per request instead — cheap, since a populated
-    background_image short-circuits immediately."""
-    if row.background_image is not None:
+async def _ensure_background(session: AsyncSession, row: DailyEditorial, feature_date: date) -> DailyEditorial:
+    """Fill in (or re-point) the row's background image.
+
+    Two cases need this on read rather than only at creation: rows written
+    while the bucket was unreachable or unconfigured (background_image is
+    NULL), and rows written by the old Unsplash implementation, whose stored
+    url points at a CDN we no longer use. Both are cheap now — the bucket
+    listing is Redis-cached, so this is a dict compare and, at most, one
+    UPDATE the first time a given date is read after the switch."""
+    current = row.background_image or {}
+    current_url = str(current.get("url") or "")
+    if current_url.startswith(public_url("")):
         return row
-    background_query = BACKGROUND_QUERIES[feature_date.toordinal() % len(BACKGROUND_QUERIES)]
-    background_image = await _fetch_background_image(background_query)
-    if background_image is not None:
-        row.background_image = background_image
-        await session.commit()
-        await session.refresh(row)
+    background = await pick_background(feature_date)
+    if background is None or background == row.background_image:
+        return row
+    row.background_image = background
+    await session.commit()
+    await session.refresh(row)
     return row
 
 
@@ -352,21 +318,20 @@ async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> 
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
     if existing:
-        return await _retry_missing_background(session, existing, feature_date)
+        return await _ensure_background(session, existing, feature_date)
     lock_key = 77000000 + int(feature_date.strftime("%Y%m%d"))
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
     if existing:
-        return await _retry_missing_background(session, existing, feature_date)
+        return await _ensure_background(session, existing, feature_date)
     recent_words, recent_authors, used_keys = await _recent_words_and_authors(session, feature_date)
     word, quote, _ = await generate_word_and_quote(feature_date, recent_words, recent_authors, used_keys)
-    background_query = BACKGROUND_QUERIES[feature_date.toordinal() % len(BACKGROUND_QUERIES)]
     row = DailyEditorial(
         feature_date=feature_date,
         word=word,
         quote=quote,
-        background_image=await _fetch_background_image(background_query),
+        background_image=await pick_background(feature_date),
         historical_events=await _fetch_events(feature_date),
     )
     session.add(row)

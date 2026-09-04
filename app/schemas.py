@@ -288,10 +288,9 @@ class WordOfTheDayOut(BaseModel):
 
 
 class BackgroundImageOut(BaseModel):
+    # Self-hosted in Supabase Storage, so there is no photographer credit to
+    # carry any more — the old Unsplash attribution fields are gone.
     url: str
-    photographer: str
-    photographer_url: str
-    unsplash_url: str
 
 
 class QuoteOfTheDayOut(BaseModel):

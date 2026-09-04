@@ -63,10 +63,16 @@ class Settings(BaseSettings):
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 
-    # Unsplash — background photo for Quote of the Day. Free tier (50
-    # req/hour on the "Demo" access tier), created at unsplash.com/developers.
-    # Absent key = feature no-ops (app falls back to a plain gradient).
-    UNSPLASH_ACCESS_KEY: Optional[str] = None
+    # Quote of the Day background photos, self-hosted in a public Supabase
+    # Storage bucket in the same project as the database. Replaced Unsplash:
+    # their API guidelines forbid re-serving the bytes, the demo tier caps at
+    # 50 req/hour, and a failed fetch used to retry on every single request.
+    # The service key is needed only to *list* the bucket; clients read the
+    # images straight off the public storage url. Absent config = feature
+    # no-ops (app falls back to a plain gradient), same as before.
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_KEY: Optional[str] = None
+    EDITORIAL_BACKGROUND_BUCKET: str = "editorial-backgrounds"
 
     # Daily sign-level horoscope provider. Kept server-side so the provider
     # can be changed or the feature disabled without releasing a new app.

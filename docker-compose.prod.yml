@@ -17,7 +17,12 @@ services:
       - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
       - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - UNSPLASH_ACCESS_KEY=${UNSPLASH_ACCESS_KEY:-}
+      # Quote of the Day backgrounds live in a public Supabase Storage
+      # bucket in the same project as the database. The service key only
+      # lists the bucket; clients read the public object urls directly.
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
+      - EDITORIAL_BACKGROUND_BUCKET=${EDITORIAL_BACKGROUND_BUCKET:-editorial-backgrounds}
       - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
       - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
       - APIVERVE_API_KEY=${APIVERVE_API_KEY:-}
