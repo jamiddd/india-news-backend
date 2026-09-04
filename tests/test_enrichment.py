@@ -4,6 +4,7 @@ parse_json_response (the fence-stripping fallback chain that's already
 broken once in production — see india-news-app-handoff.md §11 gotcha #6),
 extract_entities_rule_based, and distinct_source_count. No DB/network.
 """
+import asyncio
 import json
 
 import pytest
@@ -16,7 +17,7 @@ from app.services.enrichment import (
     select_articles_for_prompt,
     MAX_ARTICLES,
 )
-from app.services.poller import should_reenrich_on_new_outlet
+from app.services import poller
 
 
 class _StubSource:
@@ -166,25 +167,44 @@ class TestDistinctSourceCount:
         assert distinct_source_count(two) >= 2
 
 
-class TestShouldReenrichOnNewOutlet:
-    """Re-enrichment gate. Resetting ai_enriched on every joining outlet cost
-    O(outlets) paid passes per story and kept the enrich timer saturated
-    (~$20 over 2026-09-02/03); this bounds it to the doubling thresholds."""
+class TestEnrichNewCrossings:
+    """Event-driven enrichment (plan §5.D). The poller kicks off an enrichment
+    run as soon as a story becomes corroborated, instead of leaving it to the
+    timer — up to ~80 minutes on a pipeline whose median lag to a second
+    outlet is 150 minutes.
 
-    def test_fires_on_the_transition_that_unlocks_framing(self):
-        # 1 -> 2 is the one that must never be skipped: below 2 outlets there
-        # is no framing comparison to generate at all.
-        assert should_reenrich_on_new_outlet(2) is True
+    The doubling gate this replaced (re-enrich only at 2, 4, 8, 16 outlets) is
+    gone with §5.E: enrichment is now gated to multi-source clusters, so the
+    cost incident that motivated the gate cannot recur, and stories no longer
+    keep the framing they were given at two outlets.
+    """
 
-    def test_does_not_fire_for_a_singleton(self):
-        assert should_reenrich_on_new_outlet(1) is False
+    def test_runs_the_enrichment_cycle_under_a_cap(self, monkeypatch):
+        calls = []
 
-    def test_fires_only_at_doubling_thresholds(self):
-        fired = [n for n in range(1, 33) if should_reenrich_on_new_outlet(n)]
-        assert fired == [2, 4, 8, 16, 32]
+        async def fake_enrich(limit=None, **kw):
+            calls.append(limit)
+            return 0
 
-    def test_a_sixteen_outlet_story_costs_four_passes_not_fifteen(self):
-        assert sum(should_reenrich_on_new_outlet(n) for n in range(2, 17)) == 4
+        monkeypatch.setattr(
+            "scripts.enrich_all_clusters.enrich_clusters", fake_enrich
+        )
+        asyncio.run(poller._enrich_new_crossings(3))
+        # Bounded: an outage backlog is drained by the timer, not paid for in
+        # one burst at the end of a poll.
+        assert calls == [poller.EVENT_ENRICH_LIMIT]
+
+    def test_a_failed_enrichment_never_breaks_the_poll(self, monkeypatch):
+        async def boom(limit=None, **kw):
+            raise RuntimeError("Anthropic down")
+
+        monkeypatch.setattr(
+            "scripts.enrich_all_clusters.enrich_clusters", boom
+        )
+        # Ingestion is already committed by this point, and the clusters still
+        # have ai_enriched False, so the timer picks them up. Raising here
+        # would turn a paid-API blip into a failed poll cycle.
+        asyncio.run(poller._enrich_new_crossings(1))
 
 
 class TestExtractText:

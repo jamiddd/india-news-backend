@@ -73,17 +73,12 @@ HEADERS = {
 # loop below.
 GEOGRAPHIC_CATEGORIES = {"northeast", "regional_south", "regional_west", "regional_east"}
 
-def should_reenrich_on_new_outlet(distinct_source_count: int) -> bool:
-    """True when a cluster reaching `distinct_source_count` outlets is worth
-    paying to re-enrich. Doubling thresholds only: 2, 4, 8, 16...
-
-    Bounds re-enrichment to O(log outlets) paid passes per story instead of
-    O(outlets). See the call site for the cost incident this fixes. The 1->2
-    transition is always included because that is the one that unlocks the
-    framing comparison at all.
-    """
-    n = distinct_source_count
-    return n >= 2 and (n & (n - 1)) == 0
+# Cap on the event-driven enrichment run the poller kicks off (§5.D). Sized
+# well above the ~14 crossings/hour measured on 2026-09-04 so a normal cycle
+# is never truncated, but still bounded: a backlog after an outage should be
+# drained by the timer at its own pace, not paid for in one burst at the end
+# of a poll.
+EVENT_ENRICH_LIMIT = 50
 
 
 def parse_pub_date(entry) -> datetime:
@@ -190,7 +185,19 @@ async def _index_cluster_tokens(
     )
 
 
-async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source: Source) -> int:
+async def ingest_source(
+    session: AsyncSession,
+    client: CurlAsyncSession,
+    source: Source,
+    crossed_to_multi_source: Optional[Set[int]] = None,
+) -> int:
+    """Ingest one source's feed.
+
+    `crossed_to_multi_source`, when given, collects the ids of clusters that
+    became corroborated during this call — the 1->2 crossing, the moment a
+    story enters the feed. The caller uses it to enrich those clusters as soon
+    as the cycle commits rather than waiting for the next timer tick (§5.D).
+    """
     res = await fetch_feed_data(client, source)
     if res.get("status") != 200:
         source.last_polled_at = utc_now()
@@ -480,6 +487,14 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                     >= settings.FEED_MIN_DISTINCT_SOURCES
                 ):
                     matched_cluster.became_multi_source_at = utc_now()
+                    # This is the crossing the caller enriches on (§5.D).
+                    # Recorded only inside this branch, so it fires once per
+                    # cluster per the write-once stamp above — a story that
+                    # goes on to gain a third and fourth outlet is a
+                    # refinement, and refinements wait for the timer and the
+                    # Batch API rather than being paid for at list price here.
+                    if crossed_to_multi_source is not None:
+                        crossed_to_multi_source.add(matched_cluster.id)
                 # A new outlet changes what the enrichment should say: the
                 # summary now has more coverage to synthesise, and the framing
                 # comparison must list this outlet too. enrich_clusters only
@@ -490,30 +505,26 @@ async def ingest_source(session: AsyncSession, client: CurlAsyncSession, source:
                 # the clustering fix went live: 202 clusters already had fewer
                 # framing entries than they had outlets.
                 #
-                # ...but NOT on every outlet. Resetting per-joining-outlet
-                # costs O(outlets) paid passes per story, and it fires
-                # precisely on the 1->2 transition that also routes the
-                # cluster to MULTI_SOURCE_MODEL (enrichment.py) — so a
-                # 12-outlet story bought 11 Sonnet re-enrichments as it
-                # developed. That churn also kept the enrich timer's
-                # per-tick cap permanently saturated, so it ran at max
-                # throughput continuously instead of draining to zero.
-                # Measured: ~$20 of spend between 2026-09-02 22:00 and
-                # 2026-09-03 15:00, starting at this flag's deploy.
+                # On EVERY joining outlet, not at doubling thresholds
+                # (§5.E). The 2/4/8/16 gate that used to sit here was a cost
+                # fix for a problem that no longer exists: it was added when
+                # every singleton was being enriched, and the ~$20 of spend
+                # between 2026-09-02 22:00 and 2026-09-03 15:00 that provoked
+                # it came from that, not from re-enrichment as such. §5.C now
+                # gates enrichment to multi-source clusters, cutting demand
+                # ~14x, and §5.G routes these refinement passes through the
+                # Batch API at half price.
                 #
-                # Re-enrich at doubling thresholds instead: 2, 4, 8, 16...
-                # That is O(log outlets) — at most ~4 passes for a story
-                # with 16 outlets rather than 15 — while still guaranteeing
-                # a refresh at the 1->2 transition, which is the one that
-                # actually unlocks the framing comparison. Between
-                # thresholds the summary gains little from one more outlet
-                # saying the same thing, which is what the old comment's
-                # "202 clusters had fewer framing entries than outlets"
-                # measurement was really about: the 1->2 case.
-                if should_reenrich_on_new_outlet(
-                    matched_cluster.distinct_source_count
-                ):
-                    matched_cluster.ai_enriched = False
+                # Measured 2026-09-04 on live post-retune data: dropping the
+                # gate is ~500 paid calls/day against ~370 with it, a real
+                # cost of ~$0.93/day. The plan budgeted $1.50/day for this.
+                #
+                # What that buys is framing that matches the story. Under the
+                # gate, a cluster sitting at 3, 5, 6 or 7 outlets kept the
+                # framing comparison it was given at 2 — the staleness bug
+                # observed 2026-09-03, where a story listing 3 outlets
+                # actually had 6.
+                matched_cluster.ai_enriched = False
         else:
             new_cluster = StoryCluster(
                 headline=title,
@@ -678,6 +689,40 @@ async def _recompute_entity_stats(session: AsyncSession) -> None:
         cluster.entity_boost = max((reactivation_ratio[k] for k in keys), default=0.0)
 
 
+async def _enrich_new_crossings(count: int) -> None:
+    """Run the enrichment cycle immediately for stories that just became
+    corroborated (§5.D). Never raises — ingestion is already committed and a
+    failure here must not look like a failed poll.
+
+    This calls the ordinary enrichment cycle rather than enriching the crossed
+    ids directly, and that is deliberate. That cycle already selects exactly
+    the right set (multi-source, ai_enriched False), already splits first
+    passes from refinements so the crossings go synchronously and everything
+    else goes to the Batch API, and already takes the enrichment lease. A
+    second, id-targeted path here would be a duplicate of all three, and would
+    be the one that drifts when the selection rules change.
+
+    The lease is also what makes this safe to call every cycle: if the timer's
+    run is already in flight, this returns immediately rather than running a
+    competing pass.
+    """
+    # Imported here, not at module scope: app.main imports this module, and
+    # scripts.enrich_all_clusters pulls in the enrichment stack. A local
+    # import keeps that out of the poller's import graph.
+    from scripts.enrich_all_clusters import enrich_clusters
+
+    try:
+        logger.info(
+            f"[Enrich Trigger] {count} cluster(s) became multi-source this "
+            f"cycle — enriching now rather than waiting for the timer."
+        )
+        await enrich_clusters(limit=EVENT_ENRICH_LIMIT)
+    except Exception as e:
+        # The timer is the safety net: these clusters still have ai_enriched
+        # False, so the next tick picks them up.
+        logger.error(f"[Enrich Trigger] Event-driven enrichment failed: {e}")
+
+
 async def poll_all_sources(session: AsyncSession) -> int:
     async with job_lease(POLL_LEASE_NAME) as got_lease:
         if not got_lease:
@@ -710,13 +755,20 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         # completely rather than skipping that source as intended.
         source_refs = [(s.id, s.name) for s in sources]
 
+        # Clusters that became corroborated during this cycle (§5.D). Shared
+        # across every source, because the outlet that tips a story over the
+        # line is usually a different feed from the one that started it.
+        crossed_to_multi_source: Set[int] = set()
+
         async with CurlAsyncSession() as client:
             for source_id, source_name in source_refs:
                 try:
                     source = await session.get(Source, source_id)
                     if source is None:
                         continue  # deleted mid-cycle
-                    count = await ingest_source(session, client, source)
+                    count = await ingest_source(
+                        session, client, source, crossed_to_multi_source
+                    )
                     total_new += count
                 except Exception as e:
                     # A failed commit (e.g. a duplicate-key race, though this
@@ -758,6 +810,23 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         await recompute_explore_promotions(session)
 
         await session.commit()
+
+        # Event-driven enrichment (§5.D). The crossings above have had
+        # ai_enriched cleared and are committed, so the enrichment cycle's own
+        # selection will pick them up; this just runs it now instead of
+        # leaving them to the next timer tick.
+        #
+        # Why it matters: a 20m poll plus a 40-60m enrich timer put up to ~80
+        # minutes between a story becoming corroborated and being presentable,
+        # on a feed whose entire proposition is corroborated stories. Median
+        # lag to a second outlet is 150 min (measured 2026-09-04), so that
+        # delay was over half the total time-to-presentable.
+        #
+        # Deliberately after the commit and outside the poll's transaction:
+        # enrichment takes its own session and its own lease, makes paid
+        # network calls, and must never be able to roll back ingestion.
+        if crossed_to_multi_source:
+            await _enrich_new_crossings(len(crossed_to_multi_source))
 
         return total_new
     finally:
