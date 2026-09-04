@@ -521,9 +521,23 @@ async def register_device_token(
     return {"message": "Device token registered"}
 
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 @limiter.exempt
-async def root(request: Request):
+async def home(request: Request):
+    """The public landing page.
+
+    Was a JSON health blob, which meant anyone visiting openindiannews.com —
+    including Razorpay's activation reviewer, who is required to see what the
+    business sells and at what price — got `{"status": "healthy"}` and no
+    evidence a product existed. The JSON moved to /status; /health (below) was
+    already the real health check and is unchanged.
+    """
+    return (STATIC_DIR / "home.html").read_text()
+
+@app.get("/status")
+@limiter.exempt
+async def status(request: Request):
+    """The former `/` payload, kept for anything that was pointed at it."""
     return {
         "status": "healthy",
         "app": settings.PROJECT_NAME,
