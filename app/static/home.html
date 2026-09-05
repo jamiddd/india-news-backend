@@ -4,108 +4,407 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Open Indian News — Indian news, clustered and compared</title>
+<meta name="description" content="Indian news from many outlets, clustered into one story — summarised, compared, and free. No ads in the feed.">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+<meta property="og:title" content="Open Indian News">
+<meta property="og:description" content="Indian news from many outlets, clustered into one story — and compared.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
 <style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 32px 20px 80px;
-    line-height: 1.6;
-    color: #1a1a1a;
+  :root{
+    --ink:#171717; --ink-2:#4a4a4a; --ink-3:#767676;
+    --bg:#ffffff; --surface:#F3F3F8; --line:#e4e4ea;
+    --accent:#1976D2; --breaking:#C62828; --success:#2E7D32;
+    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
+    --sans:"Atkinson Hyperlegible",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --max:1080px; --radius:14px;
   }
-  h1 { font-size: 1.6rem; margin-bottom: 4px; }
-  h2 { font-size: 1.15rem; margin-top: 2.2em; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; }
-  .updated { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
-  ul { padding-left: 1.3em; }
-  li { margin-bottom: 0.5em; }
-  a { color: #0b5fff; }
-  footer { margin-top: 3em; color: #666; font-size: 0.9rem; }
-  .lede { font-size: 1.1rem; color: #333; }
-  .tagline { color: #666; font-size: 0.95rem; margin-bottom: 2em; }
-  .feature { margin-bottom: 1.4em; }
-  .feature strong { display: block; margin-bottom: 2px; }
+  :root[data-theme="dark"]{
+    --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
+    --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
+    --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
+      --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
+      --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
+    }
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,.serif{font-family:var(--serif); font-weight:700; letter-spacing:-0.01em; line-height:1.15; margin:0}
+  p{margin:0 0 1em}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--max); margin:0 auto; padding:0 24px}
+  .eyebrow{
+    font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--ink-3); margin:0 0 14px;
+  }
+
+  /* ---------- masthead ---------- */
+  header.masthead{
+    position:sticky; top:0; z-index:20; background:var(--bg);
+    background:color-mix(in srgb,var(--bg) 88%,transparent);
+    backdrop-filter:saturate(160%) blur(10px); border-bottom:1px solid var(--line);
+  }
+  .masthead .wrap{display:flex; align-items:center; gap:20px; height:62px}
+  .wordmark{font-family:var(--serif); font-weight:700; font-size:20px; color:var(--ink); letter-spacing:-.02em; white-space:nowrap}
+  .wordmark:hover{text-decoration:none}
+  .wordmark .dot{color:var(--accent)}
+  nav.links{margin-left:auto; display:flex; gap:24px; align-items:center}
+  nav.links a{color:var(--ink-2); font-size:14px}
+  nav.links a:hover{color:var(--ink); text-decoration:none}
+  .theme-btn{
+    border:1px solid var(--line); background:transparent; color:var(--ink-2);
+    width:34px; height:34px; border-radius:50%; cursor:pointer; display:grid; place-items:center; padding:0;
+  }
+  .theme-btn:hover{color:var(--ink); border-color:var(--ink-3)}
+  @media (max-width:720px){ nav.links a{display:none} }
+
+  /* ---------- hero ---------- */
+  .hero{padding:72px 0 8px; border-bottom:1px solid var(--line)}
+  .hero .wrap{display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center}
+  .hero h1{font-size:clamp(38px,5.6vw,62px)}
+  .hero .lede{font-size:19px; color:var(--ink-2); max-width:34em; margin-top:20px}
+  .cta-row{display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin:28px 0 40px}
+  .btn{
+    display:inline-flex; align-items:center; gap:9px; font-weight:700; font-size:15px;
+    padding:13px 22px; border-radius:999px; border:1px solid transparent; cursor:pointer;
+  }
+  .btn:hover{text-decoration:none}
+  .btn-primary{background:var(--ink); color:var(--bg)}
+  .btn-primary:hover{opacity:.88}
+  .btn-ghost{border-color:var(--line); color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--ink-3)}
+  .note{font-size:13px; color:var(--ink-3)}
+  .hero-stats{display:flex; gap:32px; padding:22px 0 40px; border-top:1px solid var(--line); flex-wrap:wrap}
+  .stat b{font-family:var(--serif); font-size:24px; display:block; line-height:1.2}
+  .stat span{font-size:13px; color:var(--ink-3)}
+  @media (max-width:900px){
+    .hero{padding-top:44px}
+    .hero .wrap{grid-template-columns:1fr; gap:40px}
+  }
+
+  /* ---------- phone mockup ---------- */
+  .phone{
+    width:100%; max-width:330px; margin:0 auto; border:10px solid var(--ink);
+    border-radius:36px; background:var(--bg); padding:14px 12px 18px; overflow:hidden;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,.45);
+  }
+  :root[data-theme="dark"] .phone{border-color:#3a3a42}
+  .phone-bar{display:flex; justify-content:space-between; font-size:11px; color:var(--ink-3); padding:0 6px 12px}
+  .story{border-top:1px solid var(--line); padding:14px 6px}
+  .story:first-of-type{border-top:0}
+  .tag{
+    display:inline-block; font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+    padding:3px 8px; border-radius:4px; background:var(--breaking); color:#fff; margin-bottom:8px;
+  }
+  .tag.muted{background:var(--surface); color:var(--ink-3)}
+  .story h4{font-family:var(--serif); font-size:17px; font-weight:700; margin:0 0 8px; line-height:1.25}
+  .sources{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-3); margin-bottom:12px}
+  .chip{
+    width:20px; height:20px; border-radius:50%; background:var(--surface); border:1px solid var(--line);
+    display:grid; place-items:center; font-size:9px; font-weight:700; color:var(--ink-2); margin-right:-8px;
+  }
+  .frames{background:var(--surface); border-radius:10px; padding:10px 12px}
+  .frame{display:flex; gap:8px; font-size:11px; color:var(--ink-2); padding:5px 0; line-height:1.4}
+  .frame b{color:var(--ink); flex:0 0 62px; font-size:10px; text-transform:uppercase; letter-spacing:.06em}
+  .bar{height:5px; border-radius:3px; background:var(--accent); opacity:.75}
+
+  /* ---------- sections ---------- */
+  section{padding:86px 0; border-bottom:1px solid var(--line)}
+  .sec-head{max-width:640px; margin-bottom:48px}
+  .sec-head h2{font-size:clamp(28px,3.6vw,40px)}
+  .sec-head p{color:var(--ink-2); font-size:17px; margin-top:14px}
+
+  .compare{display:grid; grid-template-columns:1fr auto 1fr; gap:28px; align-items:center}
+  .panel{border:1px solid var(--line); border-radius:var(--radius); padding:22px; background:var(--bg)}
+  .panel.good{background:var(--surface)}
+  .panel h3{font-family:var(--sans); font-size:11px; font-weight:700; margin-bottom:16px;
+    color:var(--ink-3); text-transform:uppercase; letter-spacing:.1em}
+  .dupe{font-family:var(--serif); font-size:14px; padding:9px 0; border-top:1px solid var(--line); color:var(--ink-2)}
+  .dupe:first-of-type{border-top:0}
+  .dupe small{display:block; font-family:var(--sans); font-size:11px; color:var(--ink-3)}
+  .arrow{color:var(--ink-3); font-size:26px}
+  @media (max-width:800px){ .compare{grid-template-columns:1fr; gap:16px} .arrow{transform:rotate(90deg); justify-self:center} }
+
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line);
+    border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  .card{background:var(--bg); padding:30px 26px}
+  .card .ico{width:26px; height:26px; color:var(--accent); margin-bottom:16px; display:block}
+  .card h3{font-size:19px; margin-bottom:8px}
+  .card p{color:var(--ink-2); font-size:14.5px; margin:0}
+  @media (max-width:900px){ .grid{grid-template-columns:repeat(2,1fr)} }
+  @media (max-width:600px){ .grid{grid-template-columns:1fr} }
+
+  .games{display:flex; flex-wrap:wrap; gap:10px}
+  .game{
+    border:1px solid var(--line); border-radius:999px; padding:10px 18px; font-size:14px;
+    font-weight:700; color:var(--ink-2); background:var(--bg);
+  }
+
+  .price{
+    border:1px solid var(--line); border-radius:var(--radius); padding:44px; text-align:center;
+    background:var(--surface); max-width:720px; margin:0 auto;
+  }
+  .price .big{font-family:var(--serif); font-size:clamp(44px,7vw,68px); font-weight:700; line-height:1}
+  .price .sub{color:var(--ink-2); margin-top:12px; font-size:17px}
+  .price ul{list-style:none; padding:0; margin:28px 0 0; display:grid; gap:10px; text-align:left; max-width:440px; margin-inline:auto}
+  .price li{display:flex; gap:10px; font-size:14.5px; color:var(--ink-2); align-items:flex-start}
+  .price li svg{flex:0 0 16px; margin-top:4px; color:var(--success)}
+  .donate-note{max-width:640px; margin:28px auto 0; text-align:center; font-size:14px; color:var(--ink-3)}
+
+  footer{padding:52px 0; color:var(--ink-3); font-size:14px}
+  footer .wrap{display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center}
+  footer nav{margin-left:auto; display:flex; flex-wrap:wrap; gap:20px}
+  footer a{color:var(--ink-3)}
+  footer a:hover{color:var(--ink)}
+
+  .reveal{opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .6s ease}
+  .reveal.in{opacity:1; transform:none}
+  @media (prefers-reduced-motion:reduce){ .reveal{opacity:1; transform:none; transition:none} html{scroll-behavior:auto} }
 </style>
 </head>
 <body>
 
-<h1>Open Indian News</h1>
-<p class="tagline">Indian news from many outlets, clustered into one story — and compared.</p>
+<header class="masthead">
+  <div class="wrap">
+    <a class="wordmark" href="/">Open Indian News<span class="dot">.</span></a>
+    <nav class="links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#pricing">Pricing</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <button class="theme-btn" id="theme" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+  </div>
+</header>
 
-<p class="lede">
-  Most Indian news apps show you the same story fifteen times, wrapped in advertising. Open Indian
-  News groups every outlet's coverage of a story into a single item, summarises it, and shows you
-  how different publishers are framing the same facts.
-</p>
+<div class="hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow">Android · India</p>
+      <h1>The same story,<br>told fifteen ways.<br>Read it once.</h1>
+      <p class="lede">
+        Open Indian News groups every outlet's coverage of a story into a single item, summarises
+        it, and shows you how different publishers are framing the same facts.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#features">
+          See what it does
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-ghost" href="#pricing">Free, forever</a>
+      </div>
+      <p class="note">Coming to Google Play. No ads in the feed, no subscription, no premium tier.</p>
+    </div>
 
-<h2>What it does</h2>
-
-<div class="feature">
-  <strong>Multi-outlet story clustering</strong>
-  Coverage of the same event from different publishers is grouped into one story, so you read the
-  event once instead of scrolling past it repeatedly.
+    <div class="phone reveal">
+      <div class="phone-bar"><span>Top stories</span><span>Today</span></div>
+      <article class="story">
+        <span class="tag">Breaking</span>
+        <h4>Parliament clears the amendment after a nine-hour debate</h4>
+        <div class="sources">
+          <span class="chip">TH</span><span class="chip">IE</span><span class="chip">HT</span><span class="chip">NDT</span>
+          <span style="margin-left:16px">14 outlets covering</span>
+        </div>
+        <div class="frames">
+          <div class="frame"><b>Framing</b><span>How each outlet led</span></div>
+          <div class="frame"><b>Reform</b><div style="flex:1"><div class="bar" style="width:78%"></div></div></div>
+          <div class="frame"><b>Process</b><div style="flex:1"><div class="bar" style="width:52%"></div></div></div>
+          <div class="frame"><b>Dissent</b><div style="flex:1"><div class="bar" style="width:34%"></div></div></div>
+        </div>
+      </article>
+      <article class="story">
+        <span class="tag muted">Business</span>
+        <h4>Monsoon surplus lifts the kharif sowing estimate</h4>
+        <div class="sources">
+          <span class="chip">BS</span><span class="chip">MC</span><span class="chip">LM</span>
+          <span style="margin-left:16px">6 outlets covering</span>
+        </div>
+      </article>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="hero-stats reveal">
+      <div class="stat"><b>1 story</b><span>not fifteen headlines</span></div>
+      <div class="stat"><b>0 ads</b><span>in the reading feed</span></div>
+      <div class="stat"><b>7 games</b><span>fresh every morning</span></div>
+      <div class="stat"><b>₹0</b><span>every feature, for everyone</span></div>
+    </div>
+  </div>
 </div>
 
-<div class="feature">
-  <strong>Media framing analysis</strong>
-  For stories covered by several outlets, we show the angle each publisher led with — the same
-  facts, framed differently, side by side.
-</div>
+<section id="how">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2>Clustering, not scrolling.</h2>
+      <p>Most Indian news apps show you the same event over and over, wrapped in advertising.
+         We collapse it into one item — then show you what changed between the tellings.</p>
+    </div>
+    <div class="compare reveal">
+      <div class="panel">
+        <h3>A typical feed</h3>
+        <div class="dupe">Cabinet approves the new policy<small>Outlet A · 2h</small></div>
+        <div class="dupe">New policy gets Cabinet nod<small>Outlet B · 2h</small></div>
+        <div class="dupe">Govt clears policy, oppn objects<small>Outlet C · 1h</small></div>
+        <div class="dupe">Policy cleared: what it means<small>Outlet D · 1h</small></div>
+        <div class="dupe">Cabinet green-lights policy<small>Outlet E · 48m</small></div>
+      </div>
+      <div class="arrow">→</div>
+      <div class="panel good">
+        <h3>Open Indian News</h3>
+        <div class="dupe" style="font-size:18px; color:var(--ink); padding-bottom:14px">
+          Cabinet approves the new policy
+          <small style="margin-top:6px">One story · 5 outlets · summarised · framing compared</small>
+        </div>
+        <div class="frames">
+          <div class="frame"><b>Outlet A</b><span>Leads on the economic upside</span></div>
+          <div class="frame"><b>Outlet C</b><span>Leads on opposition objections</span></div>
+          <div class="frame"><b>Outlet D</b><span>Leads on what it means for you</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-<div class="feature">
-  <strong>Summaries</strong>
-  Each story carries a short summary, so you can decide whether to read the full coverage.
-</div>
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <p class="eyebrow">Features</p>
+      <h2>Everything, at no cost.</h2>
+    </div>
+    <div class="grid reveal">
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="8" height="7" rx="2"/><rect x="15" y="14" width="6" height="7" rx="2"/></svg>
+        <h3>Story clustering</h3>
+        <p>Coverage of the same event from different publishers is grouped into one story, so you read the event once instead of scrolling past it repeatedly.</p>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8l-3 6a3.2 3.2 0 0 0 6 0Zm14 0-3 6a3.2 3.2 0 0 0 6 0Z"/><path d="M5 8h14"/></svg>
+        <h3>Framing analysis</h3>
+        <p>For stories covered by several outlets, we show the angle each publisher led with — the same facts, framed differently, side by side.</p>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 11h16M4 16h10"/></svg>
+        <h3>Short summaries</h3>
+        <p>Each story carries a short summary, so you can decide in seconds whether the full coverage is worth your time.</p>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>
+        <h3>No ads in the feed</h3>
+        <p>The reading experience carries no advertising, no interstitials, and nothing that follows you between stories.</p>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>
+        <h3>Digests on your schedule</h3>
+        <p>Save what you want to come back to, and pick the times of day you want a digest — as many or as few as you like.</p>
+      </div>
+      <div class="card">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+        <h3>Daily games</h3>
+        <p>A fresh set every morning: crossword, wordle, sudoku, word search, spelling bee, word ladder and a daily quiz.</p>
+      </div>
+    </div>
+    <div class="games reveal" style="margin-top:28px">
+      <span class="game">Crossword</span><span class="game">Wordle</span><span class="game">Sudoku</span>
+      <span class="game">Word Search</span><span class="game">Spelling Bee</span><span class="game">Word Ladder</span>
+      <span class="game">Daily Quiz</span>
+    </div>
+  </div>
+</section>
 
-<div class="feature">
-  <strong>No ads in the feed</strong>
-  The reading experience carries no advertising.
-</div>
+<section id="pricing">
+  <div class="wrap">
+    <div class="price reveal">
+      <p class="eyebrow">Pricing</p>
+      <div class="big">Free.</div>
+      <p class="sub">No paid features. No subscription. No premium tier.</p>
+      <ul>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Every feature above is available to everyone at no cost</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> The reading feed carries no advertising</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Articles always link back to the original publisher</li>
+      </ul>
+    </div>
+    <p class="donate-note">
+      The only payment the app accepts is an <strong>optional donation</strong> towards running
+      costs. A donation unlocks nothing — no features, no premium status, no change of any kind
+      inside the app. See our <a href="/refunds">Refund &amp; Cancellation Policy</a>.
+    </p>
+  </div>
+</section>
 
-<div class="feature">
-  <strong>Saved stories and notification scheduling</strong>
-  Save what you want to come back to, and choose the times of day you want a digest — as many or
-  as few as you like.
-</div>
-
-<div class="feature">
-  <strong>Daily games</strong>
-  A crossword, wordle, sudoku, word search, spelling bee, word ladder and a daily quiz — a fresh
-  set every day.
-</div>
-
-<h2>Pricing</h2>
-<div class="box">
-  <strong>Open Indian News is free.</strong><br>
-  There are no paid features, no subscription, and no premium tier. Every feature listed above is
-  available to everyone at no cost.
-</div>
-<p>
-  The only payment the app accepts is an <strong>optional donation</strong> towards running costs.
-  A donation unlocks nothing — it grants no features, no premium status and no change of any kind
-  inside the app. See our <a href="/refunds">Refund &amp; Cancellation Policy</a>.
-</p>
-
-<h2>Availability</h2>
-<p>
-  Open Indian News is an Android app, currently in development and preparing for release on Google
-  Play. This page will link to the listing once it is live.
-</p>
-
-<h2>About</h2>
-<p>
-  Open Indian News is built and operated by an independent developer in Assam, India. It aggregates
-  publicly available news feeds from Indian publishers; all articles link back to the original
-  publisher. If you publish news and would like to be included, or removed, please
-  <a href="/contact">get in touch</a>.
-</p>
+<section id="about" style="border-bottom:0">
+  <div class="wrap">
+    <div class="sec-head reveal" style="margin-bottom:0">
+      <p class="eyebrow">About</p>
+      <h2>Built by one person, in Assam.</h2>
+      <p>Open Indian News is an independent Android app, currently in development and preparing for
+         release on Google Play — this page will link to the listing once it is live. It aggregates
+         publicly available news feeds from Indian publishers, and every article links back to the
+         original source. If you publish news and would like to be included, or removed,
+         <a href="/contact">get in touch</a>.</p>
+    </div>
+  </div>
+</section>
 
 <footer>
-  Open Indian News ·
-  <a href="/privacy">Privacy Policy</a> ·
-  <a href="/terms">Terms of Service</a> ·
-  <a href="/refunds">Refunds</a> ·
-  <a href="/contact">Contact</a>
+  <div class="wrap">
+    <span>© <span id="year">2026</span> Open Indian News</span>
+    <nav>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="/refunds">Refunds</a>
+      <a href="/contact">Contact</a>
+    </nav>
+  </div>
 </footer>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var saved = null;
+    try { saved = localStorage.getItem("oin-theme"); } catch (e) {}
+    if (saved) root.setAttribute("data-theme", saved);
+
+    document.getElementById("theme").addEventListener("click", function () {
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      var current = root.getAttribute("data-theme") || (dark ? "dark" : "light");
+      var next = current === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("oin-theme", next); } catch (e) {}
+    });
+
+    document.getElementById("year").textContent = new Date().getFullYear();
+
+    var items = document.querySelectorAll(".reveal");
+    if (!("IntersectionObserver" in window)) {
+      items.forEach(function (el) { el.classList.add("in"); });
+      return;
+    }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -10% 0px" });
+    items.forEach(function (el) { io.observe(el); });
+  })();
+</script>
 
 </body>
 </html>
