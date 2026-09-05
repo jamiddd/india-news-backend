@@ -19,3 +19,8 @@ env/
 logs/
 *.log
 .git/
+
+# Raw device captures. Only the WebPs derived from them by
+# scripts/prep_shots.py are served, so the 8 MB of source PNGs stay in git
+# (for re-cropping) but never reach the production image.
+app/static/img/*.png

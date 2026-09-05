@@ -14,66 +14,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
-<style>
-  :root{
-    --ink:#171717; --ink-2:#4a4a4a; --ink-3:#767676;
-    --bg:#ffffff; --surface:#F3F3F8; --line:#e4e4ea;
-    --accent:#1976D2; --breaking:#C62828; --success:#2E7D32;
-    --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
-    --sans:"Atkinson Hyperlegible",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    --max:1080px; --radius:14px;
-  }
-  :root[data-theme="dark"]{
-    --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
-    --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-    --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
-  }
-  @media (prefers-color-scheme: dark){
-    :root:not([data-theme="light"]){
-      --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
-      --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-      --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
-    }
-  }
-
-  *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
-  body{
-    margin:0; background:var(--bg); color:var(--ink);
-    font-family:var(--sans); font-size:16px; line-height:1.6;
-    -webkit-font-smoothing:antialiased;
-  }
-  h1,h2,h3,.serif{font-family:var(--serif); font-weight:700; letter-spacing:-0.01em; line-height:1.15; margin:0}
-  p{margin:0 0 1em}
-  a{color:var(--accent); text-decoration:none}
-  a:hover{text-decoration:underline}
-  .wrap{max-width:var(--max); margin:0 auto; padding:0 24px}
-  .eyebrow{
-    font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;
-    color:var(--ink-3); margin:0 0 14px;
-  }
-
-  /* ---------- masthead ---------- */
-  header.masthead{
-    position:sticky; top:0; z-index:20; background:var(--bg);
-    background:color-mix(in srgb,var(--bg) 88%,transparent);
-    backdrop-filter:saturate(160%) blur(10px); border-bottom:1px solid var(--line);
-  }
-  .masthead .wrap{display:flex; align-items:center; gap:20px; height:62px}
-  .wordmark{font-family:var(--serif); font-weight:700; font-size:20px; color:var(--ink); letter-spacing:-.02em; white-space:nowrap}
-  .wordmark:hover{text-decoration:none}
-  .wordmark .dot{color:var(--accent)}
-  nav.links{margin-left:auto; display:flex; gap:24px; align-items:center}
-  nav.links a{color:var(--ink-2); font-size:14px}
-  nav.links a:hover{color:var(--ink); text-decoration:none}
-  .theme-btn{
-    border:1px solid var(--line); background:transparent; color:var(--ink-2);
-    width:34px; height:34px; border-radius:50%; cursor:pointer; display:grid; place-items:center; padding:0;
-  }
-  .theme-btn:hover{color:var(--ink); border-color:var(--ink-3)}
-  @media (max-width:720px){ nav.links a{display:none} }
-
-  /* ---------- hero ---------- */
+<link rel="stylesheet" href="/static/site.css?v=1">
+<style>  /* ---------- hero ---------- */
   .hero{padding:72px 0 8px; border-bottom:1px solid var(--line)}
   .hero .wrap{display:grid; grid-template-columns:1.05fr .95fr; gap:56px; align-items:center}
   .hero h1{font-size:clamp(38px,5.6vw,62px)}
@@ -91,37 +33,134 @@
   .note{font-size:13px; color:var(--ink-3)}
   .hero-stats{display:flex; gap:32px; padding:22px 0 40px; border-top:1px solid var(--line); flex-wrap:wrap}
   .stat b{font-family:var(--serif); font-size:24px; display:block; line-height:1.2}
-  .stat span{font-size:13px; color:var(--ink-3)}
+  .stat span{font-size:13px; color:var(--ink-3); display:block; max-width:34ch}
   @media (max-width:900px){
     .hero{padding-top:44px}
     .hero .wrap{grid-template-columns:1fr; gap:40px}
   }
 
-  /* ---------- phone mockup ---------- */
-  .phone{
-    width:100%; max-width:330px; margin:0 auto; border:10px solid var(--ink);
-    border-radius:36px; background:var(--bg); padding:14px 12px 18px; overflow:hidden;
-    box-shadow:0 30px 60px -30px rgba(0,0,0,.45);
+  /* ---------- screenshots ---------- */
+  /* Deliberately not device mockups: the shots are tilted, bled to the full
+     width of whatever holds them, and cropped to the part of the screen that
+     carries the point. They are here to give the page texture, not to
+     demonstrate the UI screen by screen. */
+  .shot{
+    display:block; margin:0; position:relative; overflow:hidden;
+    border-radius:6px; background:#0d0d0f;
+    box-shadow:0 24px 48px -22px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.06) inset;
+    transform:rotate(var(--tilt,0deg));
+    transition:transform .45s cubic-bezier(.2,.7,.3,1);
   }
-  :root[data-theme="dark"] .phone{border-color:#3a3a42}
-  .phone-bar{display:flex; justify-content:space-between; font-size:11px; color:var(--ink-3); padding:0 6px 12px}
-  .story{border-top:1px solid var(--line); padding:14px 6px}
-  .story:first-of-type{border-top:0}
-  .tag{
-    display:inline-block; font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
-    padding:3px 8px; border-radius:4px; background:var(--breaking); color:#fff; margin-bottom:8px;
+  .shot img{display:block; width:100%; height:100%; object-fit:cover; object-position:top}
+  .shot:hover{transform:rotate(0deg) scale(1.015)}
+  /* Tall crop for the hero, squarer crops where the shot is a supporting
+     detail rather than the subject. */
+  .shot.tall{aspect-ratio:9/16}
+  /* Taller than the other crops: a game grid needs vertical room to be
+     legible at rail width, where a 9/16 card cut the board in half. */
+  .gallery .shot{aspect-ratio:10/17}
+  .shot.mid{aspect-ratio:4/5}
+
+  /* Light/dark screenshot pairs. <picture> with a prefers-color-scheme media
+     query would ignore the page's own theme toggle, so the swap mirrors the
+     three-state token logic used for colors: bare :root is light, the media
+     query is guarded against an explicit light override, and [data-theme]
+     wins over both. Screens with no light capture simply have no .only-light
+     img and stay dark in both themes. */
+  .shot img.only-dark, .framer img.only-dark{display:none}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .shot img.only-light,    :root:not([data-theme="light"]) .framer img.only-light{display:none}
+    :root:not([data-theme="light"]) .shot img.only-dark,    :root:not([data-theme="light"]) .framer img.only-dark{display:block}
   }
-  .tag.muted{background:var(--surface); color:var(--ink-3)}
-  .story h4{font-family:var(--serif); font-size:17px; font-weight:700; margin:0 0 8px; line-height:1.25}
-  .sources{display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-3); margin-bottom:12px}
-  .chip{
-    width:20px; height:20px; border-radius:50%; background:var(--surface); border:1px solid var(--line);
-    display:grid; place-items:center; font-size:9px; font-weight:700; color:var(--ink-2); margin-right:-8px;
+  :root[data-theme="dark"] .shot img.only-light,  :root[data-theme="dark"] .framer img.only-light{display:none}
+  :root[data-theme="dark"] .shot img.only-dark,  :root[data-theme="dark"] .framer img.only-dark{display:block}
+  :root[data-theme="light"] .shot img.only-light,  :root[data-theme="light"] .framer img.only-light{display:block}
+  :root[data-theme="light"] .shot img.only-dark,  :root[data-theme="light"] .framer img.only-dark{display:none}
+
+  /* Kangaroo pocket: the shot sits straight, runs past the bottom of the
+     card, and the card's own ::after draws the pouch front over it -- a band
+     in the card colour with a lip and a shadow cast upward onto the
+     screenshot, so the lower part reads as tucked in behind rather than
+     cropped off. */
+  .card{overflow:hidden; position:relative}
+  .card .shot{--tilt:0deg; margin-top:24px; margin-bottom:-54px}
+  /* Scoped with :has so the three cards that carry no screenshot do not get
+     a pouch front with nothing behind it. Browsers without :has drop the
+     rule entirely, which degrades to a plain flush-cropped shot. */
+  .card:has(.shot)::after{
+    content:""; position:absolute; left:0; right:0; bottom:0; height:54px;
+    background:var(--bg); border-top:1px solid var(--line);
+    border-radius:14px 14px 0 0;
+    box-shadow:0 -14px 22px -12px rgba(0,0,0,.5);
   }
-  .frames{background:var(--surface); border-radius:10px; padding:10px 12px}
-  .frame{display:flex; gap:8px; font-size:11px; color:var(--ink-2); padding:5px 0; line-height:1.4}
-  .frame b{color:var(--ink); flex:0 0 62px; font-size:10px; text-transform:uppercase; letter-spacing:.06em}
-  .bar{height:5px; border-radius:3px; background:var(--accent); opacity:.75}
+
+  /* ---------- hero framing carousel ---------- */
+  /* The one feature no other Indian aggregator has, so the hero demonstrates
+     it rather than showing a picture of it: a real story's lead image and
+     headline (cut from a device capture), with the per-outlet framing rows
+     rebuilt as live cards that cycle. Card content is the app's own output
+     for this story, verbatim. */
+  .framer{
+    max-width:400px; margin:0 auto; border:1px solid var(--line); border-radius:14px;
+    background:var(--surface); overflow:hidden;
+    box-shadow:0 26px 54px -30px rgba(0,0,0,.5);
+  }
+  .framer-story{margin:0; background:#000}
+  .framer-story img{display:block; width:100%; height:auto}
+  .framer-body{padding:18px 20px 20px}
+  .framer-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px}
+  .framer-head b{font-family:var(--serif); font-size:17px}
+  .framer-head span{font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3)}
+
+  /* Fixed-height stage: cards are absolutely positioned and slide through it,
+     so the hero never reflows as the text length changes between outlets. */
+  /* Fixed height so the hero never reflows as framing text length varies,
+     and clipped so a card in transit cannot spill over the dots or the
+     heading. The padding/negative-margin pair widens the clipping box just
+     enough for each card's shadow to render without shifting the layout --
+     overflow clips at the padding box, not the border box. */
+  .framer-stage{position:relative; height:118px; overflow:hidden; padding:12px; margin:-12px}
+  .frame-card{
+    position:absolute; inset:12px; display:flex; flex-direction:column; gap:6px;
+    justify-content:center; padding:14px 16px; border-radius:10px;
+    border-left:3px solid var(--accent); background:var(--bg);
+    box-shadow:0 8px 20px -10px rgba(0,0,0,.45), 0 0 0 1px var(--line);
+    opacity:0; transform:translateY(100%);
+    transition:opacity .5s ease, transform .55s cubic-bezier(.3,.8,.3,1);
+  }
+  .frame-card b{font-size:13.5px; font-weight:700}
+  .frame-card i{font-style:italic; font-size:14px; color:var(--ink-2); line-height:1.5}
+  .frame-card.is-active{opacity:1; transform:none}
+  .frame-card.is-out{opacity:0; transform:translateY(-100%)}
+
+  .framer-dots{display:flex; gap:6px; margin-top:22px}
+  .framer-dots button{
+    flex:1; height:3px; padding:0; border:0; border-radius:2px; cursor:pointer;
+    background:var(--line); transition:background .3s;
+  }
+  .framer-dots button[aria-current="true"]{background:var(--accent)}
+  @media (prefers-reduced-motion:reduce){ .frame-card{transition:none} }
+
+  /* ---------- games gallery ---------- */
+  /* Breaks out of .wrap to run edge to edge — a rail that stops at the text
+     column reads as a widget, one that runs off both sides reads as a rail
+     you are meant to drag. The negative inline margin is the full-bleed
+     trick; the matching padding keeps the first card aligned with the text
+     above it, and scroll-padding keeps snapping aligned to that same edge. */
+  .gallery{
+    display:grid; grid-auto-flow:column; grid-auto-columns:320px; gap:26px;
+    overflow-x:auto; scroll-snap-type:x mandatory;
+    margin-inline:calc(50% - 50vw);
+    padding:30px max(24px, calc(50vw - var(--max)/2)) 34px;
+    scroll-padding-inline:max(24px, calc(50vw - var(--max)/2));
+    scrollbar-width:thin;
+  }
+  .gallery > figure{margin:0; scroll-snap-align:center}
+  .gallery > figure:nth-child(odd) .shot{--tilt:-2deg}
+  .gallery > figure:nth-child(even) .shot{--tilt:2deg}
+  .gallery figcaption{text-align:center; margin-top:18px; font-size:13px; font-weight:700; color:var(--ink-2)}
+  .rail-hint{font-size:13px; color:var(--ink-3); margin-top:4px}
+  @media (prefers-reduced-motion:reduce){ .shot{transition:none} }
 
   /* ---------- sections ---------- */
   section{padding:86px 0; border-bottom:1px solid var(--line)}
@@ -129,16 +168,43 @@
   .sec-head h2{font-size:clamp(28px,3.6vw,40px)}
   .sec-head p{color:var(--ink-2); font-size:17px; margin-top:14px}
 
-  .compare{display:grid; grid-template-columns:1fr auto 1fr; gap:28px; align-items:center}
-  .panel{border:1px solid var(--line); border-radius:var(--radius); padding:22px; background:var(--bg)}
-  .panel.good{background:var(--surface)}
-  .panel h3{font-family:var(--sans); font-size:11px; font-weight:700; margin-bottom:16px;
-    color:var(--ink-3); text-transform:uppercase; letter-spacing:.1em}
-  .dupe{font-family:var(--serif); font-size:14px; padding:9px 0; border-top:1px solid var(--line); color:var(--ink-2)}
-  .dupe:first-of-type{border-top:0}
-  .dupe small{display:block; font-family:var(--sans); font-size:11px; color:var(--ink-3)}
-  .arrow{color:var(--ink-3); font-size:26px}
-  @media (max-width:800px){ .compare{grid-template-columns:1fr; gap:16px} .arrow{transform:rotate(90deg); justify-self:center} }
+  /* ---------- how it works: stepper ---------- */
+  .steps{list-style:none; padding:0; margin:0; display:grid; grid-template-columns:repeat(3,1fr); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  .step{background:var(--bg); padding:28px 26px 30px; display:flex; flex-direction:column}
+  .step-no{
+    font-family:var(--serif); font-size:13px; font-weight:700; color:var(--accent);
+    letter-spacing:.08em; margin-bottom:14px;
+  }
+  .step h3{font-size:20px; margin-bottom:8px}
+  .step > p{color:var(--ink-2); font-size:14.5px; margin:0 0 24px}
+
+  /* Diagrams below are built from neutral bars rather than sample sentences:
+     the point of each step is the shape of the transformation, and real
+     headlines would invite reading instead of scanning. */
+  .viz{margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:10px}
+  .vcard{
+    width:100%; background:var(--surface); border:1px solid var(--line); border-radius:9px;
+    padding:12px; display:flex; flex-direction:column; gap:7px;
+  }
+  .vcard.tight{gap:5px}
+  .vrow{display:flex; align-items:center; gap:7px}
+  .bar{height:7px; border-radius:4px; background:var(--line); flex:0 0 auto}
+  .bar.soft{opacity:.6}
+  .bar.accent{background:var(--accent); opacity:.8}
+  .vdot{width:13px; height:13px; border-radius:50%; background:var(--line); flex:0 0 auto}
+  .vdot.on{background:var(--accent); opacity:.75}
+  .vstack{width:100%; display:grid; gap:6px}
+  .vstack .vcard{padding:9px 11px}
+  .vstack .vcard:nth-child(1){transform:translateX(-6px)}
+  .vstack .vcard:nth-child(3){transform:translateX(6px)}
+  .vdown{color:var(--ink-3); font-size:15px; line-height:1}
+  .vchip{
+    align-self:flex-start; font-size:10px; font-weight:700; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent);
+    border-radius:5px; padding:3px 7px;
+  }
+  @media (max-width:860px){ .steps{grid-template-columns:1fr} }
 
   .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--line);
     border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
@@ -148,12 +214,6 @@
   .card p{color:var(--ink-2); font-size:14.5px; margin:0}
   @media (max-width:900px){ .grid{grid-template-columns:repeat(2,1fr)} }
   @media (max-width:600px){ .grid{grid-template-columns:1fr} }
-
-  .games{display:flex; flex-wrap:wrap; gap:10px}
-  .game{
-    border:1px solid var(--line); border-radius:999px; padding:10px 18px; font-size:14px;
-    font-weight:700; color:var(--ink-2); background:var(--bg);
-  }
 
   .price{
     border:1px solid var(--line); border-radius:var(--radius); padding:44px; text-align:center;
@@ -166,26 +226,33 @@
   .price li svg{flex:0 0 16px; margin-top:4px; color:var(--success)}
   .donate-note{max-width:640px; margin:28px auto 0; text-align:center; font-size:14px; color:var(--ink-3)}
 
-  footer{padding:52px 0; color:var(--ink-3); font-size:14px}
-  footer .wrap{display:flex; flex-wrap:wrap; gap:16px 24px; align-items:center}
-  footer nav{margin-left:auto; display:flex; flex-wrap:wrap; gap:20px}
-  footer a{color:var(--ink-3)}
-  footer a:hover{color:var(--ink)}
-
-  .reveal{opacity:0; transform:translateY(16px); transition:opacity .6s ease, transform .6s ease}
-  .reveal.in{opacity:1; transform:none}
-  @media (prefers-reduced-motion:reduce){ .reveal{opacity:1; transform:none; transition:none} html{scroll-behavior:auto} }
 </style>
 </head>
 <body>
 
 <header class="masthead">
   <div class="wrap">
-    <a class="wordmark" href="/">Open Indian News<span class="dot">.</span></a>
+    <a class="brand" href="/">
+      <!-- The app's own OIN mark, inlined from res/drawable/ic_oin_logo_circle.xml
+           so it stays crisp at any density and costs no extra request. -->
+      <svg class="mark" viewBox="0 0 512 512" role="img" aria-label="Open Indian News">
+        <defs><clipPath id="oin"><circle cx="256" cy="256" r="248"/></clipPath></defs>
+        <circle cx="256" cy="256" r="248" fill="#1B3A66"/>
+        <g clip-path="url(#oin)" fill="#F4F0E4">
+          <path fill-rule="evenodd" d="M95,96 C30,96 0,146 0,256 C0,366 30,416 95,416 C160,416 190,366 190,256 C190,146 160,96 95,96 Z M95,168 C114,168 120,193 120,256 C120,319 114,344 95,344 C76,344 70,319 70,256 C70,193 76,168 95,168 Z"/>
+          <path d="M206,96 H286 V416 H206 Z"/>
+          <path d="M302,96 H374 V416 H302 Z M440,96 H512 V416 H440 Z M302,96 H374 L512,416 H440 Z"/>
+        </g>
+      </svg>
+      <span class="brand-text">
+        <span class="wordmark">Open Indian News<span class="stop">.</span></span>
+        <span class="brand-sub">Multi-Outlet Clustered Feed &amp; Framing Intelligence</span>
+      </span>
+    </a>
     <nav class="links">
-      <a href="#how">How it works</a>
-      <a href="#features">Features</a>
-      <a href="#pricing">Pricing</a>
+      <a href="/#how">How it works</a>
+      <a href="/#features">Features</a>
+      <a href="/#pricing">Pricing</a>
       <a href="/contact">Contact</a>
     </nav>
     <button class="theme-btn" id="theme" aria-label="Toggle dark mode" title="Toggle dark mode">
@@ -213,38 +280,51 @@
       <p class="note">Coming to Google Play. No ads in the feed, no subscription, no premium tier.</p>
     </div>
 
-    <div class="phone reveal">
-      <div class="phone-bar"><span>Top stories</span><span>Today</span></div>
-      <article class="story">
-        <span class="tag">Breaking</span>
-        <h4>Parliament clears the amendment after a nine-hour debate</h4>
-        <div class="sources">
-          <span class="chip">TH</span><span class="chip">IE</span><span class="chip">HT</span><span class="chip">NDT</span>
-          <span style="margin-left:16px">14 outlets covering</span>
+    <div class="framer reveal">
+      <figure class="framer-story">
+        <img class="only-light" src="/static/img/storycard-light.webp" width="540" height="521" fetchpriority="high" alt="Story: Trump says US may strike Iran's Pickaxe Mountain nuclear site 'very soon'.">
+        <img class="only-dark" src="/static/img/storycard-dark.webp" width="540" height="521" fetchpriority="high" alt="Story: Trump says US may strike Iran's Pickaxe Mountain nuclear site 'very soon'.">
+      </figure>
+      <div class="framer-body">
+        <div class="framer-head">
+          <b>Media framing</b>
+          <span>14 outlets</span>
         </div>
-        <div class="frames">
-          <div class="frame"><b>Framing</b><span>How each outlet led</span></div>
-          <div class="frame"><b>Reform</b><div style="flex:1"><div class="bar" style="width:78%"></div></div></div>
-          <div class="frame"><b>Process</b><div style="flex:1"><div class="bar" style="width:52%"></div></div></div>
-          <div class="frame"><b>Dissent</b><div style="flex:1"><div class="bar" style="width:34%"></div></div></div>
+        <div class="framer-stage" id="framer">
+          <article class="frame-card is-active">
+            <b>India Today World</b>
+            <i>Focuses on Trump's warning and context of recent strikes and Iran's condemnation.</i>
+          </article>
+          <article class="frame-card">
+            <b>Reuters (via Google News)</b>
+            <i>Brief factual statement of Trump's threat.</i>
+          </article>
+          <article class="frame-card">
+            <b>Al Jazeera</b>
+            <i>Frames within ongoing 'Iran war live' coverage, includes Iranian military response.</i>
+          </article>
+          <article class="frame-card">
+            <b>NDTV</b>
+            <i>Emphasizes 'fresh threat' framing of Trump's statement.</i>
+          </article>
+          <article class="frame-card">
+            <b>Deccan Chronicle</b>
+            <i>Straightforward report on Trump's statement with added quotes on nuclear weapon prevention.</i>
+          </article>
+          <article class="frame-card">
+            <b>Livemint</b>
+            <i>Combines Pickaxe threat with Trump's dismissive 'small potatoes' remark on conflict casualties.</i>
+          </article>
         </div>
-      </article>
-      <article class="story">
-        <span class="tag muted">Business</span>
-        <h4>Monsoon surplus lifts the kharif sowing estimate</h4>
-        <div class="sources">
-          <span class="chip">BS</span><span class="chip">MC</span><span class="chip">LM</span>
-          <span style="margin-left:16px">6 outlets covering</span>
-        </div>
-      </article>
+        <div class="framer-dots" id="framer-dots"></div>
+      </div>
     </div>
   </div>
   <div class="wrap">
     <div class="hero-stats reveal">
       <div class="stat"><b>1 story</b><span>not fifteen headlines</span></div>
       <div class="stat"><b>0 ads</b><span>in the reading feed</span></div>
-      <div class="stat"><b>7 games</b><span>fresh every morning</span></div>
-      <div class="stat"><b>₹0</b><span>every feature, for everyone</span></div>
+      <div class="stat"><b>Games &amp; services</b><span>daily horoscope, word of the day, quote of the day, on this day, community poll — and seven puzzles</span></div>
     </div>
   </div>
 </div>
@@ -257,29 +337,70 @@
       <p>Most Indian news apps show you the same event over and over, wrapped in advertising.
          We collapse it into one item — then show you what changed between the tellings.</p>
     </div>
-    <div class="compare reveal">
-      <div class="panel">
-        <h3>A typical feed</h3>
-        <div class="dupe">Cabinet approves the new policy<small>Outlet A · 2h</small></div>
-        <div class="dupe">New policy gets Cabinet nod<small>Outlet B · 2h</small></div>
-        <div class="dupe">Govt clears policy, oppn objects<small>Outlet C · 1h</small></div>
-        <div class="dupe">Policy cleared: what it means<small>Outlet D · 1h</small></div>
-        <div class="dupe">Cabinet green-lights policy<small>Outlet E · 48m</small></div>
-      </div>
-      <div class="arrow">→</div>
-      <div class="panel good">
-        <h3>Open Indian News</h3>
-        <div class="dupe" style="font-size:18px; color:var(--ink); padding-bottom:14px">
-          Cabinet approves the new policy
-          <small style="margin-top:6px">One story · 5 outlets · summarised · framing compared</small>
+    <ol class="steps reveal">
+      <li class="step">
+        <div class="step-no">STEP 01</div>
+        <h3>Cluster</h3>
+        <p>Every article published on the same event is matched and folded into a single story, whether two outlets covered it or forty.</p>
+        <div class="viz">
+          <div class="vstack">
+            <div class="vcard tight"><div class="vrow"><span class="vdot"></span><span class="bar" style="width:60%"></span></div></div>
+            <div class="vcard tight"><div class="vrow"><span class="vdot"></span><span class="bar" style="width:74%"></span></div></div>
+            <div class="vcard tight"><div class="vrow"><span class="vdot"></span><span class="bar" style="width:52%"></span></div></div>
+          </div>
+          <div class="vdown">&#8595;</div>
+          <div class="vcard">
+            <div class="vrow"><span class="vdot on"></span><span class="vdot"></span><span class="vdot"></span><span class="bar soft" style="width:34%"></span></div>
+            <span class="bar" style="width:92%"></span>
+            <span class="bar" style="width:70%"></span>
+            <span class="vchip">One story</span>
+          </div>
         </div>
-        <div class="frames">
-          <div class="frame"><b>Outlet A</b><span>Leads on the economic upside</span></div>
-          <div class="frame"><b>Outlet C</b><span>Leads on opposition objections</span></div>
-          <div class="frame"><b>Outlet D</b><span>Leads on what it means for you</span></div>
+      </li>
+
+      <li class="step">
+        <div class="step-no">STEP 02</div>
+        <h3>Summarise</h3>
+        <p>The clustered coverage is condensed into a few bullets — enough to know what happened without opening anything.</p>
+        <div class="viz">
+          <div class="vcard tight">
+            <span class="bar soft" style="width:100%"></span><span class="bar soft" style="width:96%"></span>
+            <span class="bar soft" style="width:99%"></span><span class="bar soft" style="width:88%"></span>
+            <span class="bar soft" style="width:97%"></span><span class="bar soft" style="width:62%"></span>
+          </div>
+          <div class="vdown">&#8595;</div>
+          <div class="vcard">
+            <div class="vrow"><span class="vdot on" style="width:5px;height:5px"></span><span class="bar" style="width:88%"></span></div>
+            <div class="vrow"><span class="vdot on" style="width:5px;height:5px"></span><span class="bar" style="width:76%"></span></div>
+            <div class="vrow"><span class="vdot on" style="width:5px;height:5px"></span><span class="bar" style="width:83%"></span></div>
+            <span class="vchip">Three bullets</span>
+          </div>
         </div>
-      </div>
-    </div>
+      </li>
+
+      <li class="step">
+        <div class="step-no">STEP 03</div>
+        <h3>Compare the framing</h3>
+        <p>Each outlet's angle on that same story is set out side by side, so the difference between the tellings is the thing you can see.</p>
+        <div class="viz">
+          <div class="vcard">
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:44%"></span><span class="bar soft" style="width:90%"></span></span></div>
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:56%"></span><span class="bar soft" style="width:72%"></span></span></div>
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:38%"></span><span class="bar soft" style="width:84%"></span></span></div>
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:50%"></span><span class="bar soft" style="width:88%"></span></span></div>
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:42%"></span><span class="bar soft" style="width:68%"></span></span></div>
+            <div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>
+              <span style="display:grid;gap:5px;flex:1"><span class="bar" style="width:60%"></span><span class="bar soft" style="width:80%"></span></span></div>
+            <span class="vchip">Same facts, different lead</span>
+          </div>
+        </div>
+      </li>
+    </ol>
   </div>
 </section>
 
@@ -294,16 +415,28 @@
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="8" height="7" rx="2"/><rect x="15" y="14" width="6" height="7" rx="2"/></svg>
         <h3>Story clustering</h3>
         <p>Coverage of the same event from different publishers is grouped into one story, so you read the event once instead of scrolling past it repeatedly.</p>
+        <figure class="shot mid">
+          <img class="only-light" src="/static/img/sources-light.webp" width="540" height="675" loading="lazy" alt="A story's Coverage list of 47 outlets, above its related topics.">
+          <img class="only-dark" src="/static/img/sources-dark.webp" width="540" height="675" loading="lazy" alt="A story's Coverage list of 47 outlets, above its related topics.">
+        </figure>
       </div>
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8l-3 6a3.2 3.2 0 0 0 6 0Zm14 0-3 6a3.2 3.2 0 0 0 6 0Z"/><path d="M5 8h14"/></svg>
         <h3>Framing analysis</h3>
         <p>For stories covered by several outlets, we show the angle each publisher led with — the same facts, framed differently, side by side.</p>
+        <figure class="shot mid">
+          <img class="only-light" src="/static/img/framing-light.webp" width="540" height="999" loading="lazy" alt="The Media framing panel, listing the angle each of six outlets led with on the same story.">
+          <img class="only-dark" src="/static/img/framing-dark.webp" width="540" height="999" loading="lazy" alt="The Media framing panel, listing the angle each of six outlets led with on the same story.">
+        </figure>
       </div>
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 11h16M4 16h10"/></svg>
         <h3>Short summaries</h3>
         <p>Each story carries a short summary, so you can decide in seconds whether the full coverage is worth your time.</p>
+        <figure class="shot mid">
+          <img class="only-light" src="/static/img/summary-light.webp" width="540" height="688" loading="lazy" alt="A story's Summary section, three bullets under the headline.">
+          <img class="only-dark" src="/static/img/summary-dark.webp" width="540" height="688" loading="lazy" alt="A story's Summary section, three bullets under the headline.">
+        </figure>
       </div>
       <div class="card">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>
@@ -321,10 +454,60 @@
         <p>A fresh set every morning: crossword, wordle, sudoku, word search, spelling bee, word ladder and a daily quiz.</p>
       </div>
     </div>
-    <div class="games reveal" style="margin-top:28px">
-      <span class="game">Crossword</span><span class="game">Wordle</span><span class="game">Sudoku</span>
-      <span class="game">Word Search</span><span class="game">Spelling Bee</span><span class="game">Word Ladder</span>
-      <span class="game">Daily Quiz</span>
+    <div class="reveal" style="margin-top:56px">
+      <h3 style="font-size:22px; margin-bottom:6px">Seven games, new every morning.</h3>
+      <p class="rail-hint">Scroll sideways →</p>
+      <div class="gallery">
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/crossword-light.webp" width="540" height="1088" loading="lazy" alt="The Crossword game, mid-play.">
+          <img class="only-dark" src="/static/img/crossword-dark.webp" width="540" height="1088" loading="lazy" alt="The Crossword game, mid-play.">
+        </span>
+        <figcaption>Crossword</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/wordle-light.webp" width="540" height="1088" loading="lazy" alt="The Wordle game, mid-play.">
+          <img class="only-dark" src="/static/img/wordle-dark.webp" width="540" height="1088" loading="lazy" alt="The Wordle game, mid-play.">
+        </span>
+        <figcaption>Wordle</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/sudoku-light.webp" width="540" height="1088" loading="lazy" alt="The Sudoku game, mid-play.">
+          <img class="only-dark" src="/static/img/sudoku-dark.webp" width="540" height="1088" loading="lazy" alt="The Sudoku game, mid-play.">
+        </span>
+        <figcaption>Sudoku</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/wordsearch-light.webp" width="540" height="1088" loading="lazy" alt="The Word Search game, mid-play.">
+          <img class="only-dark" src="/static/img/wordsearch-dark.webp" width="540" height="1088" loading="lazy" alt="The Word Search game, mid-play.">
+        </span>
+        <figcaption>Word Search</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/spellingbee-light.webp" width="540" height="1088" loading="lazy" alt="The Spelling Bee game, mid-play.">
+          <img class="only-dark" src="/static/img/spellingbee-dark.webp" width="540" height="1088" loading="lazy" alt="The Spelling Bee game, mid-play.">
+        </span>
+        <figcaption>Spelling Bee</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/wordladder-light.webp" width="540" height="1088" loading="lazy" alt="The Word Ladder game, mid-play.">
+          <img class="only-dark" src="/static/img/wordladder-dark.webp" width="540" height="1088" loading="lazy" alt="The Word Ladder game, mid-play.">
+        </span>
+        <figcaption>Word Ladder</figcaption>
+      </figure>
+      <figure>
+        <span class="shot tall">
+          <img class="only-light" src="/static/img/quiz-light.webp" width="540" height="1088" loading="lazy" alt="The Daily Quiz game, mid-play.">
+          <img class="only-dark" src="/static/img/quiz-dark.webp" width="540" height="1088" loading="lazy" alt="The Daily Quiz game, mid-play.">
+        </span>
+        <figcaption>Daily Quiz</figcaption>
+      </figure>
+      </div>
     </div>
   </div>
 </section>
@@ -375,36 +558,7 @@
   </div>
 </footer>
 
-<script>
-  (function () {
-    var root = document.documentElement;
-    var saved = null;
-    try { saved = localStorage.getItem("oin-theme"); } catch (e) {}
-    if (saved) root.setAttribute("data-theme", saved);
-
-    document.getElementById("theme").addEventListener("click", function () {
-      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      var current = root.getAttribute("data-theme") || (dark ? "dark" : "light");
-      var next = current === "dark" ? "light" : "dark";
-      root.setAttribute("data-theme", next);
-      try { localStorage.setItem("oin-theme", next); } catch (e) {}
-    });
-
-    document.getElementById("year").textContent = new Date().getFullYear();
-
-    var items = document.querySelectorAll(".reveal");
-    if (!("IntersectionObserver" in window)) {
-      items.forEach(function (el) { el.classList.add("in"); });
-      return;
-    }
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
-      });
-    }, { rootMargin: "0px 0px -10% 0px" });
-    items.forEach(function (el) { io.observe(el); });
-  })();
-</script>
+<script src="/static/site.js?v=1" defer></script>
 
 </body>
 </html>

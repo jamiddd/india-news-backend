@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -327,6 +328,28 @@ app.include_router(poll_admin_router)
 app.include_router(quiz_admin_router)
 app.include_router(admin_home_router)
 app.include_router(story_reports_admin_router)
+
+# Static assets for the landing page (device screenshots). Mounted rather
+# than inlined as data: URIs because the pages are served through the
+# lru_cache'd static_page() helper — base64-ing a dozen PNGs into that
+# string would hold megabytes resident per worker and re-send them on every
+# uncached page view.
+#
+# CachedStaticFiles rather than plain StaticFiles because of the rate
+# limiter configured below: default_limits is 100/minute per IP, and a
+# single landing-page view pulls one request per image. Immutable
+# year-long caching means a returning visitor spends zero requests against
+# that budget, and the filenames are versioned by hand when a shot is
+# re-taken.
+class CachedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
+app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Every JSON response — cluster lists especially, with full article bodies
 # and JSON columns — was going out uncompressed end to end (confirmed: no
