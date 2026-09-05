@@ -4,10 +4,10 @@ import json
 import logging
 import random
 from functools import lru_cache
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -210,6 +210,53 @@ def _weighted_shuffle(items: list, weight_fn, seed: str, strength: float = FEED_
     return sorted(items, key=key, reverse=True)
 
 
+# How long a framing comparison keeps being served after the enrichment pass
+# that produced it.
+#
+# This is the read-path half of the fix for the blanking window (see the long
+# comment in app/services/enrichment.py::apply_baseline_enrichment). The write
+# path used to null framing_comparison on every refinement and commit that null
+# before the Batch API call was even submitted, so high-coverage stories — the
+# ones that gain outlets constantly, and therefore re-enrich constantly — served
+# an empty comparison for most of their life. The column is now left alone there
+# and staleness is bounded here instead.
+#
+# Gating on age rather than clearing on write is strictly stronger: it also
+# covers a batch that fails, is cancelled, or never lands, which the old
+# clearing could not distinguish from one still in flight.
+#
+# 36h is deliberately well past the Batch API's 24h worst case, so an in-flight
+# refinement never causes a comparison to disappear mid-story; it only expires
+# framing that has genuinely been abandoned by the pipeline.
+FRAMING_MAX_AGE = timedelta(hours=36)
+
+
+def _framing_for_response(cluster: StoryCluster) -> Optional[Any]:
+    """The cluster's framing comparison, or None if it has gone stale.
+
+    Age is measured from last_enriched_at, the timestamp of the last pass that
+    actually succeeded — not last_updated_at, which moves every time the cluster
+    gains an article and would therefore keep resetting the clock on a
+    comparison the pipeline never managed to refresh.
+
+    last_enriched_at is NULL for clusters enriched before that column existed.
+    Those are served as-is rather than hidden: a comparison with an unknown age
+    is the pre-existing situation, and silently dropping it would be a
+    regression for every backfilled row.
+    """
+    framing = cluster.framing_comparison
+    if not framing:
+        return None
+    enriched_at = cluster.last_enriched_at
+    if enriched_at is None:
+        return framing
+    if enriched_at.tzinfo is None:
+        enriched_at = enriched_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - enriched_at > FRAMING_MAX_AGE:
+        return None
+    return framing
+
+
 def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
     """Builds a full StoryClusterOut (incl. article content/entities/topics/
     framing_comparison) from an ORM StoryCluster, filling
@@ -218,7 +265,10 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
     on the missing source_name field. Requires cluster.articles' .source to
     already be loaded (selectinload), same as every existing call site.
     Use this for single-cluster/detail responses; use _cluster_to_list_out
-    for list endpoints (GET /clusters, /search) — see StoryClusterListOut."""
+    for list endpoints (GET /clusters, /search) — see StoryClusterListOut.
+
+    Framing is age-gated here rather than blanked at write time — see
+    _framing_for_response."""
     articles_out = [
         ArticleOut(
             id=art.id,
@@ -245,7 +295,7 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
         last_updated_at=cluster.last_updated_at,
         entities=cluster.entities,
         topics=cluster.topics,
-        framing_comparison=cluster.framing_comparison,
+        framing_comparison=_framing_for_response(cluster),
         articles=articles_out,
     )
 

@@ -305,10 +305,43 @@ def apply_baseline_enrichment(cluster: StoryCluster) -> bool:
 
     cluster.entities = entities
     cluster.topics = topics
-    # Cleared, not merely left alone: a re-enrichment of a cluster that
-    # previously got framing must not keep serving the stale one if this
-    # pass fails to produce a new one.
-    cluster.framing_comparison = None
+
+    # Framing is deliberately NOT cleared here when the cluster can still
+    # legitimately have one.
+    #
+    # This used to unconditionally null it, on the reasoning that a stale
+    # framing is worse than none. That reasoning holds for the *content* of a
+    # comparison but not for its *availability*, and the cost was measured on
+    # production 2026-09-05: because poller.py flips ai_enriched to False on
+    # every article a cluster gains, every refinement re-entered this function
+    # and blanked the column — and the batch path (enrichment_batch.py) then
+    # COMMITS that blank before submitting, so the row served
+    # framing_comparison: null for the entire Batch API turnaround (minutes to
+    # hours, not the "momentarily" the old comments claimed).
+    #
+    # That inverted the feature's value. Blanking is triggered by gaining an
+    # outlet, so a 33-source national story re-entered the queue constantly and
+    # was blank most of the time, while a quiet 2-source story kept its framing
+    # forever. The flagship comparison was missing precisely on the stories
+    # with the most outlets to compare. A sample of 60 live clusters found 5 of
+    # 60 multi-outlet stories serving no framing at any given moment.
+    #
+    # So: keep the previous comparison in place and let the successful pass
+    # overwrite it (see the assignment in enrich_cluster_with_ai, and
+    # _apply_batch_results for the batch equivalent). One-outlet-behind beats a
+    # blank panel, and the staleness is bounded by the refinement already in
+    # flight. Staleness is now handled on the READ path instead — the API hides
+    # a comparison whose last_enriched_at is older than FRAMING_MAX_AGE (see
+    # app/main.py::_cluster_to_out), which also covers the case the old
+    # clearing could not: a batch that fails or never lands at all.
+    #
+    # The anti-fabrication invariant is unchanged and still enforced here. A
+    # cluster that CANNOT have a real comparison is still cleared
+    # unconditionally, so a framing can never outlive the multi-outlet
+    # condition that justified it (e.g. after scripts/repair_runaway_clusters.py
+    # splits a cluster back down to a single source).
+    if not can_compare_framing:
+        cluster.framing_comparison = None
 
     return can_compare_framing
 

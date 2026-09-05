@@ -7,6 +7,7 @@ import pytest
 
 from app.services.enrichment import (
     apply_ai_response,
+    apply_baseline_enrichment,
     build_enrichment_request,
     CONTENT_CAP,
     MULTI_SOURCE_MODEL,
@@ -129,3 +130,57 @@ class TestApplyAiResponse:
         with pytest.raises(Exception):
             apply_ai_response(cluster, _response("not json at all"),
                               can_compare_framing=False)
+
+
+class TestBaselinePreservesFraming:
+    """The write-path half of the blanking fix.
+
+    apply_baseline_enrichment used to null framing_comparison on every call.
+    Because poller.py flips ai_enriched to False whenever a cluster gains an
+    article, and submit_refinement_batch COMMITS the baseline before posting
+    the batch, that null was served for the whole Batch API turnaround — worst
+    on the highest-coverage stories, which refine most often.
+    """
+
+    def test_keeps_the_previous_framing_for_a_multi_outlet_cluster(self):
+        cluster = _StubCluster([
+            _StubArticle("A", 1, snippet="x", name="NDTV"),
+            _StubArticle("B", 2, snippet="y", name="The Hindu"),
+        ])
+        cluster.framing_comparison = [{"outlet": "NDTV", "headline_angle": "Official"}]
+
+        apply_baseline_enrichment(cluster)
+
+        # One refinement behind beats a blank panel while the batch is in
+        # flight; the successful pass overwrites it.
+        assert cluster.framing_comparison == [
+            {"outlet": "NDTV", "headline_angle": "Official"}
+        ]
+
+    def test_still_clears_framing_a_cluster_can_no_longer_justify(self):
+        # The anti-fabrication invariant is unchanged: framing must never
+        # outlive the multi-outlet condition that justified it (e.g. after
+        # repair_runaway_clusters.py splits a cluster back to one source).
+        cluster = _StubCluster([_StubArticle("A", 1, snippet="x", name="NDTV")])
+        cluster.framing_comparison = [{"outlet": "NDTV", "headline_angle": "Official"}]
+
+        apply_baseline_enrichment(cluster)
+
+        assert cluster.framing_comparison is None
+
+    def test_a_successful_pass_still_overwrites_the_preserved_framing(self):
+        cluster = _StubCluster([
+            _StubArticle("A", 1, snippet="x", name="NDTV"),
+            _StubArticle("B", 2, snippet="y", name="The Hindu"),
+        ])
+        cluster.framing_comparison = [{"outlet": "stale", "headline_angle": "old"}]
+
+        can_compare = apply_baseline_enrichment(cluster)
+        apply_ai_response(cluster, _response(
+            '{"neutral_headline": "H", "framing_comparison": '
+            '[{"outlet": "The Hindu", "headline_angle": "fresh"}]}'
+        ), can_compare)
+
+        assert cluster.framing_comparison == [
+            {"outlet": "The Hindu", "headline_angle": "fresh"}
+        ]

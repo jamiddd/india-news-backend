@@ -67,8 +67,15 @@ async def submit_refinement_batch(
     The rule-based baseline is applied and committed here, before the batch
     is submitted, for the same reason the synchronous path applies it first:
     it is free, and it must be on the row whether or not the paid pass ever
-    lands. Note this clears framing_comparison — a stale framing is worse
-    than none while the batch is in flight.
+    lands.
+
+    This no longer blanks framing_comparison. Committing a null here and only
+    filling it back in when the batch returned meant the row served no framing
+    for the whole turnaround, which hit high-coverage stories hardest because
+    they refine most often — see the comment in
+    app.services.enrichment.apply_baseline_enrichment. The previous comparison
+    now survives until this batch overwrites it, and read-path age-gating
+    (app.main._framing_for_response) bounds how stale it can get.
     """
     if not settings.ANTHROPIC_API_KEY or not clusters:
         return None
@@ -171,7 +178,9 @@ async def _apply_batch_results(session, results: List[Dict[str, Any]]) -> Dict[s
             succeeded += 1
         except Exception as e:
             # One malformed response must not cost the rest of the batch.
-            # The baseline written at submission time stays in place.
+            # The baseline written at submission time stays in place, and so
+            # does the cluster's previous framing comparison — the read path
+            # expires it on age if no later pass ever refreshes it.
             errored += 1
             logger.warning(
                 f"[enrich-batch] cluster #{cluster_id} response unusable: {e}"
