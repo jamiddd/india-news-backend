@@ -64,7 +64,20 @@
     font-size:10.5px; color:var(--ink-3); white-space:nowrap; overflow:hidden;
     text-overflow:ellipsis; line-height:1.4;
   }
-  @media (max-width:560px){ .brand-sub{display:none} }
+  /* Mobile: shrink the lockup rather than dropping the subtitle -- it is the
+     app's own toolbar strapline and does more identifying work than the size
+     it costs. The bar gets tight, so the gaps close up too. */
+  @media (max-width:620px){
+    .masthead .wrap{gap:10px}
+    .brand{gap:9px}
+    .brand .mark{width:28px; height:28px}
+    .wordmark{font-size:15.5px}
+    .brand-sub{font-size:9.5px; line-height:1.35}
+  }
+  @media (max-width:380px){
+    .wordmark{font-size:14.5px}
+    .brand-sub{font-size:9px}
+  }
   nav.links{margin-left:auto; display:flex; gap:24px; align-items:center}
   nav.links a{color:var(--ink-2); font-size:14px}
   nav.links a:hover{color:var(--ink); text-decoration:none}
@@ -104,7 +117,15 @@
 /* Compact variant for the masthead, where the install link has to sit in a
    70px bar next to the nav. */
 .btn-sm{padding:8px 16px; font-size:13.5px}
-@media (max-width:460px){ .btn-sm{padding:7px 13px; font-size:13px} }
+/* Below the breakpoint the label is dropped and the button becomes a round
+   icon, which is the only way it and the two-line brand lockup both fit a
+   narrow bar. The label survives as the accessible name. */
+.get-app svg{display:none; flex:0 0 auto}
+@media (max-width:620px){
+  .get-app{padding:0; width:36px; height:36px; border-radius:50%; justify-content:center}
+  .get-app span{display:none}
+  .get-app svg{display:block}
+}
 
 /* ---------- document pages (privacy, terms, refunds, contact) ---------- */
 /* These carry prose only, so they need the type scale and nothing more. */
