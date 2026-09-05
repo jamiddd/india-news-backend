@@ -611,6 +611,47 @@ async def register_device_token(
     return {"message": "Device token registered"}
 
 
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/device-tokens/unregister", status_code=200)
+@limiter.limit("30/minute")
+async def unregister_device_token(
+    request: Request,
+    user_id: str,
+    payload: DeviceTokenRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Drop an FCM token when the user turns notifications off, so the account
+    stops being targetable by scripts/send_notifications.py. The privacy
+    policy promises we hold no push token for a device that has notifications
+    disabled; without this the row survived until account deletion.
+
+    POST rather than DELETE-with-body: an FCM token is up to 512 chars and
+    carries ':' — awkward in a path segment — and bodies on DELETE are
+    poorly supported across the client stack. `platform` on the shared
+    request schema is ignored here.
+
+    Scoped to (user_id, token), not the token alone: the register endpoint
+    reassigns a token to whichever account last logged in on that device, so
+    an unregister racing that reassignment must not delete the *new* owner's
+    row. Idempotent — unregistering a token that is absent, or that now
+    belongs to someone else, succeeds without doing anything, because the
+    caller's desired end state (this user gets no pushes on this device)
+    already holds.
+    """
+    result = await db.execute(
+        select(DeviceToken).where(
+            DeviceToken.fcm_token == payload.fcm_token,
+            DeviceToken.user_id == user_id,
+        )
+    )
+    token_row = result.scalar_one_or_none()
+    if token_row is not None:
+        await db.delete(token_row)
+        await db.commit()
+
+    return {"message": "Device token unregistered"}
+
+
 @app.get("/", response_class=HTMLResponse)
 @limiter.exempt
 async def home(request: Request):
@@ -1014,6 +1055,23 @@ async def refund_policy(request: Request):
 @limiter.limit("60/minute")
 async def contact_us(request: Request):
     return static_page("contact.html")
+
+# Play requires a publicly reachable account-deletion URL in the Data safety
+# form, reachable without installing the app — the in-app Danger Zone flow
+# (POST /api/v1/account/delete, below) does not satisfy it on its own. Both
+# paths are served: /delete-account is the canonical one given to Play,
+# /account-deletion is an alias, since the wording of that Console field has
+# changed before and a stale link there is a review-blocking dead end.
+
+@app.get("/delete-account", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def delete_account_info(request: Request):
+    return static_page("delete-account.html")
+
+@app.get("/account-deletion", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def delete_account_info_alias(request: Request):
+    return static_page("delete-account.html")
 
 @app.post(f"{settings.API_V1_STR}/account/delete", status_code=204)
 @limiter.limit("5/hour")

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delete your account — Open Indian News</title>
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css?v=5">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
+<link rel="stylesheet" href="/static/site.css?v=5">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <!-- The app's own OIN mark, inlined from res/drawable/ic_oin_logo_circle.xml
+           so it stays crisp at any density and costs no extra request. -->
+      <svg class="mark" viewBox="0 0 512 512" role="img" aria-label="Open Indian News">
+        <defs><clipPath id="oin"><circle cx="256" cy="256" r="248"/></clipPath></defs>
+        <circle cx="256" cy="256" r="248" fill="#1B3A66"/>
+        <g clip-path="url(#oin)" fill="#F4F0E4">
+          <path fill-rule="evenodd" d="M95,96 C30,96 0,146 0,256 C0,366 30,416 95,416 C160,416 190,366 190,256 C190,146 160,96 95,96 Z M95,168 C114,168 120,193 120,256 C120,319 114,344 95,344 C76,344 70,319 70,256 C70,193 76,168 95,168 Z"/>
+          <path d="M206,96 H286 V416 H206 Z"/>
+          <path d="M302,96 H374 V416 H302 Z M440,96 H512 V416 H440 Z M302,96 H374 L512,416 H440 Z"/>
+        </g>
+      </svg>
+      <span class="brand-text">
+        <span class="wordmark">Open Indian News<span class="stop">.</span></span>
+        <span class="brand-sub">Multi-Outlet Clustered Feed &amp; Framing Intelligence</span>
+      </span>
+    </a>
+    <nav class="links">
+      <a href="/#how">How it works</a>
+      <a href="/#features">Features</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/about">About</a>
+      <a href="/contact">Contact</a>
+    </nav>
+    <a class="btn btn-primary btn-sm get-app" href="/download" aria-label="Get the app">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 12l6 6 6-6"/></svg>
+      <span>Get the app</span>
+    </a>
+    <button class="theme-btn" id="theme" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="wrap doc">
+<h1>Delete your account and data</h1>
+<p class="updated">Open Indian News · Last updated: 5 September 2026</p>
+
+<p>
+  You can delete your Open Indian News account at any time, and doing so permanently erases the
+  data we hold about you. You do not need to contact us or wait for a support ticket &mdash; the
+  deletion runs immediately, from inside the app.
+</p>
+
+<div class="box">
+  <strong>In the app:</strong> Settings &rarr; scroll to <strong>Danger Zone</strong> &rarr;
+  <strong>Delete account</strong>, and confirm. You will be asked to sign in again first, because
+  deletion requires a fresh proof of identity &mdash; that is what stops anyone else deleting your
+  account.
+</div>
+
+<h2>If you can no longer sign in</h2>
+<p>
+  If you have lost access to the device or the sign-in method, email
+  <a href="mailto:jamiddeka1@gmail.com">jamiddeka1@gmail.com</a> from the address on the account
+  and ask for deletion. We will verify that you control that address and complete it manually,
+  normally within 7 days and at most within 30.
+</p>
+
+<h2>What is deleted</h2>
+<p>Deleting your account removes, permanently and immediately:</p>
+<ul>
+  <li>Your account record &mdash; email address, display name and account identifier &mdash; from
+      both our database and Firebase Authentication.</li>
+  <li>Your saved stories.</li>
+  <li>Your app preferences, including theme, language filter and your category choices.</li>
+  <li>The sources you have chosen to follow or block.</li>
+  <li>Your reading history &mdash; which stories you opened, how long you spent, how far you
+      scrolled &mdash; and the topic affinities derived from it.</li>
+  <li>Your push notification tokens, so no further notification can reach any device.</li>
+  <li>Your game sessions and your notification history.</li>
+</ul>
+<p>
+  This is not a flag marking the account inactive. The rows are deleted, and every table above is
+  removed along with the account by the database itself, so nothing can be missed or left behind.
+</p>
+
+<h2>What is kept, and why</h2>
+<p>
+  If you have ever donated, the <strong>donation record itself remains</strong> &mdash; the amount,
+  the date and the payment provider&rsquo;s transaction ID. Indian tax and accounting rules require
+  us to keep a record of money actually received, and we cannot delete it on request.
+</p>
+<p>
+  <strong>Your link to it is severed.</strong> The account identifier stored against the donation is
+  cleared when the account is deleted, so what remains is an anonymous record that a payment of some
+  amount happened on some date. It cannot be traced back to you through anything we hold. We never
+  had your card or UPI details in the first place &mdash; see the
+  <a href="/privacy">Privacy Policy</a>.
+</p>
+<p>
+  Aggregate counts that contain no personal data &mdash; how many people opened a story, for
+  instance &mdash; may persist, as they are not linked to any account.
+</p>
+
+<h2>Reading without an account</h2>
+<p>
+  Signing in is optional. You can read the feed, search, and play the daily games without an
+  account, and in that case there is nothing on our servers to delete: saved stories stay on your
+  device, and uninstalling the app removes them.
+</p>
+
+<h2>Questions</h2>
+<p>
+  Write to <a href="mailto:jamiddeka1@gmail.com">jamiddeka1@gmail.com</a> or use the
+  <a href="/contact">contact page</a>.
+</p>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="year">2026</span> Open Indian News</span>
+    <nav>
+      <a href="/about">About</a>
+      <a href="/download">Download</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/donate">Donate</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="/refunds">Refunds</a>
+      <a href="/contact">Contact</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="/static/site.js?v=5" defer></script>
+
+</body>
+</html>
