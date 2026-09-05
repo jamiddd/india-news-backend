@@ -96,6 +96,10 @@
 .btn-primary:hover{opacity:.88}
 .btn-ghost{border-color:var(--line); color:var(--ink)}
 .btn-ghost:hover{border-color:var(--ink-3)}
+/* Compact variant for the masthead, where the install link has to sit in a
+   70px bar next to the nav. */
+.btn-sm{padding:8px 16px; font-size:13.5px}
+@media (max-width:460px){ .btn-sm{padding:7px 13px; font-size:13px} }
 
 /* ---------- document pages (privacy, terms, refunds, contact) ---------- */
 /* These carry prose only, so they need the type scale and nothing more. */
