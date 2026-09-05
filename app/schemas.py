@@ -71,6 +71,15 @@ class StoryClusterOut(BaseModel):
     entities: Optional[Any] = None
     topics: Optional[Any] = None
     framing_comparison: Optional[Any] = None
+    # Reinstated 2026-09-05 (it had been dropped as unread by any client).
+    # The detail screen needs it to tell two states apart that are otherwise
+    # identical on the wire: a framing_comparison that is null because no
+    # enrichment pass has run yet, versus one that is null because a pass DID
+    # run and the model correctly reported nothing worth comparing (an
+    # explicit [] is stored as None — see apply_ai_response). Without it the
+    # app's "comparison on its way" placeholder would sit there forever on the
+    # second kind. Detail responses only; the list schema below still omits it.
+    ai_enriched: bool = False
     articles: List[ArticleOut] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -79,10 +88,10 @@ class StoryClusterOut(BaseModel):
 class StoryClusterListOut(BaseModel):
     """Same as StoryClusterOut minus `entities`/`topics`/`framing_comparison`
     — all three are detail-screen-only (StoryDetailScreen.kt), never read by
-    any feed/list card. `ai_enriched` isn't here either: confirmed to not
-    even be declared in the Android StoryCluster model, so dropped from
-    StoryClusterOut entirely — it was sent on every cluster and deserialized
-    never. See ArticleListOut for the matching per-article trim."""
+    any feed/list card. `ai_enriched` isn't here either, and that trim still
+    holds: the detail screen reads it (to distinguish "not enriched yet" from
+    "enriched, nothing to compare" — see StoryClusterOut), but no feed/list
+    card does. See ArticleListOut for the matching per-article trim."""
     id: int
     headline: str
     summary: Optional[str] = None

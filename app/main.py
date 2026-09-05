@@ -296,6 +296,7 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
         entities=cluster.entities,
         topics=cluster.topics,
         framing_comparison=_framing_for_response(cluster),
+        ai_enriched=cluster.ai_enriched,
         articles=articles_out,
     )
 

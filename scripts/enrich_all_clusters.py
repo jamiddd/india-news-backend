@@ -40,6 +40,38 @@ DEFAULT_BATCH_LIMIT = 50
 ENRICH_LEASE_NAME = "enrich_clusters"
 
 
+def prioritize_first_pass(clusters: list) -> None:
+    """Sort a synchronous first-pass batch in place, highest coverage first.
+
+    The synchronous pass is serial, so a cluster's position in this list IS how
+    long its readers wait for a summary and a framing comparison.
+
+    The selection query's own ordering cannot serve that. It sorts on
+    first_seen_at, which poller.py writes once at cluster creation (never
+    updated) from the EARLIEST article's publish time — i.e. when the story
+    appeared as a lone RSS item, not when it became eligible for enrichment by
+    reaching a second outlet. Those two moments drift hours apart on exactly the
+    stories that matter: a piece that broke at 09:00 and was corroborated at
+    11:10 sorts BELOW a trivial cluster created whole at 11:05, so the 13-outlet
+    lead story was enriched after dozens of items nobody is reading, each one a
+    serial LLM call. (If recency were the goal, the right column would be
+    became_multi_source_at — what the feed itself ages on, via
+    COALESCE(became_multi_source_at, first_seen_at) in models.py.)
+
+    Coverage is the better proxy anyway: what decides who notices a missing
+    framing panel is how many people open the story, and that tracks outlet
+    count, not age. Small clusters wait longer within a cycle as a result, which
+    is the intended trade — they are read less, and news-enrich.timer is the
+    safety net for anything a cycle drops.
+
+    Ordering only, never selection: the caller's LIMIT has already chosen the
+    set, so this adds no API calls and no cost. It changes only which of them
+    finish first. Sorted in place, and stable, so clusters on equal coverage
+    keep the query's recency order rather than being shuffled arbitrarily.
+    """
+    clusters.sort(key=lambda c: c.distinct_source_count or 0, reverse=True)
+
+
 async def enrich_clusters(
     limit: int | None = DEFAULT_BATCH_LIMIT,
     force_all: bool = False,
@@ -162,6 +194,8 @@ async def _enrich_clusters_locked(
         # ai_enriched is not: the poller resets ai_enriched for both cases.
         first_pass = [c for c in clusters if c.last_enriched_at is None]
         refinements = [c for c in clusters if c.last_enriched_at is not None]
+
+        prioritize_first_pass(first_pass)
 
         total = len(first_pass)
         if total:
