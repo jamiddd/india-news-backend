@@ -10,7 +10,7 @@
   :root{
     --ink:#171717; --ink-2:#4a4a4a; --ink-3:#767676;
     --bg:#ffffff; --surface:#F3F3F8; --line:#e4e4ea;
-    --accent:#1976D2; --breaking:#C62828; --success:#2E7D32;
+    --accent:#1976D2; --on-accent:#FFFFFF; --breaking:#C62828; --success:#2E7D32;
     --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
     --sans:"Atkinson Hyperlegible",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --max:1080px; --radius:14px;
@@ -18,13 +18,13 @@
   :root[data-theme="dark"]{
     --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
     --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-    --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
+    --accent:#64B5F6; --on-accent:#171717; --breaking:#EF5350; --success:#66BB6A;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
       --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-      --accent:#64B5F6; --breaking:#EF5350; --success:#66BB6A;
+      --accent:#64B5F6; --on-accent:#171717; --breaking:#EF5350; --success:#66BB6A;
     }
   }
 
@@ -92,7 +92,12 @@
     padding:13px 22px; border-radius:999px; border:1px solid transparent; cursor:pointer;
   }
 .btn:hover{text-decoration:none}
-.btn-primary{background:var(--ink); color:var(--bg)}
+/* Blue rather than black, matching the app's accent: this is the one
+   interactive colour in the design system, and the install button is the
+   page's primary action. --on-accent flips to near-black in dark mode,
+   where the accent lightens to #64B5F6 and white text on it would not
+   hold up. */
+.btn-primary{background:var(--accent); color:var(--on-accent)}
 .btn-primary:hover{opacity:.88}
 .btn-ghost{border-color:var(--line); color:var(--ink)}
 .btn-ghost:hover{border-color:var(--ink-3)}
