@@ -83,6 +83,7 @@ from app.services.feed_gate import (
     listing_age_anchor,
 )
 from app.services.related_stories import find_related_clusters
+from app.services.editorial_backgrounds import project_base_url
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from scripts.enrich_all_clusters import enrich_clusters
 
@@ -889,6 +890,20 @@ async def donate_page(request: Request):
     return static_page("donate.html")
 
 
+def _default_apk_url() -> str:
+    """The public Storage URL for the current Android build, or "" when
+    Supabase is not configured. Reuses the editorial-backgrounds helper for
+    the project origin, which already copes with SUPABASE_URL being set to
+    the REST endpoint rather than the bare origin."""
+    base = project_base_url()
+    if not base:
+        return ""
+    return (
+        f"{base}/storage/v1/object/public/"
+        f"{settings.APK_BUCKET}/{settings.APK_OBJECT_PATH.lstrip('/')}"
+    )
+
+
 @app.get("/download", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def download_page(request: Request):
@@ -907,15 +922,21 @@ async def download_page(request: Request):
 @app.get("/download/apk")
 @limiter.limit("30/minute")
 async def download_apk(request: Request):
-    """Redirects to the hosted build. A redirect rather than a file response
-    so the APK never has to live in this repo or the image -- see
-    APK_DOWNLOAD_URL in config.py."""
-    if not settings.APK_DOWNLOAD_URL:
+    """Redirects to the hosted build.
+
+    A redirect rather than a file response so the APK never has to live in
+    this repo or the image. The target defaults to the public Supabase
+    Storage object, derived from SUPABASE_URL, so shipping a new build is an
+    upload to the bucket with no redeploy -- see APK_DOWNLOAD_URL and friends
+    in config.py.
+    """
+    url = settings.APK_DOWNLOAD_URL or _default_apk_url()
+    if not url:
         raise HTTPException(
             status_code=404,
             detail="No build is currently published for direct download.",
         )
-    return RedirectResponse(settings.APK_DOWNLOAD_URL, status_code=302)
+    return RedirectResponse(url, status_code=302)
 
 
 @app.get("/privacy", response_class=HTMLResponse)

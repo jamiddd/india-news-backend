@@ -104,16 +104,19 @@ class Settings(BaseSettings):
     # secret — it's a value you choose in Dashboard > Settings > Webhooks —
     # and without it POST /payments/razorpay/webhook refuses every request
     # rather than recording unverified payments.
-    # Where /download/apk sends the reviewer. The build itself is NOT served
-    # from this repo: an APK is tens of megabytes and changes every release,
-    # and everything here lands in the image on both droplets via the
-    # Dockerfile's `COPY . /app/`. Host it wherever (Supabase Storage, object
-    # storage, a plain file on the droplet) and point this at it. Unset means
-    # /download/apk returns 404 rather than a broken redirect.
+    # Where /download/apk sends the visitor. The build is NOT served from this
+    # repo: an APK is several megabytes and changes every release, and
+    # everything here lands in the image on both droplets via the Dockerfile's
+    # `COPY . /app/`.
+    #
+    # By default the URL is derived from SUPABASE_URL and the two settings
+    # below, so publishing a new build is an upload to the bucket and nothing
+    # else -- no env change, no redeploy. Set APK_DOWNLOAD_URL to override
+    # with an arbitrary URL (a GitHub release asset, say) if the build ever
+    # moves off Supabase Storage.
     APK_DOWNLOAD_URL: Optional[str] = None
-
-    # Shown on /download so a reviewer knows which build they installed.
-    APK_VERSION_LABEL: Optional[str] = None
+    APK_BUCKET: str = "builds"
+    APK_OBJECT_PATH: str = "android/OpenIndianNews.apk"
 
     RAZORPAY_KEY_ID: Optional[str] = None
     RAZORPAY_KEY_SECRET: Optional[str] = None
