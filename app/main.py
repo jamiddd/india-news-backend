@@ -859,6 +859,23 @@ async def reveal_daily_crossword(
         raise HTTPException(status_code=400, detail="Blocked cells cannot be revealed")
     return {"row": payload.row, "col": payload.col, "letter": letter}
 
+@app.get("/about", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def about(request: Request):
+    """About Us. One of the pages Razorpay's activation check looks for by URL:
+    a section anchored on the landing page does not reliably satisfy it."""
+    return static_page("about.html")
+
+
+@app.get("/pricing", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def pricing(request: Request):
+    """Pricing details, likewise required as its own URL. States that the app
+    is free and that a donation unlocks nothing -- the same wording as / and
+    /refunds, which was written for the activation reviewer."""
+    return static_page("pricing.html")
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def privacy_policy(request: Request):
