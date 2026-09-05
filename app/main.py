@@ -11,7 +11,7 @@ from typing import Optional, List
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -874,6 +874,48 @@ async def pricing(request: Request):
     is free and that a donation unlocks nothing -- the same wording as / and
     /refunds, which was written for the activation reviewer."""
     return static_page("pricing.html")
+
+
+@app.get("/donate", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def donate_page(request: Request):
+    """The web donation flow.
+
+    Posts to the same /donations/link endpoint the Android app uses, so the
+    two paths mint links identically and cannot drift. Grants nothing on
+    return, for the reason stated above the donation endpoints: the moment a
+    donation unlocks app functionality it stops being a donation.
+    """
+    return static_page("donate.html")
+
+
+@app.get("/download", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def download_page(request: Request):
+    """Install page for the Android build.
+
+    Exists because the app is not on Google Play yet, and Razorpay's
+    activation form wants an app link a reviewer can actually open. Play's
+    pre-production tracks are no use for that: internal testing is an
+    allowlist-only URL, closed testing is not publicly searchable, and open
+    testing needs production access first. So the build is hosted directly
+    and this page is the link that gets submitted.
+    """
+    return static_page("download.html")
+
+
+@app.get("/download/apk")
+@limiter.limit("30/minute")
+async def download_apk(request: Request):
+    """Redirects to the hosted build. A redirect rather than a file response
+    so the APK never has to live in this repo or the image -- see
+    APK_DOWNLOAD_URL in config.py."""
+    if not settings.APK_DOWNLOAD_URL:
+        raise HTTPException(
+            status_code=404,
+            detail="No build is currently published for direct download.",
+        )
+    return RedirectResponse(settings.APK_DOWNLOAD_URL, status_code=302)
 
 
 @app.get("/privacy", response_class=HTMLResponse)

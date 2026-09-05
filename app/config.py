@@ -104,6 +104,17 @@ class Settings(BaseSettings):
     # secret — it's a value you choose in Dashboard > Settings > Webhooks —
     # and without it POST /payments/razorpay/webhook refuses every request
     # rather than recording unverified payments.
+    # Where /download/apk sends the reviewer. The build itself is NOT served
+    # from this repo: an APK is tens of megabytes and changes every release,
+    # and everything here lands in the image on both droplets via the
+    # Dockerfile's `COPY . /app/`. Host it wherever (Supabase Storage, object
+    # storage, a plain file on the droplet) and point this at it. Unset means
+    # /download/apk returns 404 rather than a broken redirect.
+    APK_DOWNLOAD_URL: Optional[str] = None
+
+    # Shown on /download so a reviewer knows which build they installed.
+    APK_VERSION_LABEL: Optional[str] = None
+
     RAZORPAY_KEY_ID: Optional[str] = None
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
