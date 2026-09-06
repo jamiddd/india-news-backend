@@ -48,15 +48,25 @@ ENGAGEMENT_THRESHOLD_MULTIPLIER = 1.3
 # literal position. Tunable; not backtested yet (see design memory — same
 # caveat as piece 1's decay half-lives).
 #
-# Lowered 8.0 -> 2.0 when headline_score's numerator became LN(1 + n)
-# instead of n (see poller.py). The boost is multiplicative, so it survived
-# that change arithmetically, but its *meaning* did not: against linear
-# counts 8x let a 2-source story beat an 8-source one, while against a log
-# numerator the same 8x would let it beat a story with thousands of
-# outlets — turning an explore slot into an unconditional top-of-feed
-# override. At 2.0 a promoted 2-source story out-scores an ordinary story
-# up to ~8 sources, which is what the paragraph above always intended.
-EXPLORE_PROMOTED_BOOST = 2.0
+# This constant is calibrated against headline_score's scale and has to be
+# re-solved every time that scale changes, because the boost is
+# multiplicative: it survives such a change arithmetically while silently
+# ceasing to mean what it was set to mean.
+#
+#   8.0  against a linear numerator: let a 2-source story beat an 8-source
+#        one, as intended.
+#   2.0  after the numerator became LN(1 + n) — 8.0 there would have beaten
+#        a story with thousands of outlets, an unconditional top-of-feed
+#        override.
+#   3.5  now the numerator is POWER(n, 0.8). At 2.0 the boost had quietly
+#        shrunk to tying with ~5 sources; 3.5 restores the ~8-10 source
+#        equivalence the first paragraph describes, and still loses to a
+#        genuinely enormous story.
+#
+# The intent is pinned by test_explore_boost_beats_several_sources_but_not_
+# an_enormous_story in tests/test_ranking.py — if that fails after a scale
+# change, this number is what needs re-solving, not the test.
+EXPLORE_PROMOTED_BOOST = 3.5
 
 # How many past cycles' worth of ordinary (non-explore) read_events to
 # sample when estimating baseline_mean_engagement. A cap, not a time

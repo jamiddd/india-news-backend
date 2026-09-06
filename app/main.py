@@ -1380,6 +1380,20 @@ async def list_story_clusters(
             # per poll cycle in poller.py), not raw recency. This is what keeps
             # a story 6 outlets are covering above a single regional outlet's
             # story that merely updated more recently.
+            #
+            # headline_score carries recency on its own — its decay exponent is
+            # deliberately gentle (see ranking.py) so that a story leads on
+            # corroboration without new stories being locked out. Measured
+            # against live data with scripts/eval_ranking.py: 55% of the top 20
+            # is under an hour old while an 18-outlet story from five hours ago
+            # still holds first place.
+            #
+            # An earlier revision added a separate freshness floor on top of
+            # this, so a new story could lead on newness alone. The harness
+            # killed it: a floor lifts every story below it to the SAME value,
+            # which made a brand-new 1-source item and a brand-new 2-source one
+            # score identically — erasing corroboration exactly among the newest
+            # stories, where the feed gate is currently not enforced either.
             if weights:
                 # Per-cluster boost = the highest weight among its contributing
                 # sources (a cluster with a boosted source among 5 others still
@@ -1476,10 +1490,10 @@ async def list_story_clusters(
         else:
             next_cursor = None
 
-        # Same weight the old inline shuffle used (headline_score * source
-        # boost * explore boost) — precomputed here and cached alongside the
-        # formatted clusters so a future cache hit can reshuffle without the
-        # ORM objects (headline_score etc. aren't on StoryClusterOut).
+        # Same weight the ORDER BY used (headline_score * source boost * explore
+        # boost) — precomputed here and cached alongside the formatted clusters
+        # so a future cache hit can reshuffle without the ORM objects
+        # (headline_score etc. aren't on StoryClusterOut).
         cluster_outs = [_cluster_to_list_out(c) for c in items]
         item_weights = [
             c.headline_score

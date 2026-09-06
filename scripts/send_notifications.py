@@ -9,18 +9,33 @@ notifiable_clauses() in app/services/feed_gate.py. That requirement is
 unconditional, not tied to FEED_GATE_ENABLED: a push is the most intrusive
 surface the app has.
 
-- Breaking: headline_score > BREAKING_SCORE_THRESHOLD (0.4). This value is
-  deliberately above 0.3536, the highest score a singleton (1-outlet) story
-  can ever reach regardless of recency (score = distinct_source_count /
-  (hours+2)^1.5, and a 1-source story at age 0 scores 1/2^1.5 = 0.3536) — so
-  crossing 0.4 is only mathematically possible when 2+ independent outlets
-  are actively corroborating the same story right now. The explicit
-  multi-source clause added 2026-09-03 does not change which clusters
-  qualify; it stops that guarantee from depending on one constant staying
-  above one number, which nothing in the code said out loud. Capped at
-  BREAKING_DAILY_CAP (5) sends/day per user even on an unusually newsy day;
-  confirmed against live production data that ~3 clusters/day naturally
-  cross 0.4, so the cap is a rarely-binding safety net, not the normal case.
+- Breaking: headline_score > BREAKING_SCORE_THRESHOLD (0.6). This value is
+  deliberately above 0.5, the highest score a singleton (1-outlet) story can
+  ever reach regardless of recency (a 1-source story at age 0 scores
+  1^0.8 / 2 = 0.5) — so crossing it is only mathematically possible when 2+
+  independent outlets are actively corroborating the same story right now.
+  The explicit multi-source clause added 2026-09-03 does not change which
+  clusters qualify; it stops that guarantee from depending on one constant
+  staying above one number, which nothing in the code said out loud. Capped
+  at BREAKING_DAILY_CAP (5) sends/day per user even on an unusually newsy
+  day, so the cap is a rarely-binding safety net, not the normal case.
+
+  THIS CONSTANT IS CALIBRATED AGAINST headline_score AND MUST BE RE-SOLVED
+  WHENEVER THAT SCORE'S SCALE CHANGES. It is a bare comparison against a
+  float, so a change to the score does not break it — it silently changes
+  who gets woken up. It has been wrong once already: 0.4 was solved against
+  the original n/(hours+2)^1.5, and survived unchanged through the switch to
+  LN(1 + n), which quietly cut a 10-source story's eligible window from 6.6
+  hours to 1.3 and made a 2-source story ineligible entirely.
+
+  0.6 is solved against POWER(n, 0.8) / (hours+2) to restore the original
+  intent, matching its eligibility windows closely:
+
+      sources    original @0.4     now @0.6
+            1            0.00h        0.00h   (never, by construction)
+            2            0.92h        0.90h
+            5            3.39h        4.04h
+           10            6.55h        8.52h
 - Daily: one notification per configured time-of-day (a user can pick
   several), covering only the single top-headline_score cluster overall
   (not personalized). Dedup is per time-slot via NotificationLog.
@@ -66,8 +81,9 @@ from app.services.job_lease import job_lease
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# See module docstring for why this exact value.
-BREAKING_SCORE_THRESHOLD = 0.4
+# See module docstring for why this exact value — and for why it has to be
+# re-solved whenever app/services/ranking.py changes the score's scale.
+BREAKING_SCORE_THRESHOLD = 0.6
 BREAKING_DAILY_CAP = 5
 
 # Job runs every ~15 min; treat a user as "at their preferred time" if we're
