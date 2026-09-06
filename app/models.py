@@ -442,11 +442,19 @@ class StoryCluster(Base):
     # corroborated is this story", used to rank the default "All Stories"
     # feed by importance rather than raw recency.
     distinct_source_count = Column(Integer, default=1)
-    # Precomputed ranking score (distinct_source_count decayed by recency,
-    # HN-style) — recomputed in bulk once per poll cycle in
-    # poll_all_sources(). Stored rather than computed at query time so the
-    # "All Stories" feed can keyset-paginate against an index instead of
-    # re-aggregating on every request. See app/services/poller.py.
+    # Precomputed ranking score, HN-style: LN(1 + distinct_source_count)
+    # decayed by age measured from COALESCE(became_multi_source_at,
+    # first_seen_at) — deliberately NOT last_updated_at, which a busy
+    # cluster rewrites often enough to never age. Recomputed in bulk once
+    # per poll cycle in poll_all_sources(), where the full reasoning for
+    # both the anchor and the log lives. Stored rather than computed at
+    # query time so the "All Stories" feed can keyset-paginate against an
+    # index instead of re-aggregating on every request.
+    #
+    # Magnitudes are much smaller than the pre-log formula's (a 60-source
+    # breaking story is ~1.5, not ~21). Nothing compares it against a
+    # literal — the entity and explore boosts are multiplicative — but a new
+    # threshold written against it must be chosen on this scale.
     headline_score = Column(Float, default=0.0)
 
     first_seen_at = Column(DateTime(timezone=True), default=utc_now, index=True)

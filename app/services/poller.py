@@ -16,6 +16,7 @@ from app.models import Source, Article, StoryCluster, ClusterToken, EntityStat, 
 from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.explore_bandit import recompute_explore_promotions
+from app.services.ranking import UPDATE_HEADLINE_SCORES_SQL
 from app.services.dedup import (
     MIN_SHARED_TOKENS,
     compute_url_hash,
@@ -790,13 +791,38 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         # every row on every cycle regardless of new ingestion. Pure column
         # arithmetic, no joins, cheap even at 100k+ clusters. See
         # StoryCluster.headline_score and app/main.py's use of it.
-        await session.execute(text("""
-            UPDATE story_clusters SET headline_score =
-                distinct_source_count / POWER(
-                    GREATEST(EXTRACT(EPOCH FROM (now() - last_updated_at)) / 3600.0, 0) + 2,
-                    1.5
-                )
-        """))
+        #
+        # Two properties of this formula are deliberate, both fixing a
+        # top-of-feed story that would not move for 1.5 days:
+        #
+        # 1. It decays from COALESCE(became_multi_source_at, first_seen_at),
+        #    NOT last_updated_at. last_updated_at is rewritten every time any
+        #    article joins the cluster (see the matching loop above), so a
+        #    story with many outlets on it resets its own decay clock
+        #    continuously and never ages. That is a positive feedback loop:
+        #    the more sources a story has, the more often something arrives
+        #    to keep it pinned. Under the old formula a 60-source story
+        #    needed ~14 consecutive hours with zero new articles — across all
+        #    60 outlets — merely to fall level with a fresh 5-source story,
+        #    which in practice never happened. Both halves of the COALESCE
+        #    are written once and never rewritten, so the clock now runs from
+        #    when the story actually broke. This is the same anchor
+        #    feed_gate.listing_age_anchor() already uses for the age gate;
+        #    the gate was fixed for this drift and the score was not.
+        #
+        # 2. The numerator is LN(1 + n), not n. Corroboration has diminishing
+        #    returns: the 60th outlet to repeat a story tells a reader far
+        #    less than the 2nd did. Linear counting let one very large story
+        #    outrank a fresh, genuinely different one by ~12x on source count
+        #    alone; log compresses that to ~2.3x, so breadth still wins but
+        #    stops steamrolling the rest of the feed.
+        #
+        # The cost is real and worth stating: a genuinely developing story no
+        # longer earns extra life from new coverage. That was last_updated_at's
+        # legitimate purpose — the mechanism just could not tell a real
+        # development from the 47th outlet posting a recap, and got the
+        # trade-off badly wrong in the common case.
+        await session.execute(text(UPDATE_HEADLINE_SCORES_SQL))
 
         # Feed ranking redesign, piece 1: global importance. Same transaction
         # as the headline_score update above, so both are consistent as of

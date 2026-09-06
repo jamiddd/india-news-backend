@@ -47,7 +47,16 @@ ENGAGEMENT_THRESHOLD_MULTIPLIER = 1.3
 # beat) a several-source story's headline_score, without hardcoding a
 # literal position. Tunable; not backtested yet (see design memory — same
 # caveat as piece 1's decay half-lives).
-EXPLORE_PROMOTED_BOOST = 8.0
+#
+# Lowered 8.0 -> 2.0 when headline_score's numerator became LN(1 + n)
+# instead of n (see poller.py). The boost is multiplicative, so it survived
+# that change arithmetically, but its *meaning* did not: against linear
+# counts 8x let a 2-source story beat an 8-source one, while against a log
+# numerator the same 8x would let it beat a story with thousands of
+# outlets — turning an explore slot into an unconditional top-of-feed
+# override. At 2.0 a promoted 2-source story out-scores an ordinary story
+# up to ~8 sources, which is what the paragraph above always intended.
+EXPLORE_PROMOTED_BOOST = 2.0
 
 # How many past cycles' worth of ordinary (non-explore) read_events to
 # sample when estimating baseline_mean_engagement. A cap, not a time
