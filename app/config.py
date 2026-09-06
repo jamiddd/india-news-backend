@@ -47,18 +47,25 @@ class Settings(BaseSettings):
     FEED_MIN_DISTINCT_SOURCES: int = 2
 
     # The feed gate itself: when true, listings show only stories with at
-    # least FEED_MIN_DISTINCT_SOURCES distinct outlets. Default OFF — this
-    # is the product commitment in docs/multi-source-feed-plan.md, not a
-    # backend cleanup, and it wants to be switched on deliberately (and
-    # switched back off in one env var if the feed turns out too thin).
+    # least FEED_MIN_DISTINCT_SOURCES distinct outlets. This is the product
+    # commitment in docs/multi-source-feed-plan.md, not a backend cleanup —
+    # the app's premise is comparative coverage, and a single-outlet report
+    # is the one thing it promises not to lead with.
+    #
+    # Turned on 2026-09-06, after scripts/eval_ranking.py showed
+    # single-source stories sitting in the live top 20. Still an env var, and
+    # still overridable per environment (see docker-compose.prod.yml), so it
+    # can be switched back off without a code change if the feed turns out
+    # too thin — run `eval_ranking.py --min-sources 2` to see what it costs
+    # before and after.
     #
     # Everything else keyed on FEED_MIN_DISTINCT_SOURCES — the crossing
     # stamp, the enrichment gate — runs regardless of this flag, so the data
-    # the gated feed needs is already being produced before it is turned on.
+    # the gated feed needs was already being produced before it went on.
     #
     # Detail-by-id is deliberately never gated: an existing deep link,
     # notification, or saved story must still open.
-    FEED_GATE_ENABLED: bool = False
+    FEED_GATE_ENABLED: bool = True
 
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None

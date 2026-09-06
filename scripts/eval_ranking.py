@@ -21,6 +21,7 @@ Usage:
         python scripts/eval_ranking.py
     ... --at "2026-09-05 14:00"      # rank as of a past moment
     ... --formula "steep:1.0:1.0"    # add a candidate to the comparison
+    ... --min-sources 2              # preview the feed with the gate on
     ... --top 30
 """
 import argparse
@@ -87,7 +88,7 @@ def summarise(ranked: list[Row], top: int) -> str:
             f"{under_1h:>4.0%} under 1h")
 
 
-async def load(session, as_of: datetime) -> list[Row]:
+async def load(session, as_of: datetime, min_sources: int) -> list[Row]:
     """Every cluster the feed could show at `as_of`, with the same age anchor
     and the same window the live listing query applies.
 
@@ -102,7 +103,7 @@ async def load(session, as_of: datetime) -> list[Row]:
             StoryCluster.distinct_source_count,
             StoryCluster.became_multi_source_at,
             StoryCluster.first_seen_at,
-        ).where(StoryCluster.distinct_source_count >= gate_min_sources())
+        ).where(StoryCluster.distinct_source_count >= min_sources)
     )
 
     rows = []
@@ -121,14 +122,14 @@ async def load(session, as_of: datetime) -> list[Row]:
     return rows
 
 
-def print_comparison(rows: list[Row], formulas, top: int) -> None:
+def print_comparison(rows: list[Row], formulas, top: int, min_sources: int) -> None:
     ranked = {
         name: sorted(rows, key=lambda c, f=fn: f(c.sources, c.age_hours), reverse=True)
         for name, fn in formulas
     }
 
     print(f"\n{len(rows)} clusters in the window "
-          f"(gate >= {gate_min_sources()} sources, <= {LISTING_MAX_AGE.days}d old)\n")
+          f"(gate >= {min_sources} sources, <= {LISTING_MAX_AGE.days}d old)\n")
 
     for name, _fn in formulas:
         print(f"  {name:<34} {summarise(ranked[name], top)}")
@@ -169,14 +170,35 @@ def parse_formula(raw: str):
             f"--formula wants name:breadth:decay, e.g. 'steep:1.0:1.0' (got {raw!r})")
 
 
-async def main(as_of: datetime, formulas, top: int) -> None:
+async def main(as_of: datetime, formulas, top: int, min_sources: int | None) -> None:
+    live_gate = gate_min_sources()
     async with AsyncSessionLocal() as session:
-        rows = await load(session, as_of)
+        # Always load ungated, so "what does the gate cost" can be answered from
+        # the same query rather than a second trip.
+        rows = await load(session, as_of, 1)
     if not rows:
         print("No clusters in the window — nothing to compare.")
         return
+
     print(f"\nRanking as of {as_of:%Y-%m-%d %H:%M} UTC")
-    print_comparison(rows, formulas, top)
+
+    # The number the gate decision actually turns on: not how many clusters
+    # exist, but how much of the recent feed survives it. A gate that halves a
+    # four-day archive but empties the last six hours is a gate that shows a
+    # reader an empty app.
+    print("\n--- what the feed gate costs ---")
+    for window in (6, 24, 96):
+        recent = [c for c in rows if c.age_hours <= window]
+        for n in (2, 3):
+            kept = [c for c in recent if c.sources >= n]
+            print(f"  last {window:>2}h: {len(recent):>5} clusters -> "
+                  f"{len(kept):>5} at >= {n} sources ({len(kept) / max(len(recent), 1):>5.1%})")
+
+    effective = min_sources if min_sources is not None else live_gate
+    if min_sources is not None and min_sources != live_gate:
+        print(f"\n(previewing gate >= {min_sources}; live setting is >= {live_gate})")
+    rows = [c for c in rows if c.sources >= effective]
+    print_comparison(rows, formulas, top, effective)
 
 
 if __name__ == "__main__":
@@ -188,6 +210,9 @@ if __name__ == "__main__":
     ap.add_argument("--formula", type=parse_formula, action="append", default=None,
                     help="name:breadth:decay — repeatable. Replaces the defaults.")
     ap.add_argument("--top", type=int, default=20)
+    ap.add_argument("--min-sources", type=int, default=None,
+                    help="Preview the feed at this gate threshold instead of the "
+                         "live FEED_GATE_ENABLED/FEED_MIN_DISTINCT_SOURCES setting.")
     args = ap.parse_args()
 
     if args.at:
@@ -195,4 +220,5 @@ if __name__ == "__main__":
     else:
         moment = datetime.now(timezone.utc)
 
-    asyncio.run(main(moment, [CURRENT] + (args.formula or DEFAULT_CANDIDATES), args.top))
+    asyncio.run(main(moment, [CURRENT] + (args.formula or DEFAULT_CANDIDATES),
+                     args.top, args.min_sources))

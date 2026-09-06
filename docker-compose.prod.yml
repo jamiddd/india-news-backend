@@ -16,6 +16,12 @@ services:
       # true ONLY when DATABASE_URL is the transaction pooler (6543).
       - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
       - REDIS_URL=${REDIS_URL}
+      # The multi-source feed gate. On by default (see app/config.py); listed
+      # here because nothing else in this file passes it, so without this line
+      # setting it in .env would silently do nothing. Set FEED_GATE_ENABLED=false
+      # in .env and restart to back it out without a code change or a rebuild.
+      - FEED_GATE_ENABLED=${FEED_GATE_ENABLED:-true}
+      - FEED_MIN_DISTINCT_SOURCES=${FEED_MIN_DISTINCT_SOURCES:-2}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       # Quote of the Day backgrounds live in a public Supabase Storage
       # bucket in the same project as the database. The service key only

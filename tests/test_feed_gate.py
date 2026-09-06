@@ -25,10 +25,20 @@ def _sql(query) -> str:
 
 
 class TestFeedGate:
-    def test_defaults_to_off(self):
-        # The gate is a product commitment, not a cleanup — it must never
-        # arrive switched on as a side effect of deploying the code.
-        assert settings.FEED_GATE_ENABLED is False
+    def test_is_on(self):
+        # Off until 2026-09-06, on the principle that a product commitment must
+        # never arrive as a side effect of deploying code. It was then turned on
+        # deliberately, after scripts/eval_ranking.py showed single-source
+        # stories sitting in the live top 20 — which is precisely what the app
+        # promises not to lead with.
+        #
+        # This assertion is not "the gate is correct"; it is "the value is the
+        # one somebody chose". Flipping it back is a legitimate call if the feed
+        # proves too thin (docs/clustering-rework-handoff.md: ~46% of genuinely
+        # related pairs still are not merged, and under the gate those stories
+        # are invisible rather than merely buried) — but it should fail here
+        # first, rather than drift.
+        assert settings.FEED_GATE_ENABLED is True
 
     def test_is_a_no_op_when_disabled(self, monkeypatch):
         monkeypatch.setattr(settings, "FEED_GATE_ENABLED", False)
