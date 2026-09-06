@@ -194,3 +194,15 @@
 .form-msg{margin:14px 0 0; font-size:14px; min-height:1.2em}
 .form-msg.err{color:var(--breaking)}
 .form-msg.ok{color:var(--accent)}
+
+/* Credits: the photographer list runs to fifty names, which as a single
+   column is a wall of scrolling. Columns collapse to one on narrow screens
+   via the min() track size rather than a media query. */
+.credits-photos {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: .35rem 1.5rem;
+}
+.credits-photos li { margin: 0; }

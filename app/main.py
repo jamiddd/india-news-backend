@@ -1058,6 +1058,16 @@ async def terms_of_service(request: Request):
 async def refund_policy(request: Request):
     return static_page("refunds.html")
 
+# Attribution for everything the app is built on. Not merely courtesy: SCOWL's
+# terms and the SIL Open Font Licence both require their notices to travel with
+# the software, and Wikipedia's CC BY-SA requires attribution for the On This
+# Day text. The same credits ship inside the app (Settings > Credits); this is
+# the copy anyone can reach without installing it.
+@app.get("/credits", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def credits(request: Request):
+    return static_page("credits.html")
+
 @app.get("/contact", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def contact_us(request: Request):
