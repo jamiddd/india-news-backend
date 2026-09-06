@@ -9,9 +9,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/site.css?v=5">
+<link rel="stylesheet" href="/static/site.css?v=6">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
-<link rel="stylesheet" href="/static/site.css?v=5">
+<link rel="stylesheet" href="/static/site.css?v=6">
 </head>
 <body>
 
@@ -40,6 +40,7 @@
       <a href="/pricing">Pricing</a>
       <a href="/about">About</a>
       <a href="/contact">Contact</a>
+      <a href="/feedback">Feedback</a>
     </nav>
     <a class="btn btn-primary btn-sm get-app" href="/download" aria-label="Get the app">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 12l6 6 6-6"/></svg>
@@ -53,7 +54,7 @@
 
 <main class="wrap doc">
 <h1>Privacy Policy</h1>
-<p class="updated">Open Indian News · Last updated: 4 September 2026</p>
+<p class="updated">Open Indian News · Last updated: 6 September 2026</p>
 
 <p>
   This policy explains what information Open Indian News ("the app", "we", "us") collects, why,
@@ -122,20 +123,44 @@
   and you can ask us to delete yours at any time.
 </p>
 
+<h2>Crash reporting</h2>
+<p>
+  The app includes <strong>Firebase Crashlytics</strong>, so that when it crashes or freezes we
+  find out and can fix it. A report is sent only when something actually goes wrong. It contains
+  the technical details of the failure &mdash; where in the code it happened, your device model and
+  Android version, and the state of the device at that moment, such as free memory and storage
+  &mdash; together with a random identifier for the app installation.
+</p>
+<p>
+  That identifier is not your account, and we do not attach your name, email or user ID to a crash
+  report. Crash reporting is on in the published app and off in development builds. It is the only
+  automatic reporting in the app, and there is no way for us to use it to watch what you read.
+</p>
+
 <h2>What we don't do</h2>
 <div class="box">
-  The app has <strong>no analytics SDK, no crash-reporting SDK, and no advertising SDK</strong> of
-  any kind. We don't track your behavior in the app, and we don't share or sell any information to
-  advertisers or data brokers, because there aren't any integrated.
+  The app has <strong>no advertising SDK and no third-party analytics or attribution SDK</strong>
+  &mdash; no Google Analytics, no Facebook SDK, no ad network, no data broker, nothing that follows
+  you between apps or across the web. We do not sell or share your information with anyone for
+  advertising or profiling, and there is nothing integrated that could. What we record about your
+  reading is listed above, stays on our own server, and exists to order your feed.
 </div>
 
 <h2>Third parties</h2>
 <p>
-  We use <strong>Firebase Authentication</strong>, a service provided by Google, to handle sign-in.
-  Google processes your email, display name, and authentication credentials as part of providing
-  that service, under
-  <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google's own privacy terms</a>.
-  We don't share your data with any other third party.
+  We use three services from Google, all part of Firebase, and each processes data under
+  <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google's own privacy terms</a>:
+</p>
+<ul>
+  <li><strong>Firebase Authentication</strong> handles sign-in. Google processes your email,
+      display name and authentication credentials in order to provide it.</li>
+  <li><strong>Firebase Cloud Messaging</strong> delivers push notifications, and issues the device
+      token described above.</li>
+  <li><strong>Firebase Crashlytics</strong> receives crash and freeze reports, as described above.</li>
+</ul>
+<p>
+  We also use <strong>Razorpay</strong> to process donations, and only if you make one &mdash; see
+  the Donations section above. Apart from these, we don't share your data with any third party.
 </p>
 
 <h2>News content</h2>
@@ -195,11 +220,12 @@
       <a href="/terms">Terms</a>
       <a href="/refunds">Refunds</a>
       <a href="/contact">Contact</a>
+      <a href="/feedback">Feedback</a>
     </nav>
   </div>
 </footer>
 
-<script src="/static/site.js?v=5" defer></script>
+<script src="/static/site.js?v=6" defer></script>
 
 </body>
 </html>
