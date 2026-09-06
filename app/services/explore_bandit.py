@@ -58,15 +58,18 @@ ENGAGEMENT_THRESHOLD_MULTIPLIER = 1.3
 #   2.0  after the numerator became LN(1 + n) — 8.0 there would have beaten
 #        a story with thousands of outlets, an unconditional top-of-feed
 #        override.
-#   3.5  now the numerator is POWER(n, 0.8). At 2.0 the boost had quietly
-#        shrunk to tying with ~5 sources; 3.5 restores the ~8-10 source
-#        equivalence the first paragraph describes, and still loses to a
-#        genuinely enormous story.
+#   3.5  when the numerator became POWER(n, 0.8). At 2.0 the boost had
+#        quietly shrunk to tying with ~5 sources.
+#   4.0  now the numerator is POWER(n, 0.9). 3.5 still technically cleared
+#        an 8-source story there, but by 0.5% — close enough that any
+#        further tuning would flip it silently. 4.0 ties with ~9 sources,
+#        which is the middle of the intended range rather than its edge,
+#        and still loses to a genuinely enormous story.
 #
 # The intent is pinned by test_explore_boost_beats_several_sources_but_not_
 # an_enormous_story in tests/test_ranking.py — if that fails after a scale
 # change, this number is what needs re-solving, not the test.
-EXPLORE_PROMOTED_BOOST = 3.5
+EXPLORE_PROMOTED_BOOST = 4.0
 
 # How many past cycles' worth of ordinary (non-explore) read_events to
 # sample when estimating baseline_mean_engagement. A cap, not a time
