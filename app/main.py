@@ -85,6 +85,7 @@ from app.services.feed_gate import (
 )
 from app.services.related_stories import find_related_clusters
 from app.services.editorial_backgrounds import project_base_url
+from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from scripts.enrich_all_clusters import enrich_clusters
 
@@ -568,6 +569,7 @@ async def update_user_preferences(
     request: Request,
     user_id: str,
     preferences: UserPreferences,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(User).where(User.id == user_id))
@@ -587,6 +589,7 @@ async def register_device_token(
     request: Request,
     user_id: str,
     payload: DeviceTokenRegisterRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -620,6 +623,7 @@ async def unregister_device_token(
     request: Request,
     user_id: str,
     payload: DeviceTokenRegisterRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1094,9 +1098,11 @@ async def delete_account(request: Request, payload: AccountDeleteRequest, db: As
     Firebase ID token, verified server-side here — same as /auth/login. The
     account deleted is derived from the verified token's own uid claim, not
     a client-supplied user_id, so this endpoint can't be used to delete
-    someone else's account by guessing/observing their internal id (unlike
-    other endpoints, e.g. preferences update, which still trust a raw
-    client-supplied user_id — see india-news-app-handoff.md).
+    someone else's account by guessing/observing their internal id. Every
+    other /users/{user_id} endpoint now proves the same thing via the
+    require_user dependency (app/services/request_auth.py); this one keeps
+    its own body-carried token because it predates that dependency and
+    needs a *fresh* token rather than a possibly-memoised one.
     """
     try:
         identity = await verify_firebase_id_token(payload.uid)
@@ -1106,8 +1112,13 @@ async def delete_account(request: Request, payload: AccountDeleteRequest, db: As
     result = await db.execute(select(User).where(User.provider_uid == identity.uid))
     user = result.scalar_one_or_none()
     if user is not None:
+        deleted_id = user.id
         await db.delete(user)
         await db.commit()
+        # Drop any memoised verification for this account, so an ID token
+        # still inside its lifetime can't be replayed against rows that no
+        # longer exist (see app/services/request_auth.py).
+        invalidate_token_cache_for_user(deleted_id)
 
     await delete_firebase_user(identity.uid)
 
@@ -1333,6 +1344,7 @@ async def list_story_clusters(
                      "`source_weights`/the All Stories ranking entirely. Mutually exclusive "
                      "with those in intent, not enforced; if set, it wins.",
     ),
+    caller_id: Optional[str] = Depends(optional_user_id),
     db: AsyncSession = Depends(get_db)
 ):
     # `seed`/`user_id` deliberately excluded from the cache key: neither
@@ -1534,6 +1546,11 @@ async def list_story_clusters(
     # never cached — record_exposure/db.commit() below is a write side
     # effect that must run exactly once per real request, not be replayed
     # from a shared cache entry.
+    # The bandit logs an exposure against this id, so it must be the caller's
+    # own — an unverified id would let anyone write into a stranger's explore
+    # history. Unverified callers keep the feed, minus the experiment.
+    if user_id and caller_id != user_id:
+        user_id = None
     if is_all and cursor is None and user_id and display_items:
         user_exists = (await db.execute(select(User.id).where(User.id == user_id))).scalar_one_or_none()
         if user_exists:
@@ -1571,6 +1588,7 @@ async def list_for_you_clusters(
     request: Request,
     user_id: str = Query(...),
     limit: int = Query(20, ge=1, le=50),
+    caller_id: Optional[str] = Depends(optional_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -1597,6 +1615,18 @@ async def list_for_you_clusters(
     otherwise capture it as cluster_id (this broke once already in prod;
     see git history).
     """
+    # "For You" is one user's reading history rendered as a feed, so the
+    # user_id must be proven, not asserted. Anonymous callers get 401 rather
+    # than a stranger's personalized feed.
+    if caller_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Sign in to use For You",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if caller_id != user_id:
+        raise HTTPException(status_code=403, detail="Not your account")
+
     user_result = await db.execute(select(User).where(User.id == user_id))
     if user_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1743,6 +1773,7 @@ async def start_game_session(
     user_id: str,
     game_type: str,
     payload: GameSessionRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Record that `user_id` opened `game_type`'s puzzle for `puzzle_date`.
@@ -1770,6 +1801,7 @@ async def complete_game_session(
     user_id: str,
     game_type: str,
     payload: GameSessionRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark (user_id, game_type, puzzle_date) as completed — upserts so this
@@ -1801,7 +1833,12 @@ async def complete_game_session(
 
 @app.get(f"{settings.API_V1_STR}/users/{{user_id}}/games/stats", response_model=GameStatsOut)
 @limiter.limit("60/minute")
-async def get_game_stats(request: Request, user_id: str, db: AsyncSession = Depends(get_db)):
+async def get_game_stats(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(User).where(User.id == user_id))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1875,6 +1912,7 @@ async def record_read_event(
     request: Request,
     user_id: str,
     payload: ReadEventRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -2091,6 +2129,7 @@ async def save_story(
     request: Request,
     user_id: str,
     payload: SaveStoryRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Bookmarks a cluster for user_id. Upserted on (user_id, cluster_id) —
@@ -2118,6 +2157,7 @@ async def unsave_story(
     request: Request,
     user_id: str,
     cluster_id: int,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -2137,6 +2177,7 @@ async def report_story(
     user_id: str,
     cluster_id: int,
     payload: ReportStoryRequest,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -2159,6 +2200,7 @@ async def list_saved_stories(
     user_id: str,
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[int] = Query(None, description="Cursor for pagination (a saved_stories.id)"),
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -2196,6 +2238,7 @@ async def star_source(
     request: Request,
     user_id: str,
     source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Stars source_id for user_id — boosts ranking in /clusters/for-you
@@ -2223,6 +2266,7 @@ async def unstar_source(
     request: Request,
     user_id: str,
     source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -2242,6 +2286,7 @@ async def unstar_source(
 async def list_starred_sources(
     request: Request,
     user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -2264,6 +2309,7 @@ async def block_source(
     request: Request,
     user_id: str,
     source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Blocks source_id for user_id — client filters this source's stories
@@ -2293,6 +2339,7 @@ async def unblock_source(
     request: Request,
     user_id: str,
     source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -2312,6 +2359,7 @@ async def unblock_source(
 async def list_blocked_sources(
     request: Request,
     user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_result = await db.execute(select(User).where(User.id == user_id))
