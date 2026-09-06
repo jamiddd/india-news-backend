@@ -457,3 +457,36 @@ class GameStatsOut(BaseModel):
     xp: int = 0
     xp_to_next_level: int = 100
     by_game: dict[str, GameTypeStatsOut]
+
+
+# --- Website feedback form (/feedback) ---
+
+# Kept in step with the <select> in app/static/feedback.html. A Literal rather
+# than a free string so an unknown category is a 422 at the edge instead of an
+# unqueryable value in the table.
+FeedbackCategory = Literal["bug", "story", "feature", "publisher", "other"]
+
+
+class FeedbackRequest(BaseModel):
+    category: FeedbackCategory = "other"
+    # Both optional: someone reporting a broken page should not have to say who
+    # they are. An empty string from the form is normalised to None server-side.
+    name: Optional[str] = Field(default=None, max_length=120)
+    email: Optional[str] = Field(default=None, max_length=320)
+    # The lower bound rejects the "hi" submissions that cost a reply to
+    # establish they contain no information; the upper bound is what a long,
+    # genuinely detailed bug report needs, and no more.
+    message: str = Field(min_length=10, max_length=5000)
+    # Honeypot. Real browsers leave it empty because it is hidden; scripted
+    # spam fills every field it finds. Named to look worth filling in.
+    website: Optional[str] = Field(default=None, max_length=200)
+    # Set by the Android app when someone is signed in, so a reply can be tied
+    # to an account. Client-supplied and unverified, exactly like the user_id
+    # on the preferences endpoints — it is a hint for whoever reads the message,
+    # never an authorisation claim, and nothing is granted on the strength of
+    # it. The web form never sends it.
+    user_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class FeedbackResponse(BaseModel):
+    ok: bool = True

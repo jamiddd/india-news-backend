@@ -50,7 +50,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
@@ -69,6 +69,7 @@ from app.schemas import (
     StarredSourcesOut,
     BlockedSourcesOut,
     ReportStoryRequest,
+    FeedbackRequest, FeedbackResponse,
 )
 from app.services.affinity import record_engagement, score_clusters_for_user
 from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
@@ -111,6 +112,7 @@ from app.poll_admin import router as poll_admin_router
 from app.quiz_admin import router as quiz_admin_router
 from app.admin_home import router as admin_home_router
 from app.story_reports_admin import router as story_reports_admin_router
+from app.feedback_admin import router as feedback_admin_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -380,6 +382,7 @@ app.include_router(poll_admin_router)
 app.include_router(quiz_admin_router)
 app.include_router(admin_home_router)
 app.include_router(story_reports_admin_router)
+app.include_router(feedback_admin_router)
 
 # Static assets for the landing page (device screenshots). Mounted rather
 # than inlined as data: URIs because the pages are served through the
@@ -1056,6 +1059,16 @@ async def refund_policy(request: Request):
 async def contact_us(request: Request):
     return static_page("contact.html")
 
+# Feedback is deliberately separate from /contact. /contact publishes an email
+# address and a postal address because Razorpay and Play require them to be
+# findable; this is the path for someone who just wants to say a thing and be
+# done, without opening a mail client or revealing who they are.
+
+@app.get("/feedback", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def feedback_page(request: Request):
+    return static_page("feedback.html")
+
 # Play requires a publicly reachable account-deletion URL in the Data safety
 # form, reachable without installing the app — the in-app Danger Zone flow
 # (POST /api/v1/account/delete, below) does not satisfy it on its own. Both
@@ -1097,6 +1110,52 @@ async def delete_account(request: Request, payload: AccountDeleteRequest, db: As
         await db.commit()
 
     await delete_firebase_user(identity.uid)
+
+@app.post(f"{settings.API_V1_STR}/feedback", response_model=FeedbackResponse, status_code=201)
+@limiter.limit("5/hour")
+async def submit_feedback(request: Request, payload: FeedbackRequest, db: AsyncSession = Depends(get_db)):
+    """
+    Accepts a message from the website's /feedback form.
+
+    Unauthenticated on purpose: requiring an account to report that something
+    is broken selects for exactly the users least likely to have hit the
+    problem. The abuse budget is therefore spent on the rate limit above (5/hour
+    per IP, the same allowance as account deletion) and the honeypot below,
+    rather than on a login wall or a third-party captcha that would put another
+    tracker on the page.
+
+    The honeypot is answered with the same 201 a real submission gets. Telling a
+    spam script it was detected is free information for tuning the next attempt;
+    a silent accept costs it a slot in the rate limit and teaches it nothing.
+    """
+    if payload.website:
+        logger.info("Discarded honeypot feedback submission")
+        return FeedbackResponse()
+
+    def clean(value: Optional[str]) -> Optional[str]:
+        # The form posts "" for fields left alone; store null instead, so
+        # "did they leave an email?" is one check rather than two.
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+    # Where it came from is decided here, not by the sender: only the Android
+    # app sends X-Client-Version (see the version-negotiation middleware above),
+    # so its presence is the one signal about the origin that a caller cannot
+    # simply assert. Anything else — the form, curl, a future client — is "web".
+    source = "android" if request.headers.get("X-Client-Version") else "web"
+
+    db.add(Feedback(
+        category=payload.category,
+        name=clean(payload.name),
+        email=clean(payload.email),
+        message=payload.message.strip(),
+        source=source,
+        user_id=clean(payload.user_id),
+    ))
+    await db.commit()
+    return FeedbackResponse()
 
 @app.get(f"{settings.API_V1_STR}/sources", response_model=List[SourceOut])
 @limiter.limit("30/minute")

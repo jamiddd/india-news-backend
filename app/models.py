@@ -789,3 +789,44 @@ class Donation(Base):
         # id must never produce a second row. Upserted on in app/main.py.
         Index("uq_donations_provider_payment_id", "provider_payment_id", unique=True),
     )
+
+
+class Feedback(Base):
+    """
+    A message left through the website's /feedback form.
+
+    Deliberately holds nothing the sender did not type. No IP address, no
+    session, no fingerprint: abuse is handled by the endpoint's rate limit and
+    the honeypot field rather than by retaining identifiers, which keeps this
+    table outside the scope of anything the privacy policy has to promise
+    about tracking. `email` is optional for the same reason — someone
+    reporting a problem should not have to identify themselves, and a reply is
+    only possible (and only attempted) when they ask for one by leaving it.
+
+    `user_id` is not a foreign key and is normally null. The form is public
+    and unauthenticated; the column exists so the same table can accept
+    feedback from a signed-in app user later without a migration, and a stale
+    id left behind by a deleted account is harmless here.
+    """
+    __tablename__ = "feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # One of the values in schemas.FeedbackCategory. Stored as a plain string
+    # rather than a DB enum so adding a category later is a code change, not a
+    # migration on a live table.
+    category = Column(String(32), nullable=False, default="other")
+    name = Column(String(120), nullable=True)
+    email = Column(String(320), nullable=True)
+    message = Column(Text, nullable=False)
+    # "web" today. Set by the server, never trusted from the client.
+    source = Column(String(32), nullable=False, default="web")
+    user_id = Column(String(64), nullable=True, index=True)
+    # Triage state for whoever reads these: "new" -> "read" -> "closed".
+    status = Column(String(32), nullable=False, default="new", server_default="new")
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        # The only query this table has: "show me what has come in, newest
+        # first, that I have not dealt with yet."
+        Index("ix_feedback_status_created_at", "status", "created_at"),
+    )

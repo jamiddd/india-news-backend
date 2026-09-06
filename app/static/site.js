@@ -154,3 +154,75 @@
     });
   });
 })();
+
+// /feedback. Posts to the same endpoint an in-app feedback form would use, so
+// the two can never drift. The server is the authority on what it will accept;
+// the checks here exist only to save a round trip on the obvious mistakes.
+(function () {
+  var form = document.getElementById("feedback-form");
+  if (!form) return;
+
+  var message = document.getElementById("fb-message");
+  var count = document.getElementById("fb-count");
+  var go = document.getElementById("fb-go");
+  var msg = document.getElementById("fb-msg");
+
+  function say(text, kind) {
+    msg.textContent = text;
+    msg.classList.toggle("err", kind === "err");
+    msg.classList.toggle("ok", kind === "ok");
+  }
+
+  function tally() { count.textContent = String(message.value.length); }
+  message.addEventListener("input", function () { tally(); say(""); });
+  tally();
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+
+    var body = message.value.trim();
+    if (body.length < 10) {
+      say("Tell us a little more — at least a sentence.", "err");
+      message.focus();
+      return;
+    }
+
+    var email = document.getElementById("fb-email").value.trim();
+    // Not a validity check, just a typo check: an address we cannot reply to is
+    // worse than no address, because it looks like a reply is coming.
+    if (email !== "" && email.indexOf("@") < 1) {
+      say("That email address does not look right. Leave it blank if you do not want a reply.", "err");
+      return;
+    }
+
+    go.disabled = true;
+    say("Sending…");
+
+    fetch("/api/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: document.getElementById("fb-category").value,
+        name: document.getElementById("fb-name").value,
+        email: email,
+        message: body,
+        website: document.getElementById("fb-website").value
+      })
+    }).then(function (r) {
+      if (r.status === 429) {
+        say("That is a lot of feedback in one hour. Try again later, or email us.", "err");
+        go.disabled = false;
+        return;
+      }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      // Replace the form outright: leaving a filled-in form on screen next to
+      // "thanks" invites a second identical submission.
+      form.innerHTML = "";
+      say("Thank you — that has been sent. If you left an email, you will hear back.", "ok");
+      form.appendChild(msg);
+    }).catch(function () {
+      say("That did not send. Check your connection and try again, or email jamiddeka1@gmail.com.", "err");
+      go.disabled = false;
+    });
+  });
+})();

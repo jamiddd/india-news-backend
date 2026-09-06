@@ -5,6 +5,11 @@ anthropic>=0.69.0  # scripts/eval_clustering.py only — the app itself calls th
                    # Messages API over raw httpx (see services/enrichment.py).
                    # The eval harness uses the Batch API, whose submit/poll/
                    # results cycle is not worth hand-rolling for a dev script.
+aiosqlite>=0.20.0  # tests/test_feedback.py only — exercises POST /api/v1/feedback
+                   # against a real database rather than a mocked session, since
+                   # what it asserts (the honeypot writes no row, blank strings
+                   # land as NULL) is precisely what a mock would paper over.
+                   # Production is Postgres via asyncpg; nothing ships this.
 pyflakes>=3.2.0  # catches undefined names, which no test here covers: a
                  # NameError inside a function body passes import, passes
                  # ast.parse, and only fails when that line executes. One

@@ -12,7 +12,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin_session import (
@@ -24,7 +24,7 @@ from app.admin_session import (
     set_session_cookie,
 )
 from app.database import get_db
-from app.models import DailyPoll, DailyQuiz
+from app.models import DailyPoll, DailyQuiz, Feedback
 from app.services.polls import IST
 
 router = APIRouter(prefix="/admin")
@@ -100,7 +100,19 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
     waiting = sum(1 for task in tasks.values() if task["waiting"])
     heading = ("Nothing waiting on you" if not waiting
                else f"{waiting} item{'s' if waiting > 1 else ''} to review")
+    # Feedback is not part of pending_reviews(): that dict drives the morning
+    # push, which is about the two drafts that expire if nobody acts on them
+    # today. Unread feedback is not urgent in the same way and must not make
+    # the notification fire, but the reviewer is already here, so show it.
+    unread = await db.scalar(
+        select(func.count()).select_from(Feedback).where(Feedback.status == "new")) or 0
+    feedback_card = (
+        f"<div class=task><h2>Feedback</h2>"
+        f"<p class=meta>{'<b class=danger>' + str(unread) + ' unread</b>' if unread else 'Nothing unread'}</p>"
+        f"<a href='/admin/feedback'>Open feedback →</a></div>")
+
     return layout(TITLE, (
         f"<h1>Daily Review — {today}</h1><p class=meta>{heading}</p>"
         f"{_task_card('Poll', tasks['poll'])}"
-        f"{_task_card('Quiz', tasks['quiz'])}"))
+        f"{_task_card('Quiz', tasks['quiz'])}"
+        f"{feedback_card}"))

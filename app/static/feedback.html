@@ -3,8 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pricing — Open Indian News</title>
-<meta name="description" content="Open Indian News is free. No subscription, no premium tier; donations are optional and unlock nothing.">
+<title>Send Feedback — Open Indian News</title>
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -12,6 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/site.css?v=6">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
+<link rel="stylesheet" href="/static/site.css?v=6">
 </head>
 <body>
 
@@ -53,60 +53,67 @@
 </header>
 
 <main class="wrap doc">
+<h1>Send Feedback</h1>
+<p class="updated">Tell us what is broken, missing, or wrong.</p>
 
-<h1>Pricing</h1>
-<p class="updated">Open Indian News &middot; Last updated: 5 September 2026</p>
-
-<div class="box">
-  <p>
-    <strong>Open Indian News is free.</strong> There are no paid features, no subscription and no
-    premium tier. Every feature of the app is available to everyone at no cost.
-  </p>
-</div>
-
-<h2>What it costs to use</h2>
-<table>
-  <tr><th>Item</th><th>Price</th></tr>
-  <tr><td>Downloading and using the app</td><td>&#8377;0</td></tr>
-  <tr><td>Clustered stories, summaries and media framing</td><td>&#8377;0</td></tr>
-  <tr><td>Saved stories and scheduled digests</td><td>&#8377;0</td></tr>
-  <tr><td>Daily games and services</td><td>&#8377;0</td></tr>
-  <tr><td>Optional donation towards running costs</td><td>Any amount you choose</td></tr>
-</table>
-
-<h2>Donations</h2>
 <p>
-  The only payment the app accepts is an <strong>optional donation</strong> towards running costs
-  &mdash; servers, data and the services the app depends on.
-</p>
-<p>
-  <strong>A donation unlocks nothing.</strong> It grants no features, no premium status, no removal
-  of anything, and no change of any kind inside the app. It is a contribution towards keeping the
-  app running, not a purchase. Nobody is asked to donate in order to use any part of the app.
-</p>
-<p>
-  Donations are processed by Razorpay and can be made <a href="/donate">on this site</a> or from inside the app. Amounts are chosen by the donor. See our
-  <a href="/refunds">Refund &amp; Cancellation Policy</a> for how to request a refund, and our
-  <a href="/terms">Terms of Service</a> for the terms that apply.
+  This goes straight to the person who builds the app. You do not need an account, and you do not
+  need to leave your name &mdash; say what happened and that is enough. Leave an email only if you
+  want a reply.
 </p>
 
-<h2>No advertising in the feed</h2>
-<p>
-  The reading experience carries no advertising, no interstitials and nothing that follows a reader
-  between stories.
-</p>
+<form id="feedback-form" novalidate>
+  <div class="field">
+    <label for="fb-category">What is this about?</label>
+    <select id="fb-category" name="category">
+      <option value="bug">Something is broken</option>
+      <option value="story">A story is wrong or misleading</option>
+      <option value="feature">An idea or a request</option>
+      <option value="publisher">I publish news &mdash; include or remove my site</option>
+      <option value="other" selected>Something else</option>
+    </select>
+  </div>
 
-<h2>Questions</h2>
-<p>
-  Anything unclear about the above, please <a href="/contact">contact us</a> &mdash; email is read
-  by a person.
-</p>
+  <div class="field">
+    <label for="fb-message">Your message</label>
+    <textarea id="fb-message" name="message" rows="7" required minlength="10" maxlength="5000"
+              placeholder="If something is broken, your device and roughly when it happened helps a lot."></textarea>
+    <span class="hint"><span id="fb-count">0</span> / 5000</span>
+  </div>
 
+  <div class="row-2">
+    <div class="field">
+      <label for="fb-name">Your name <span class="opt">optional</span></label>
+      <input id="fb-name" name="name" type="text" maxlength="120" autocomplete="name">
+    </div>
+    <div class="field">
+      <label for="fb-email">Email <span class="opt">only if you want a reply</span></label>
+      <input id="fb-email" name="email" type="email" maxlength="320" autocomplete="email">
+    </div>
+  </div>
+
+  <!-- Honeypot: hidden from people, irresistible to scripts. Never filled in by
+       a real submission, so anything arriving here is discarded server-side. -->
+  <div class="hp" aria-hidden="true">
+    <label for="fb-website">Website</label>
+    <input id="fb-website" name="website" type="text" tabindex="-1" autocomplete="off">
+  </div>
+
+  <button type="submit" class="btn btn-primary" id="fb-go">Send feedback</button>
+  <p class="form-msg" id="fb-msg" role="status" aria-live="polite"></p>
+</form>
+
+<h2>Other ways to reach us</h2>
+<p>
+  If you would rather use email, or you need our postal or business details, they are on the
+  <a href="/contact">Contact page</a>. To delete your account and data, see
+  <a href="/delete-account">Delete your account</a>.
+</p>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>&copy; <span id="year">2026</span> Open Indian News</span>
+    <span>© <span id="year">2026</span> Open Indian News</span>
     <nav>
       <a href="/about">About</a>
       <a href="/download">Download</a>
