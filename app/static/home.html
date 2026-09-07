@@ -68,22 +68,15 @@
   :root[data-theme="light"] .shot img.only-light,  :root[data-theme="light"] .framer img.only-light{display:block}
   :root[data-theme="light"] .shot img.only-dark,  :root[data-theme="light"] .framer img.only-dark{display:none}
 
-  /* Kangaroo pocket: the shot sits straight, runs past the bottom of the
-     card, and the card's own ::after draws the pouch front over it -- a band
-     in the card colour with a lip and a shadow cast upward onto the
-     screenshot, so the lower part reads as tucked in behind rather than
-     cropped off. */
-  .card{overflow:hidden; position:relative}
-  .card .shot{--tilt:0deg; margin-top:24px; margin-bottom:-54px}
-  /* Scoped with :has so the three cards that carry no screenshot do not get
-     a pouch front with nothing behind it. Browsers without :has drop the
-     rule entirely, which degrades to a plain flush-cropped shot. */
-  .card:has(.shot)::after{
-    content:""; position:absolute; left:0; right:0; bottom:0; height:54px;
-    background:var(--bg); border-top:1px solid var(--line);
-    border-radius:14px 14px 0 0;
-    box-shadow:0 -14px 22px -12px rgba(0,0,0,.5);
-  }
+  /* Kangaroo pocket, shared: the three screenshots run past the bottom of
+     their own cards and tuck behind a single band -- .grid-divider -- that
+     spans the full row, right on the line between the top three (image)
+     cards and the bottom three (text-only) cards, rather than each card
+     cutting its own separate pocket. .card stays overflow:visible so a
+     shot escaping downward renders into that shared band instead of being
+     clipped at its own card's edge. */
+  .card{position:relative}
+  .card .shot{--tilt:0deg; margin-top:24px; margin-bottom:-54px; position:relative}
 
   /* ---------- hero coverflow ---------- */
   /* The one feature no other Indian aggregator has, so the hero demonstrates
@@ -115,22 +108,22 @@
     transform:translate(0,0) scale(1.06); opacity:1; filter:none;
   }
   .cf-card.cf-p-left{
-    z-index:2; transform:translate(-192px,20px) scale(.82) rotate(-3deg);
+    z-index:2; transform:translate(-192px,20px) scale(.82);
     opacity:.6; filter:brightness(.74) saturate(.85);
   }
   .cf-card.cf-p-right{
-    z-index:2; transform:translate(192px,20px) scale(.82) rotate(3deg);
+    z-index:2; transform:translate(192px,20px) scale(.82);
     opacity:.6; filter:brightness(.74) saturate(.85);
   }
   /* Off-canvas staging positions -- invisible, but real DOM positions (not
      display:none) so the transition into/out of cf-p-left/cf-p-right has
      somewhere to animate from/to instead of popping. */
   .cf-card.cf-p-farleft{
-    z-index:1; transform:translate(-320px,28px) scale(.68) rotate(-5deg);
+    z-index:1; transform:translate(-320px,28px) scale(.68);
     opacity:0; pointer-events:none;
   }
   .cf-card.cf-p-farright{
-    z-index:1; transform:translate(320px,28px) scale(.68) rotate(5deg);
+    z-index:1; transform:translate(320px,28px) scale(.68);
     opacity:0; pointer-events:none;
   }
   .cf-card.cf-p-left:hover, .cf-card.cf-p-right:hover{opacity:.85}
@@ -141,13 +134,10 @@
     font-size:13.5px; font-weight:700; line-height:1.35; color:#fff;
     background:linear-gradient(to top, rgba(0,0,0,.8), rgba(0,0,0,0));
   }
-  .cf-card:not(.cf-p-center) .cf-caption{
-    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden;
-  }
-  .cf-body{display:none; padding:16px 18px 18px}
-  /* Only the centred card shows the framing rows -- a peek card is here to
-     be recognised and clicked toward, not read. */
-  .cf-card.cf-p-center .cf-body{display:block}
+  /* Same layout at every position -- image, caption and the framing rows
+     all render on every card in the pool, not just the centred one; only
+     size/opacity/filter (above) tell the centred card apart from a peek. */
+  .cf-body{padding:16px 18px 18px}
 
   .framer-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px}
   .framer-head b{font-family:var(--serif); font-size:17px}
@@ -195,10 +185,10 @@
 
   @media (max-width:900px){
     .cf-card{width:210px; margin-left:-105px}
-    .cf-card.cf-p-left{transform:translate(-150px,16px) scale(.82) rotate(-3deg)}
-    .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82) rotate(3deg)}
-    .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68) rotate(-5deg)}
-    .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68) rotate(5deg)}
+    .cf-card.cf-p-left{transform:translate(-150px,16px) scale(.82)}
+    .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82)}
+    .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68)}
+    .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68)}
     .cf-track{max-width:300px; height:372px}
     .coverflow{min-height:392px}
   }
@@ -288,7 +278,25 @@
   .card .ico{width:26px; height:26px; color:var(--accent); margin-bottom:16px; display:block}
   .card h3{font-size:19px; margin-bottom:8px}
   .card p{color:var(--ink-2); font-size:14.5px; margin:0}
-  @media (max-width:900px){ .grid{grid-template-columns:repeat(2,1fr)} }
+  /* Explicit rows rather than relying on grid auto-flow, so the divider
+     between them (see the kangaroo-pocket comment above) can sit in its own
+     row spanning all three columns without colliding with either group. */
+  .row-top{grid-row:1}
+  .row-bottom{grid-row:3}
+  .grid-divider{
+    grid-row:2; grid-column:1/-1; position:relative; height:54px;
+    background:var(--bg); border-top:1px solid var(--line);
+    box-shadow:0 -14px 22px -12px rgba(0,0,0,.5);
+  }
+  @media (max-width:900px){
+    .grid{grid-template-columns:repeat(2,1fr)}
+    /* Two columns means the top group wraps to two rows on its own --
+       give it room instead of the fixed row:1, and drop the divider (a
+       clean shared line only reads correctly against a flush row break). */
+    .row-top{grid-row:auto}
+    .row-bottom{grid-row:auto}
+    .grid-divider{display:none}
+  }
   @media (max-width:600px){ .grid{grid-template-columns:1fr} }
 
   .price{
@@ -459,7 +467,7 @@
       <h2>Everything, at no cost.</h2>
     </div>
     <div class="grid reveal">
-      <div class="card">
+      <div class="card row-top">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="8" height="7" rx="2"/><rect x="15" y="14" width="6" height="7" rx="2"/></svg>
         <h3>Story clustering</h3>
         <p>Coverage of the same event from different publishers is grouped into one story, so you read the event once instead of scrolling past it repeatedly.</p>
@@ -468,7 +476,7 @@
           <img class="only-dark" src="/static/img/sources-dark.webp" width="540" height="675" loading="lazy" alt="A story's Coverage list of 47 outlets, above its related topics.">
         </figure>
       </div>
-      <div class="card">
+      <div class="card row-top">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 8l-3 6a3.2 3.2 0 0 0 6 0Zm14 0-3 6a3.2 3.2 0 0 0 6 0Z"/><path d="M5 8h14"/></svg>
         <h3>Framing analysis</h3>
         <p>For stories covered by several outlets, we show the angle each publisher led with — the same facts, framed differently, side by side.</p>
@@ -477,7 +485,7 @@
           <img class="only-dark" src="/static/img/framing-dark.webp" width="540" height="999" loading="lazy" alt="The Media framing panel, listing the angle each of six outlets led with on the same story.">
         </figure>
       </div>
-      <div class="card">
+      <div class="card row-top">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 11h16M4 16h10"/></svg>
         <h3>Short summaries</h3>
         <p>Each story carries a short summary, so you can decide in seconds whether the full coverage is worth your time.</p>
@@ -486,17 +494,18 @@
           <img class="only-dark" src="/static/img/summary-dark.webp" width="540" height="688" loading="lazy" alt="A story's Summary section, three bullets under the headline.">
         </figure>
       </div>
-      <div class="card">
+      <div class="grid-divider" aria-hidden="true"></div>
+      <div class="card row-bottom">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>
         <h3>No ads in the feed</h3>
         <p>The reading experience carries no advertising, no interstitials, and nothing that follows you between stories.</p>
       </div>
-      <div class="card">
+      <div class="card row-bottom">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>
         <h3>Digests on your schedule</h3>
         <p>Save what you want to come back to, and pick the times of day you want a digest — as many or as few as you like.</p>
       </div>
-      <div class="card">
+      <div class="card row-bottom">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
         <h3>Daily games</h3>
         <p>A fresh set every morning: crossword, sudoku, word search, spelling bee, word ladder and a daily quiz.</p>
