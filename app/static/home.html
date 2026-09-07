@@ -198,12 +198,14 @@
   .coverflow.has-multi .cf-nav{display:flex}
 
   @media (max-width:900px){
-    .cf-card{width:210px; margin-left:-105px}
-    .cf-card.cf-p-left{transform:translate(-150px,16px) scale(.82)}
-    .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82)}
-    .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68)}
-    .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68)}
-    .cf-track{max-width:300px; height:398px; touch-action:pan-y}
+    /* 20% wider than the original 210px mobile card -- side-peek offsets
+       below are scaled by the same factor so the spacing stays proportional. */
+    .cf-card{width:252px; margin-left:-126px}
+    .cf-card.cf-p-left{transform:translate(-180px,16px) scale(.82)}
+    .cf-card.cf-p-right{transform:translate(180px,16px) scale(.82)}
+    .cf-card.cf-p-farleft{transform:translate(-300px,22px) scale(.68)}
+    .cf-card.cf-p-farright{transform:translate(300px,22px) scale(.68)}
+    .cf-track{max-width:360px; height:398px; touch-action:pan-y}
     .coverflow{min-height:418px}
     /* Swipe is the primary way to move the coverflow at this width; the
        arrows step aside rather than compete with the thumb for space. */
