@@ -410,11 +410,13 @@ def build_chains(
 async def get_story_timeline(
     conn, cluster_id: int, days: int = DAYS,
 ) -> Tuple[List[Cluster], Optional[str]]:
-    """The clusters chained with `cluster_id`, sorted chronologically (the
-    "story so far" order), plus a display label for the chain's anchor
-    entity — or ([], None) if `cluster_id` isn't in the lookback window at
-    all, distinct from "found but not part of any chain" ([cluster_id
-    itself excluded -> empty list], "").
+    """The full chain `cluster_id` belongs to, sorted chronologically (the
+    "story so far" order) — INCLUDING `cluster_id` itself, so a client can
+    render the whole arc and highlight where the viewer currently is,
+    rather than a "here's what else" list with a gap where the current
+    story should be — plus a display label for the chain's anchor entity.
+    Returns ([], None) if `cluster_id` isn't in the lookback window at all,
+    distinct from "found but not part of any chain" ([], "").
 
     A chain past MAX_PLAUSIBLE_CHAIN is treated as a topic-blob failure and
     returned as if ungrouped, rather than shown to a user as one story —
@@ -433,7 +435,7 @@ async def get_story_timeline(
         return [], None
 
     members = sorted(
-        (by_id[cid] for cid in chain_ids if cid != cluster_id and cid in by_id),
+        (by_id[cid] for cid in chain_ids if cid in by_id),
         key=lambda c: c.first_seen_at,
     )
 

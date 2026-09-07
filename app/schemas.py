@@ -142,6 +142,23 @@ class RelatedClustersOut(BaseModel):
     actor: Optional[str] = None
 
 
+class TimelineOut(BaseModel):
+    """GET /clusters/{id}/timeline — see app/services/story_chains.py.
+    `items` is the FULL chain in chronological order (oldest first),
+    INCLUDING the cluster the client asked about — unlike
+    RelatedClustersOut, which excludes it. A client renders this as one
+    continuous "story so far" arc and highlights whichever item's id
+    matches the one it navigated from, rather than diffing a
+    doesn't-include-itself list against what it already has.
+    Precision on this chain is ~0.72 on real data (see story_chains.py's
+    CHAIN_PARAMS) — not high-confidence; UI copy should reflect that this
+    is "possibly related developments," not an authoritative timeline."""
+    items: List[StoryClusterListOut]
+    # Display name of the anchor entity the chain was found through (e.g.
+    # "Govinda") — None if no chain was found.
+    anchor: Optional[str] = None
+
+
 class UserPreferences(BaseModel):
     theme_mode: str = "system"
     accent_color: str = "blue"
@@ -490,3 +507,29 @@ class FeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     ok: bool = True
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/public/hero — the marketing site's homepage carousel (see
+# backend/docs/website-roadmap.md item 4). A deliberately slim shape, not a
+# reuse of StoryClusterListOut/StoryClusterOut: the carousel needs only
+# headline, lead image, outlet count and framing rows, never the full
+# article list or per-article fields those responses carry.
+class HeroFramingOut(BaseModel):
+    outlet: str
+    headline_angle: str
+
+
+class HeroStoryOut(BaseModel):
+    id: int
+    headline: str
+    image_url: str
+    source_count: int
+    category: str
+    framing: List[HeroFramingOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HeroStoriesOut(BaseModel):
+    items: List[HeroStoryOut] = []
