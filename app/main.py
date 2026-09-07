@@ -7,7 +7,7 @@ from functools import lru_cache
 from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Dict
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -55,6 +55,7 @@ from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
+    TimelineFeaturesOut, TimelineFeatureListItemOut, TimelineFeatureDetailOut, TimelineBeatOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -1884,6 +1885,114 @@ async def get_cluster_timeline(
     items = [_cluster_to_list_out(by_id[cid]) for cid in member_ids if cid in by_id]
 
     result_out = TimelineOut(items=items, anchor=anchor)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/timelines", response_model=TimelineFeaturesOut)
+@limiter.limit("60/minute")
+async def list_timeline_features(request: Request, db: AsyncSession = Depends(get_db)):
+    """Timeline/Context tab's list view — a curated handful of LLM-narrated
+    "story so far" trails (see scripts/build_story_timelines.py), a
+    separate dedicated-tab feature from both GET /clusters/{id}/timeline
+    (per-story chain view, unused by any UI so far) and GET /related
+    (non-chained related stories, shown inline on the detail screen). Only
+    last_seen_in_top rows show here — a chain that fell out of the latest
+    generation cycle's selection keeps its row and narrative (a direct
+    link via GET /timelines/{id} still resolves) but stops appearing in
+    this list, rather than being deleted or blanked."""
+    cache_key = "timelines:list"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return TimelineFeaturesOut.model_validate_json(cached)
+
+    result = await db.execute(
+        select(StoryTimelineFeature)
+        .where(StoryTimelineFeature.last_seen_in_top.is_(True))
+        .order_by(desc(StoryTimelineFeature.narrative_generated_at))
+    )
+    rows = result.scalars().all()
+
+    anchor_ids = [r.anchor_cluster_id for r in rows]
+    anchors_by_id: Dict[int, StoryCluster] = {}
+    if anchor_ids:
+        anchors_result = await db.execute(
+            select(StoryCluster)
+            .where(StoryCluster.id.in_(anchor_ids))
+            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        )
+        anchors_by_id = {c.id: c for c in anchors_result.scalars().all()}
+
+    items = [
+        TimelineFeatureListItemOut(
+            id=row.id,
+            title=row.title or "",
+            context=row.context or "",
+            story_count=len(row.cluster_ids or []),
+            is_editorial_pick=row.is_editorial_pick,
+            narrative_generated_at=row.narrative_generated_at,
+            anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
+            if row.anchor_cluster_id in anchors_by_id else None,
+        )
+        for row in rows
+    ]
+    result_out = TimelineFeaturesOut(timelines=items)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/timelines/{{timeline_id}}", response_model=TimelineFeatureDetailOut)
+@limiter.limit("60/minute")
+async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSession = Depends(get_db)):
+    """A single timeline's full narrative thread, beat by beat, with each
+    beat's referenced clusters hydrated into slim cards so the client can
+    show a mini source/headline reference per beat without a second
+    round-trip. A direct link to a timeline that has fallen out of the
+    list view (last_seen_in_top=false) still resolves here — only
+    GET /timelines (the list) hides it."""
+    cache_key = f"timelines:{timeline_id}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return TimelineFeatureDetailOut.model_validate_json(cached)
+
+    row_result = await db.execute(select(StoryTimelineFeature).where(StoryTimelineFeature.id == timeline_id))
+    row = row_result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    raw_beats = row.beats or []
+    all_cluster_ids = {cid for beat in raw_beats for cid in (beat.get("cluster_ids") or [])}
+    clusters_by_id: Dict[int, StoryCluster] = {}
+    if all_cluster_ids:
+        clusters_result = await db.execute(
+            select(StoryCluster)
+            .where(StoryCluster.id.in_(list(all_cluster_ids)))
+            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        )
+        clusters_by_id = {c.id: c for c in clusters_result.scalars().all()}
+
+    beats_out = [
+        TimelineBeatOut(
+            date_label=beat.get("date_label", ""),
+            label=beat.get("label", ""),
+            narration=beat.get("narration", ""),
+            clusters=[
+                _cluster_to_list_out(clusters_by_id[cid])
+                for cid in (beat.get("cluster_ids") or [])
+                if cid in clusters_by_id
+            ],
+        )
+        for beat in raw_beats
+    ]
+
+    result_out = TimelineFeatureDetailOut(
+        id=row.id,
+        title=row.title or "",
+        context=row.context or "",
+        is_editorial_pick=row.is_editorial_pick,
+        narrative_generated_at=row.narrative_generated_at,
+        beats=beats_out,
+    )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 

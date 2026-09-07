@@ -159,6 +159,45 @@ class TimelineOut(BaseModel):
     anchor: Optional[str] = None
 
 
+class TimelineBeatOut(BaseModel):
+    """One entry in a TimelineFeatureDetailOut's narrative — see
+    app/services/timeline_narrative.py's SYSTEM_PROMPT for the exact shape
+    the LLM is asked to produce; `clusters` is that beat's cluster_ids
+    hydrated into slim cards so the client can show a mini source/headline
+    reference per beat without a second round-trip."""
+    date_label: str
+    label: str
+    narration: str
+    clusters: List[StoryClusterListOut] = []
+
+
+class TimelineFeatureListItemOut(BaseModel):
+    """GET /timelines list item — see app/models.py's StoryTimelineFeature.
+    Deliberately thin (no beats): the tab's list view needs a card, not the
+    full thread. anchor_cluster carries headline/summary/lead-article image
+    so the client can build that card without hydrating every beat."""
+    id: int
+    title: str
+    context: str
+    story_count: int
+    is_editorial_pick: bool
+    narrative_generated_at: Optional[datetime] = None
+    anchor_cluster: Optional[StoryClusterListOut] = None
+
+
+class TimelineFeaturesOut(BaseModel):
+    timelines: List[TimelineFeatureListItemOut]
+
+
+class TimelineFeatureDetailOut(BaseModel):
+    id: int
+    title: str
+    context: str
+    is_editorial_pick: bool
+    narrative_generated_at: Optional[datetime] = None
+    beats: List[TimelineBeatOut]
+
+
 class UserPreferences(BaseModel):
     theme_mode: str = "system"
     accent_color: str = "blue"
