@@ -316,13 +316,24 @@ def score(clusters: List[ClusterRec], baseline_rates: Dict[str, float],
           labels: Dict[str, str], id_to_idx: Dict[int, int], p: Params) -> dict:
     assignment = build_chains(clusters, baseline_rates, p)
 
+    # same_event counts as a positive for chaining purposes (two clusters
+    # describing one incident belong in the same timeline entry, arguably
+    # more so than a genuine "continues" pair) but is tallied separately —
+    # it's a downstream symptom of clustering's own recall gap (production
+    # runs ~0.70 pairwise recall), not something the chain-builder should be
+    # penalised or credited for as if it were a real continuation call.
     tp = fp = fn = tn = 0
+    same_event_together = same_event_total = 0
     for key, verdict in labels.items():
         x, y = (int(v) for v in key.split("-"))
         if x not in id_to_idx or y not in id_to_idx:
             continue
         ix, iy = id_to_idx[x], id_to_idx[y]
         together = iy in assignment[ix]
+        if verdict == "same_event":
+            same_event_total += 1
+            same_event_together += together
+            continue
         if verdict == "continues":
             tp += together
             fn += not together
@@ -333,6 +344,9 @@ def score(clusters: List[ClusterRec], baseline_rates: Dict[str, float],
     precision = tp / (tp + fp) if (tp + fp) else 1.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    same_event_catch_rate = (
+        same_event_together / same_event_total if same_event_total else None
+    )
 
     chain_ids = {frozenset(v) for v in assignment.values() if len(v) > 1}
     sizes = [len(c) for c in chain_ids]
@@ -345,6 +359,8 @@ def score(clusters: List[ClusterRec], baseline_rates: Dict[str, float],
         "chains": len(chain_ids),
         "chained_clusters": sum(sizes),
         "largest_chain": max(sizes) if sizes else 0,
+        "same_event_catch_rate": same_event_catch_rate,
+        "same_event_total": same_event_total,
     }
 
 
@@ -437,23 +453,33 @@ def _build_pairs(clusters: List[ClusterRec], baseline_rates: Dict[str, float],
 
 LABEL_SYSTEM = """You label pairs of Indian news story clusters for a story-timeline evaluation.
 
-Each cluster is an already-corroborated news story (multiple outlets covering
-one event). Cluster A happened first; cluster B happened at the same time or
-later. Decide whether B is a LATER DEVELOPMENT of the SAME evolving story as
-A — a genuine next chapter (an update, a ruling, an arrest, a resignation, a
-reaction that meaningfully advances the same narrative thread) — as opposed
-to unrelated coverage that merely shares a person, place, or topic.
+Each cluster is meant to be an already-corroborated news story (multiple
+outlets covering one event), but clustering is imperfect: sometimes the
+exact same specific event ends up split across two cluster IDs instead of
+one. Your job is to tell apart three cases:
 
-Answer "continues" only when a reader following story A would consider B
-part of the same ongoing story. Answer "unrelated" for:
+"same_event" — A and B report the SAME specific incident/announcement/
+ruling/match/death, essentially duplicates that should have been one
+cluster (e.g. two outlets' write-ups of one retirement announcement, one
+death, one squad recall, filed the same day).
+
+"continues" — B is a GENUINE LATER DEVELOPMENT of A's story: a distinct
+subsequent incident in the same ongoing narrative (an update, a new ruling,
+an arrest, a reaction, day 2 of a multi-day event) — not the same specific
+incident, but a real next chapter a reader following A would want to see.
+
+"unrelated" — neither of the above:
 - the same person/organisation/place in a genuinely different story
 - the same broad topic or category (e.g. both "Bollywood news", both
-  "monsoon coverage") without being the same specific developing story
+  "monsoon coverage") without being the same developing story
 - routine recurring coverage that happens to share an entity (daily market
-  wraps, separate matches in one tournament) unless B is specifically about
-  how A's story developed
+  wraps, separate unrelated matches by the same club/player) unless B is
+  specifically about how A's story developed
 
-Be strict. When genuinely uncertain, answer "unrelated"."""
+Be strict. When genuinely uncertain between "continues" and "unrelated",
+answer "unrelated". When genuinely uncertain whether it's the same event or
+a later one, answer "same_event" only if they clearly describe one
+incident, not two."""
 
 
 def _label_prompt(pair_id: str, a: ClusterRec, b: ClusterRec) -> str:
@@ -461,7 +487,8 @@ def _label_prompt(pair_id: str, a: ClusterRec, b: ClusterRec) -> str:
         f"Pair {pair_id}\n\n"
         f"A) [{a.first_seen_at.date()}] {a.headline}\n\n"
         f"B) [{b.first_seen_at.date()}] {b.headline}\n\n"
-        f'Reply with exactly one JSON object: {{"verdict": "continues"}} or {{"verdict": "unrelated"}}'
+        f'Reply with exactly one JSON object: {{"verdict": "same_event"}}, '
+        f'{{"verdict": "continues"}}, or {{"verdict": "unrelated"}}'
     )
 
 
@@ -522,15 +549,22 @@ def _do_label(pairs_path: str, out_path: str) -> None:
         try:
             verdict = json.loads(text.strip().strip("`").removeprefix("json").strip())["verdict"]
         except Exception:
-            verdict = "continues" if '"continues"' in text else "unrelated"
+            if '"same_event"' in text:
+                verdict = "same_event"
+            elif '"continues"' in text:
+                verdict = "continues"
+            else:
+                verdict = "unrelated"
         labels[result.custom_id] = verdict
 
     with open(out_path, "w") as fh:
         json.dump({"model": LABEL_MODEL, "labels": labels}, fh, indent=1)
 
-    same = sum(1 for v in labels.values() if v == "continues")
-    print(f"Wrote {len(labels)} labels to {out_path} ({same} continues / "
-          f"{len(labels) - same} unrelated, {failed} failed)")
+    counts = {v: sum(1 for x in labels.values() if x == v)
+              for v in ("same_event", "continues", "unrelated")}
+    print(f"Wrote {len(labels)} labels to {out_path} "
+          f"({counts['same_event']} same_event / {counts['continues']} continues / "
+          f"{counts['unrelated']} unrelated, {failed} failed)")
 
 
 # ---------------------------------------------------------------------------
@@ -538,9 +572,11 @@ def _do_label(pairs_path: str, out_path: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _print_row(name: str, s: dict) -> None:
+    se = (f" same_event_catch={s['same_event_catch_rate']:.3f}(n={s['same_event_total']})"
+          if s.get("same_event_catch_rate") is not None else "")
     print(f"{name:<58} P={s['precision']:.3f} R={s['recall']:.3f} "
           f"F1={s['f1']:.3f}  chains={s['chains']:<5} "
-          f"chained_clusters={s['chained_clusters']:<5} max={s['largest_chain']}")
+          f"chained_clusters={s['chained_clusters']:<5} max={s['largest_chain']}{se}")
 
 
 GRID = {
