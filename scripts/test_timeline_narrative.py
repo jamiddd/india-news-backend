@@ -28,7 +28,7 @@ import asyncio
 import json
 import os
 import sys
-from typing import Dict, FrozenSet, List
+from typing import Dict, FrozenSet, List, Optional
 
 import httpx
 
@@ -196,6 +196,30 @@ def debug_institutions(clusters: List[Cluster], baseline_rates: Dict[str, float]
             clusters, qualifying, INSTITUTION_OVERLAP_THRESHOLD, INSTITUTION_MIN_POSTINGS,
         )
 
+    # Global postings (across ALL clusters in the window, not just this
+    # chain) — compute_institution_keys' avg_overlap is computed the same
+    # way, over every postings of the key window-wide, so reproducing its
+    # verdict needs the same input, not just this chain's members.
+    postings: Dict[str, List[int]] = {}
+    for cid, keys in qualifying.items():
+        for key in keys:
+            postings.setdefault(key, []).append(cid)
+
+    def avg_overlap(key: str) -> Optional[float]:
+        ids = postings.get(key, [])
+        if len(ids) < INSTITUTION_MIN_POSTINGS:
+            return None
+        companions = [qualifying[cid] - {key} for cid in ids]
+        overlaps = []
+        for a in range(len(companions)):
+            for b in range(a + 1, len(companions)):
+                ca, cb = companions[a], companions[b]
+                if not ca or not cb:
+                    overlaps.append(0.0)
+                    continue
+                overlaps.append(len(ca & cb) / min(len(ca), len(cb)))
+        return sum(overlaps) / len(overlaps) if overlaps else 0.0
+
     # Every qualifying key shared by 2+ members of this specific chain —
     # these are the candidate "why did these get linked" keys.
     key_members: Dict[str, List[int]] = {}
@@ -203,12 +227,15 @@ def debug_institutions(clusters: List[Cluster], baseline_rates: Dict[str, float]
         for key in qualifying.get(cid, set()):
             key_members.setdefault(key, []).append(cid)
 
-    print(f"\n--- institution-filter check ({len(institutions)} institution keys total) ---")
+    print(f"\n--- institution-filter check ({len(institutions)} institution keys total, threshold={INSTITUTION_OVERLAP_THRESHOLD}, min_postings={INSTITUTION_MIN_POSTINGS}) ---")
     for key, members in sorted(key_members.items(), key=lambda kv: -len(kv[1])):
         if len(members) < 2:
             continue
         verdict = "FILTERED AS INSTITUTION" if key in institutions else "kept as chain-forming key"
-        print(f"  {key}: {len(members)} members, {sorted(members)} -> {verdict}")
+        overlap = avg_overlap(key)
+        total_postings = len(postings.get(key, []))
+        overlap_str = f"avg_overlap={overlap:.3f} over {total_postings} window-wide postings" if overlap is not None else f"only {total_postings} window-wide postings (< min_postings, filter never runs on it)"
+        print(f"  {key}: {len(members)}/{total_postings} of its window-wide postings are in this chain -> {verdict} ({overlap_str})")
     print("--- end institution-filter check ---\n")
 
 
