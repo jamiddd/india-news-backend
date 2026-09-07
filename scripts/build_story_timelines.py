@@ -88,6 +88,19 @@ async def select_chains(
 
     distinct_chains = {frozenset(v) for v in assignment.values() if len(v) > 1}
 
+    # A chain the LLM already judged coherent:false, with membership
+    # unchanged since that judgment, would otherwise keep winning a
+    # fallback slot by sheer size forever — needs_generation only skips
+    # the LLM CALL for an unchanged chain, it says nothing about whether
+    # that chain should keep competing for a slot. Exclude those from
+    # fallback ranking; a chain whose membership later changes is a new
+    # candidate and gets a fresh judgment (and a fresh shot at a slot).
+    rejected_result = await session.execute(
+        select(StoryTimelineFeature.cluster_ids).where(StoryTimelineFeature.coherent.is_(False))
+    )
+    known_incoherent = {frozenset(ids) for (ids,) in rejected_result.all() if ids}
+    distinct_chains -= known_incoherent
+
     picks_result = await session.execute(
         select(StoryTimelineFeature).where(StoryTimelineFeature.is_editorial_pick.is_(True))
     )
