@@ -183,13 +183,18 @@
 
   /* Loop arrows -- hidden until the live endpoint has answered with more
      than one story to move between (.has-multi, added by site.js); the
-     static fallback is always exactly one story. */
+     static fallback is always exactly one story. Solid accent fill (not a
+     hover-only tint) so they read clearly against the page at rest --
+     touch has no hover state to reveal them by. */
   .cf-nav{
-    display:none; flex:0 0 auto; width:38px; height:38px; align-items:center; justify-content:center;
-    border-radius:50%; border:1px solid var(--line); background:var(--bg); color:var(--ink-1);
-    font-size:19px; line-height:1; cursor:pointer; box-shadow:0 8px 18px -10px rgba(0,0,0,.35);
+    display:none; flex:0 0 auto; width:46px; height:46px; align-items:center; justify-content:center;
+    border-radius:50%; border:none; background:var(--accent); color:var(--on-accent);
+    font-size:24px; line-height:1; cursor:pointer;
+    box-shadow:0 10px 24px -8px rgba(0,0,0,.5);
+    transition:transform .15s ease, opacity .15s ease;
   }
-  .cf-nav:hover{background:var(--surface)}
+  .cf-nav:hover{opacity:.88}
+  .cf-nav:active{transform:scale(.92)}
   .coverflow.has-multi .cf-nav{display:flex}
 
   @media (max-width:900px){
@@ -198,8 +203,11 @@
     .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82)}
     .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68)}
     .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68)}
-    .cf-track{max-width:300px; height:398px}
+    .cf-track{max-width:300px; height:398px; touch-action:pan-y}
     .coverflow{min-height:418px}
+    /* Swipe is the primary way to move the coverflow at this width; the
+       arrows step aside rather than compete with the thumb for space. */
+    .cf-nav{width:40px; height:40px; font-size:20px}
   }
 
   /* ---------- games gallery ---------- */
@@ -625,7 +633,7 @@
   </div>
 </footer>
 
-<script src="/static/site.js?v=9" defer></script>
+<script src="/static/site.js?v=10" defer></script>
 
 </body>
 </html>

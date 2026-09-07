@@ -228,6 +228,41 @@
       prevBtn.addEventListener("click", function () { go(-1); });
       nextBtn.addEventListener("click", function () { go(1); });
 
+      // Touch swipe -- primarily for mobile, where the arrows have less
+      // room and a thumb dragging the cards themselves is the more natural
+      // gesture. Horizontal-only: a swipe that reads as more vertical than
+      // horizontal is left alone so the page can still scroll normally
+      // (touch-action:pan-y on .cf-track backs this up at the browser
+      // level so vertical scrolling never has to wait on a swipe decision
+      // here). { passive: true } throughout since nothing here ever calls
+      // preventDefault.
+      var touchStartX = null, touchStartY = null;
+      var SWIPE_THRESHOLD = 40;
+      track.addEventListener("touchstart", function (e) {
+        if (e.touches.length !== 1) return;
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        pauseFraming();
+      }, { passive: true });
+      track.addEventListener("touchend", function (e) {
+        if (touchStartX === null) return;
+        var dx = e.changedTouches[0].clientX - touchStartX;
+        var dy = e.changedTouches[0].clientY - touchStartY;
+        touchStartX = null;
+        // go() no-ops (without resuming framing itself) when there's only
+        // the single fallback story to show -- guard here rather than
+        // there, so a swipe on the single-story fallback still resumes.
+        if (stories.length > 1 && Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+          go(dx < 0 ? 1 : -1);
+        } else {
+          resumeFraming();
+        }
+      }, { passive: true });
+      track.addEventListener("touchcancel", function () {
+        touchStartX = null;
+        resumeFraming();
+      }, { passive: true });
+
       buildPool();
 
       // Stop the framing auto-cycle while the reader is hovering,
