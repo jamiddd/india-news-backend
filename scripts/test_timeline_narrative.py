@@ -1,8 +1,7 @@
 """Prompt-iteration harness for the Timeline/Context tab's LLM narrative —
-run this against real data BEFORE any table/cron plumbing gets built, so the
-output shape and tone are settled first. Not the production generator;
-scripts/build_story_timelines.py (unwritten yet) will absorb whatever this
-script converges on.
+run this against real data to sanity-check the prompt in app/services/
+timeline_narrative.py (the shared module both this script and
+scripts/build_story_timelines.py, the production generator, call into).
 
 Usage (needs DATABASE_URL + ANTHROPIC_API_KEY in the environment, same as
 any other backend script — run on the server via SSH, or locally against
@@ -18,10 +17,19 @@ prod if you have DATABASE_URL set):
                                                                  # candidate
                                                                  # chains, no
                                                                  # LLM call
+    python scripts/test_timeline_narrative.py --debug-institutions
+                                                                 # print which
+                                                                 # connecting
+                                                                 # entity keys
+                                                                 # got caught/
+                                                                 # missed by
+                                                                 # the
+                                                                 # institution
+                                                                 # filter
 
 Reuses story_chains.py's load_clusters/load_baseline_rates/build_chains
-directly rather than re-deriving chain membership — this script's only new
-code is the selection-for-testing + prompt + narrative call.
+directly rather than re-deriving chain membership — this script's own code
+is just the selection-for-testing + the debug diagnostics.
 """
 import argparse
 import asyncio
@@ -30,11 +38,8 @@ import os
 import sys
 from typing import Dict, FrozenSet, List, Optional
 
-import httpx
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.config import settings  # noqa: E402
 from app.services.story_chains import (  # noqa: E402
     DAYS,
     GENERIC_METRIC,
@@ -49,121 +54,7 @@ from app.services.story_chains import (  # noqa: E402
     load_baseline_rates,
     load_clusters,
 )
-
-MODEL = "claude-sonnet-5"
-API_URL = "https://api.anthropic.com/v1/messages"
-
-# Narrative writing needs real prose judgment (structure a saga into beats,
-# decide what's connective-tissue vs. a genuine new development) — the
-# cheap/fast Haiku used for the daily-games JSON extraction in llm_gen.py
-# isn't the right default here the way it is there.
-
-SYSTEM_PROMPT = """You are writing a "story so far" recap for a news app, in \
-the voice of a YouTuber who covers one ongoing story across many videos and \
-occasionally posts a big recap once enough has happened. The reader has NOT \
-been following along — assume zero prior context, but do not pad with filler.
-
-You will be given a chronological list of news events (each one a distinct \
-story-cluster: a date, a headline, and outlet-sourced bullet summaries) that \
-all belong to the same unfolding story. Turn them into ONE stitched \
-narrative:
-
-- A short "context" paragraph (2-4 sentences) that orients a reader with no \
-  prior knowledge: who/what this is about and why it matters.
-- A chronological list of "beats" — one entry per genuinely new development. \
-  Merge events that are really the same beat reported differently; do not \
-  pad the timeline to match the input count. Each beat: a plain-language date \
-  reference, a one-line label, and 2-4 sentences of narration in your own \
-  words (not copied summary bullets) that connects to what came before ("this \
-  followed X", "in response to Y") rather than reading as an isolated blurb.
-- No speculation about what happens next. No editorializing/opinion — narrate \
-  what happened and why it's connected, not what should happen.
-- If the events don't actually form one coherent trail (e.g. they only share \
-  a name, not a throughline), say so plainly in "context" and return an empty \
-  beats list rather than forcing a narrative.
-- Specifically: a chain linked only by one recurring PERSON appearing in \
-  each event, where the events themselves cover substantively unrelated \
-  topics (e.g. the same official shows up in an unrelated trade dispute, a \
-  personnel appointment, and a sanctions announcement, with no event \
-  building on another's substance), is NOT a coherent story — mark \
-  coherent:false, even if a superficial narrative COULD be written by \
-  treating that person as the protagonist. A real story-so-far has events \
-  that causally or substantively connect to each other, not merely a \
-  cast member in common. When in doubt, prefer coherent:false to writing a \
-  narrative that leans on a person's presence to paper over otherwise \
-  disconnected events.
-
-Respond with ONLY a JSON object, no markdown fences, matching exactly:
-{
-  "coherent": true | false,
-  "title": "short headline for the whole trail",
-  "context": "orienting paragraph",
-  "beats": [
-    {"date_label": "e.g. 'Early August' or 'Sept 3'", "label": "short beat title", "narration": "2-4 sentences", "cluster_ids": [123, 124]}
-  ]
-}"""
-
-
-async def call_claude(user_content: str) -> dict:
-    if not settings.ANTHROPIC_API_KEY:
-        raise SystemExit("ANTHROPIC_API_KEY not set in the environment.")
-    async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            API_URL,
-            headers={
-                "x-api-key": settings.ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "max_tokens": 8000,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": user_content}],
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        text = "".join(
-            block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
-        )
-        cleaned = text.strip().strip("`").removeprefix("json").strip()
-        try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            # A long chain (many beats) can still outrun max_tokens even at
-            # 8000 — surface the raw text and the stop_reason instead of a
-            # bare traceback, so a truncation is legible as "ran out of
-            # tokens" rather than "the JSON is malformed".
-            print(f"\n!!! JSON parse failed ({e}); stop_reason={data.get('stop_reason')}")
-            print("--- raw response ---")
-            print(text)
-            print("--- end raw response ---\n")
-            raise
-
-
-def format_chain_for_prompt(members: List[Cluster], summaries: Dict[int, str]) -> str:
-    lines = []
-    for c in members:
-        lines.append(f"--- cluster_id={c.id} | {c.first_seen_at.date().isoformat()} ---")
-        lines.append(f"Headline: {c.headline}")
-        summary = summaries.get(c.id)
-        if summary:
-            lines.append(f"Summary:\n{summary}")
-        lines.append(f"Outlets covering: {c.distinct_source_count}")
-    return "\n".join(lines)
-
-
-async def fetch_summaries(session, cluster_ids: List[int]) -> Dict[int, str]:
-    from sqlalchemy import text
-
-    if not cluster_ids:
-        return {}
-    result = await session.execute(
-        text("SELECT id, summary FROM story_clusters WHERE id = ANY(:ids)"),
-        {"ids": cluster_ids},
-    )
-    return {row.id: row.summary for row in result if row.summary}
+from app.services.timeline_narrative import TimelineNarrativeError, generate_narrative  # noqa: E402
 
 
 def debug_institutions(clusters: List[Cluster], baseline_rates: Dict[str, float], chain_ids: FrozenSet[int]) -> None:
@@ -301,11 +192,12 @@ async def main() -> None:
                 print()
                 continue
 
-            summaries = await fetch_summaries(session, [m.id for m in members])
-            prompt = format_chain_for_prompt(members, summaries)
             print("\n--- calling Claude ---")
-            narrative = await call_claude(prompt)
-            print(json.dumps(narrative, indent=2))
+            try:
+                narrative = await generate_narrative(session, members)
+                print(json.dumps(narrative, indent=2))
+            except TimelineNarrativeError as e:
+                print(f"!!! {e}")
             print()
 
 
