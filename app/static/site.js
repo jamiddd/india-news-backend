@@ -19,28 +19,66 @@
     var year = document.getElementById("year");
     if (year) year.textContent = new Date().getFullYear();
 
-    // Hero framing carousel. Cards cycle one at a time; the outgoing card
-    // leaves upward while the incoming one arrives from below, so the motion
-    // reads as a single column advancing rather than a crossfade.
+    // Hero carousel: real top stories, swipeable, each with its own framing
+    // rows cycling underneath (backend/docs/website-roadmap.md item 4).
+    // Framing cards cycle one at a time; the outgoing card leaves upward
+    // while the incoming one arrives from below, so the motion reads as a
+    // single column advancing rather than a crossfade.
     var stage = document.getElementById("framer");
     if (stage) {
-      var cards = Array.prototype.slice.call(stage.querySelectorAll(".frame-card"));
+      var host = document.getElementById("hero-framer");
       var dots = document.getElementById("framer-dots");
-      var at = 0, timer = null;
+      var imgLight = document.getElementById("framer-img-light");
+      var imgDark = document.getElementById("framer-img-dark");
+      var caption = document.getElementById("framer-caption");
+      var countEl = document.getElementById("framer-count");
+      var prevBtn = document.getElementById("framer-prev");
+      var nextBtn = document.getElementById("framer-next");
+      var cards = [], buttons = [], at = 0, timer = null;
       var STEP = 3400;
       var still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-      cards.forEach(function (c, i) {
-        var b = document.createElement("button");
-        b.type = "button";
-        b.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + cards.length);
-        b.addEventListener("click", function () { show(i); restart(); });
-        dots.appendChild(b);
-      });
-      var buttons = Array.prototype.slice.call(dots.children);
+      // What's baked into the page at load, so the hero always shows
+      // something even if the live endpoint never answers -- see the
+      // roadmap doc's "A static fallback" note. `image` stays null here:
+      // the fallback screenshot pair already in the DOM (framer-img-light/
+      // dark) is left alone rather than replaced.
+      var stories = [{
+        image: null,
+        caption: "",
+        count: "14 outlets",
+        framing: Array.prototype.slice.call(stage.querySelectorAll(".frame-card")).map(function (c) {
+          return { outlet: c.querySelector("b").textContent, headline_angle: c.querySelector("i").textContent };
+        })
+      }];
+      var storyAt = 0;
+
+      function buildFraming(list) {
+        stage.innerHTML = "";
+        dots.innerHTML = "";
+        cards = list.map(function (f, i) {
+          var el = document.createElement("article");
+          el.className = "frame-card" + (i === 0 ? " is-active" : "");
+          var b = document.createElement("b"); b.textContent = f.outlet;
+          var it = document.createElement("i"); it.textContent = f.headline_angle;
+          el.appendChild(b); el.appendChild(it);
+          stage.appendChild(el);
+          return el;
+        });
+        buttons = cards.map(function (_, i) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + cards.length);
+          b.setAttribute("aria-current", i === 0 ? "true" : "false");
+          b.addEventListener("click", function () { show(i); restart(); });
+          dots.appendChild(b);
+          return b;
+        });
+        at = 0;
+      }
 
       function show(next) {
-        if (next === at) return;
+        if (next === at || !cards[next]) return;
         cards[at].classList.remove("is-active");
         cards[at].classList.add("is-out");
         var prev = at;
@@ -56,16 +94,36 @@
       function tick() { show((at + 1) % cards.length); }
       function restart() {
         window.clearInterval(timer);
-        timer = window.setInterval(tick, STEP);
+        if (!still.matches && cards.length > 1) timer = window.setInterval(tick, STEP);
       }
 
-      buttons[0].setAttribute("aria-current", "true");
-      restart();
+      function renderStory(i) {
+        storyAt = ((i % stories.length) + stories.length) % stories.length;
+        var s = stories[storyAt];
+        if (s.image) {
+          // A live story is a real news photo, not a themed UI capture, so
+          // one <img> replaces the light/dark screenshot pair rather than
+          // swapping each of their srcs.
+          imgLight.style.display = "block";
+          imgLight.src = s.image;
+          imgLight.alt = s.caption;
+          imgDark.style.display = "none";
+        }
+        caption.textContent = s.caption;
+        countEl.textContent = s.count;
+        buildFraming(s.framing);
+        restart();
+        host.classList.toggle("has-multi", stories.length > 1);
+      }
+
+      prevBtn.addEventListener("click", function () { renderStory(storyAt - 1); restart(); });
+      nextBtn.addEventListener("click", function () { renderStory(storyAt + 1); restart(); });
+
+      renderStory(0);
 
       // Stop while the reader is hovering, keyboard-focused inside, or has
       // the tab in the background -- an unattended interval keeps firing
       // transitions on a page nobody is looking at.
-      var host = stage.parentNode;
       host.addEventListener("mouseenter", function () { window.clearInterval(timer); });
       host.addEventListener("mouseleave", restart);
       host.addEventListener("focusin", function () { window.clearInterval(timer); });
@@ -73,7 +131,27 @@
       document.addEventListener("visibilitychange", function () {
         if (document.hidden) { window.clearInterval(timer); } else { restart(); }
       });
-      if (still.matches) { window.clearInterval(timer); }
+
+      // Replace the fallback with real clusters once they load. Silently
+      // keeps the fallback on any failure (bad response, network error,
+      // empty list) -- see the roadmap doc: the hero must never end up
+      // showing nothing.
+      fetch("/api/v1/public/hero").then(function (r) {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      }).then(function (data) {
+        if (!data || !data.items || !data.items.length) return;
+        stories = data.items.map(function (it) {
+          var n = it.source_count;
+          return {
+            image: it.image_url,
+            caption: it.headline,
+            count: n + (n === 1 ? " outlet" : " outlets"),
+            framing: it.framing || []
+          };
+        });
+        renderStory(0);
+      }).catch(function () {});
     }
 
     var items = document.querySelectorAll(".reveal");

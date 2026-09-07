@@ -490,3 +490,29 @@ class FeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     ok: bool = True
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/public/hero — the marketing site's homepage carousel (see
+# backend/docs/website-roadmap.md item 4). A deliberately slim shape, not a
+# reuse of StoryClusterListOut/StoryClusterOut: the carousel needs only
+# headline, lead image, outlet count and framing rows, never the full
+# article list or per-article fields those responses carry.
+class HeroFramingOut(BaseModel):
+    outlet: str
+    headline_angle: str
+
+
+class HeroStoryOut(BaseModel):
+    id: int
+    headline: str
+    image_url: str
+    source_count: int
+    category: str
+    framing: List[HeroFramingOut] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HeroStoriesOut(BaseModel):
+    items: List[HeroStoryOut] = []
