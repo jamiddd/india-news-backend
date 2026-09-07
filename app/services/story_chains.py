@@ -9,10 +9,13 @@ as clustering-rework-handoff.md's SHIPPED_PARAMS, or the harness measures
 an algorithm nobody is running.
 
 NOT WIRED INTO ANY ENDPOINT YET. This module is Phase 3 of the plan
-(candidate generation + actor selection + chain assembly); the API/UI
-layer is a later step, deliberately not built until CHAIN_PARAMS below is
-confirmed against real labelled data rather than the provisional grid run
-this shipped with (see the comment on CHAIN_PARAMS).
+(candidate generation + actor selection + chain assembly). CHAIN_PARAMS
+below are now confirmed against the 3-class relabelled set (2026-09-07) —
+the API/UI layer (Phase 4) is unstarted for its own reasons, not blocked
+on this anymore. Precision is ~0.635 on genuine continuations: workable to
+build against, not a number to represent to a user as high-confidence.
+See CHAIN_PARAMS' comments for what's still an accepted limitation
+(institutional-entity false positives) rather than fixed.
 
 What's reused from the first attempt (validated by manual review there,
 and in related_stories.py's port of the same logic):
@@ -57,14 +60,12 @@ from app.redis_client import get_redis_client
 
 DAYS = 30
 
-# PROVISIONAL — chosen from a grid run against the OLD 2-class label set
-# (continues/unrelated), which conflated genuine chaining errors with
-# same-day duplicate-cluster pairs clustering itself failed to merge (see
-# the 2026-09-07 session: ~half the measured false positives were that,
-# not real mistakes). Re-run scripts/eval_story_chains.py's `grid` against
-# the 3-class relabel (same_event/continues/unrelated) before trusting
-# these numbers or wiring this module into an endpoint. Mirror any change
-# here into that script's own defaults in the same commit.
+# CONFIRMED against the 3-class relabel (same_event/continues/unrelated,
+# 625 pairs) on 2026-09-07: P=0.635, R=0.576 (recall measured on genuine
+# "continues" pairs only — same_event duplicates are tracked separately,
+# see get_story_timeline's docstring). Same numbers as the earlier
+# provisional 2-class run, so the relabel didn't move these constants —
+# it moved what we understood the false positives to BE (see below).
 GENERIC_PERCENTILE = 0.99
 GENERIC_METRIC = "in_set_df"  # "in_set_df" beat "baseline_rate" on real data:
 # entity_stats (9.3k rows as of 2026-09-07) isn't dense enough yet to catch
@@ -72,6 +73,24 @@ GENERIC_METRIC = "in_set_df"  # "in_set_df" beat "baseline_rate" on real data:
 # 134-cluster blob chain (topic-blob failure) where in_set_df, computed
 # fresh from the window itself, stayed under the plausibility cap.
 SUBSUMPTION_RATIO = 0.9
+
+# KNOWN, ACCEPTED LIMITATION (2026-09-07 false-positive analysis): a
+# meaningful share of the remaining ~36% false-positive rate is
+# institutional entities — a specific court, a named cricket-board
+# official — that survive the genericity/backdrop filters (they aren't
+# frequent enough to be "generic," and they aren't a location/LLM-flagged/
+# Source-name match) yet recur across many genuinely unrelated stories the
+# same way a location would. Two fixes were tried and rejected by the
+# grid: requiring 3 shared entities per link collapsed recall
+# (0.576->0.337) for ~0.2pp of precision; requiring 2 reintroduced
+# Round 2's original "topic bucket" drift (a 114-cluster generic European
+# football roundup, chained via club/player-name transitivity — see
+# scripts/eval_story_chains.py's Params.subsumption_ratio docstring for
+# the full account). Left as one shared entity being sufficient (Node 5),
+# same as the first attempt validated. A real fix would need an
+# institution/venue classifier analogous to Round 5's location/backdrop
+# handling for organizations specifically — not attempted; no cheap
+# structural signal (unlike "matches a Source name") was found for it.
 
 # A chain past this size in a 30-day window is a topic blob, not one
 # story — same reasoning as related_stories.py's MAX_DF_RATIO-adjacent
