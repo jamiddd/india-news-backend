@@ -98,16 +98,36 @@ async def select_chains(
     rejected_result = await session.execute(
         select(StoryTimelineFeature.cluster_ids).where(StoryTimelineFeature.coherent.is_(False))
     )
-    known_incoherent = {frozenset(ids) for (ids,) in rejected_result.all() if ids}
-    distinct_chains -= known_incoherent
+    # Overlap, not exact-set equality — a rejected chain's live membership
+    # drifts run to run just like any other (grows, or shrinks as clusters
+    # age out of the lookback window), so an exact-match check stops
+    # excluding it almost immediately. Any shared member means "this is
+    # still substantially the same blob", which is the thing that was
+    # actually rejected.
+    known_incoherent_ids: set = set()
+    for (ids,) in rejected_result.all():
+        if ids:
+            known_incoherent_ids.update(ids)
+    distinct_chains = {c for c in distinct_chains if not (c & known_incoherent_ids)}
 
     picks_result = await session.execute(
         select(StoryTimelineFeature).where(StoryTimelineFeature.is_editorial_pick.is_(True))
     )
     picked_rows = picks_result.scalars().all()
 
+    # story_chains.py's subsumption merge only merges groups whose overlap
+    # crosses SUBSUMPTION_RATIO — groups overlapping below that threshold
+    # stay separate, so build_chains' assignment is NOT a strict partition:
+    # two different clusters can end up mapped to two different, non-
+    # identical frozensets that still share some members (observed live,
+    # 2026-09-07: a chain of 15 and a chain of 11 both anchored on the same
+    # most-recent cluster, in the same run). Selecting both wastes an LLM
+    # call and would show what reads as two duplicate cards for the same
+    # underlying saga, so dedupe by ANY member overlap across the whole
+    # selection, not just exact frozenset equality — editorial picks first,
+    # so a manual pick always wins the slot over an overlapping fallback.
     selected: List[tuple[FrozenSet[int], bool]] = []
-    used_chains: set = set()
+    used_cluster_ids: set = set()
     for row in picked_rows:
         chain_ids = assignment.get(row.anchor_cluster_id)
         if not chain_ids or len(chain_ids) <= 1:
@@ -120,17 +140,21 @@ async def select_chains(
                 "unchained) — skipping this cycle", row.anchor_cluster_id,
             )
             continue
-        if chain_ids in used_chains:
-            continue  # two picks pointing at the same chain
+        if chain_ids & used_cluster_ids:
+            continue  # overlaps a pick already taken this cycle
         selected.append((chain_ids, True))
-        used_chains.add(chain_ids)
+        used_cluster_ids |= chain_ids
 
     remaining = slots - len(selected)
     if remaining > 0:
-        fallback_candidates = [c for c in rank_chains(list(distinct_chains), by_id) if c not in used_chains]
-        for chain_ids in fallback_candidates[:remaining]:
+        for chain_ids in rank_chains(list(distinct_chains), by_id):
+            if remaining <= 0:
+                break
+            if chain_ids & used_cluster_ids:
+                continue
             selected.append((chain_ids, False))
-            used_chains.add(chain_ids)
+            used_cluster_ids |= chain_ids
+            remaining -= 1
 
     return selected[:slots], by_id
 
