@@ -99,7 +99,7 @@ async def call_claude(user_content: str) -> dict:
             },
             json={
                 "model": MODEL,
-                "max_tokens": 3000,
+                "max_tokens": 8000,
                 "system": SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": user_content}],
             },
@@ -109,7 +109,19 @@ async def call_claude(user_content: str) -> dict:
         text = "".join(
             block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
         )
-        return json.loads(text.strip().strip("`").removeprefix("json").strip())
+        cleaned = text.strip().strip("`").removeprefix("json").strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError as e:
+            # A long chain (many beats) can still outrun max_tokens even at
+            # 8000 — surface the raw text and the stop_reason instead of a
+            # bare traceback, so a truncation is legible as "ran out of
+            # tokens" rather than "the JSON is malformed".
+            print(f"\n!!! JSON parse failed ({e}); stop_reason={data.get('stop_reason')}")
+            print("--- raw response ---")
+            print(text)
+            print("--- end raw response ---\n")
+            raise
 
 
 def format_chain_for_prompt(members: List[Cluster], summaries: Dict[int, str]) -> str:
