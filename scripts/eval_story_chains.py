@@ -240,16 +240,67 @@ class Params:
     # backend/docs/story-graph-design.md for how this mirrors Round 2/4's
     # unresolved fragmentation issues in the first attempt.
     subsumption_ratio: float = 0.8
+    # Institution/diffuseness filter (2026-09-07, second attempt at the
+    # institutional-entity false-positive problem the min_shared experiment
+    # above failed to fix): an entity whose occurrences pair with mostly
+    # DIFFERENT, unrelated companion entities each time is acting as
+    # connective tissue (a venue, a standing official, a prolific person's
+    # many unrelated stories) rather than a story's actual subject — the
+    # same underlying idea as "a place is backdrop, not what the story is
+    # about" from Round 5, generalized to any entity type via a measurable
+    # signal instead of a type check. See compute_institution_keys.
+    use_institution_filter: bool = False
+    institution_overlap_threshold: float = 0.15
+    institution_min_postings: int = 3
     # Candidate window for pair generation / chain membership. Fixed by
     # the fixture in practice; kept as a field so it prints in the label.
     window_days: int = 30
 
     def label(self) -> str:
+        inst = (f" inst<{self.institution_overlap_threshold:.2f}"
+                if self.use_institution_filter else "")
         return (
             f"generic({self.generic_metric})>={self.generic_percentile:.2f} "
             f"backdrop={'on' if self.use_backdrop_filter else 'off'} "
-            f"subsume>={self.subsumption_ratio:.2f}"
+            f"subsume>={self.subsumption_ratio:.2f}{inst}"
         )
+
+
+def compute_institution_keys(clusters: List[ClusterRec], qualifying: List[Set[str]],
+                              overlap_threshold: float, min_postings: int) -> Set[str]:
+    """Entities behaving as connective tissue rather than a story's subject:
+    their occurrences pair with mostly DIFFERENT companion entities each
+    time, instead of recurring with the same few (as a real evolving
+    story's cast would). Measured, not typed — catches standing
+    institutions (a specific court, a sports board official) the same way
+    it catches a prolific person whose many news items are genuinely
+    unrelated stories, not one to fragment via Node 7/8 (deliberately not
+    rebuilt — see build_chains' docstring). Entities with too few mentions
+    to judge (< min_postings) are left alone — innocent until shown
+    otherwise, not filtered on missing evidence.
+    """
+    postings: Dict[str, List[int]] = {}
+    for i, keys in enumerate(qualifying):
+        for key in keys:
+            postings.setdefault(key, []).append(i)
+
+    institutions: Set[str] = set()
+    for key, idxs in postings.items():
+        if len(idxs) < min_postings:
+            continue
+        companions = [qualifying[i] - {key} for i in idxs]
+        overlaps = []
+        for a in range(len(companions)):
+            for b in range(a + 1, len(companions)):
+                ca, cb = companions[a], companions[b]
+                if not ca or not cb:
+                    overlaps.append(0.0)
+                    continue
+                overlaps.append(len(ca & cb) / min(len(ca), len(cb)))
+        avg_overlap = sum(overlaps) / len(overlaps) if overlaps else 0.0
+        if avg_overlap < overlap_threshold:
+            institutions.add(key)
+    return institutions
 
 
 def _generic_cutoff(values: List[float], percentile: float) -> float:
@@ -294,12 +345,27 @@ def build_chains(clusters: List[ClusterRec], baseline_rates: Dict[str, float],
     # surviving specific entity is a valid group-forming key on its own,
     # and Node 6b below already collapses groups that turn out to describe
     # the same story under different labels.
-    groups: Dict[str, Set[int]] = {}
-    for i, c in enumerate(clusters):
+    qualifying: List[Set[str]] = []
+    for c in clusters:
+        keys = set()
         for key, is_backdrop in c.entity_backdrop.items():
             if p.use_backdrop_filter and is_backdrop:
                 continue
             if is_generic(key):
+                continue
+            keys.add(key)
+        qualifying.append(keys)
+
+    institutions: Set[str] = set()
+    if p.use_institution_filter:
+        institutions = compute_institution_keys(
+            clusters, qualifying, p.institution_overlap_threshold, p.institution_min_postings,
+        )
+
+    groups: Dict[str, Set[int]] = {}
+    for i, keys in enumerate(qualifying):
+        for key in keys:
+            if key in institutions:
                 continue
             groups.setdefault(key, set()).add(i)
 
@@ -634,6 +700,8 @@ GRID = {
     "generic_metric": ["baseline_rate", "in_set_df"],
     "use_backdrop_filter": [True, False],
     "subsumption_ratio": [0.6, 0.7, 0.8, 0.9],
+    "use_institution_filter": [True, False],
+    "institution_overlap_threshold": [0.10, 0.15, 0.20],
 }
 
 
@@ -741,6 +809,10 @@ def main() -> None:
     ins.add_argument("--generic-metric", choices=["baseline_rate", "in_set_df"])
     ins.add_argument("--subsumption-ratio", type=float)
     ins.add_argument("--no-backdrop-filter", action="store_true")
+    ins.add_argument("--institution-filter", action="store_true",
+                     help="enable the institution/diffuseness filter (off by "
+                          "default here; production defaults it on at 0.15)")
+    ins.add_argument("--institution-overlap-threshold", type=float)
 
     args = ap.parse_args()
 
@@ -784,10 +856,13 @@ def main() -> None:
                 ("generic_percentile", args.generic_percentile),
                 ("generic_metric", args.generic_metric),
                 ("subsumption_ratio", args.subsumption_ratio),
+                ("institution_overlap_threshold", args.institution_overlap_threshold),
             ) if v is not None
         }
         if args.no_backdrop_filter:
             overrides["use_backdrop_filter"] = False
+        if args.institution_filter:
+            overrides["use_institution_filter"] = True
         p = replace(Params(), **overrides)
         print(f"RESOLVED  {p.label()}")
         _inspect(clusters, baseline_rates, p, args.limit, args.min_size)
