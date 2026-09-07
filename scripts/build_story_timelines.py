@@ -233,17 +233,14 @@ async def set_last_seen_in_top(session, anchor_cluster_id: int, value: bool, *, 
         row.last_seen_in_top = value
 
 
-async def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--days", type=int, default=DAYS)
-    parser.add_argument("--slots", type=int, default=DEFAULT_SLOTS)
-    parser.add_argument("--scan-cap", type=int, default=None, help=f"max fallback candidates to try (default: slots x {DEFAULT_SCAN_CAP_MULTIPLIER})")
-    parser.add_argument("--dry-run", action="store_true", help="select and log only; still calls the LLM for any new/changed candidate (see module docstring), just skips all writes")
-    args = parser.parse_args()
-    scan_cap = args.scan_cap or args.slots * DEFAULT_SCAN_CAP_MULTIPLIER
+async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optional[int] = None, dry_run: bool = False) -> None:
+    """The actual generation cycle — called by both this script's CLI
+    (`main`, below) and scripts/run_timeline_scheduler.py's daemon loop, so
+    the two never drift into re-implementing selection separately."""
+    scan_cap = scan_cap or slots * DEFAULT_SCAN_CAP_MULTIPLIER
 
     async with AsyncSessionLocal() as session:
-        by_id, assignment, known_incoherent_ids, picked_rows = await load_candidates(session, args.days)
+        by_id, assignment, known_incoherent_ids, picked_rows = await load_candidates(session, days)
         distinct_chains = {frozenset(v) for v in assignment.values() if len(v) > 1}
         distinct_chains = {c for c in distinct_chains if not (c & known_incoherent_ids)}
 
@@ -269,7 +266,7 @@ async def main() -> None:
                 continue
             used_cluster_ids |= chain_ids
             editorial_count += 1
-            anchor_cluster_id, _coherent = await generate_for_chain(session, chain_ids, True, by_id, dry_run=args.dry_run)
+            anchor_cluster_id, _coherent = await generate_for_chain(session, chain_ids, True, by_id, dry_run=dry_run)
             if anchor_cluster_id is not None:
                 attempted_anchor_ids.add(anchor_cluster_id)
                 filled_anchor_ids.add(anchor_cluster_id)
@@ -282,7 +279,7 @@ async def main() -> None:
         # story_chains.py's non-strict-partition quirk means an "overlap"
         # here means "substantially the same real-world story", not a
         # coincidence.
-        remaining = args.slots - editorial_count
+        remaining = slots - editorial_count
         scanned = 0
         if remaining > 0:
             for chain_ids in rank_chains(list(distinct_chains), by_id):
@@ -292,7 +289,7 @@ async def main() -> None:
                     continue
                 scanned += 1
                 used_cluster_ids |= chain_ids
-                anchor_cluster_id, coherent = await generate_for_chain(session, chain_ids, False, by_id, dry_run=args.dry_run)
+                anchor_cluster_id, coherent = await generate_for_chain(session, chain_ids, False, by_id, dry_run=dry_run)
                 if anchor_cluster_id is None:
                     continue
                 attempted_anchor_ids.add(anchor_cluster_id)
@@ -304,12 +301,12 @@ async def main() -> None:
 
         logger.info(
             "filled %d/%d slots (%d editorial, %d algorithmic; scanned %d fallback candidates)",
-            len(filled_anchor_ids), args.slots, editorial_count, len(filled_anchor_ids) - editorial_count, scanned,
+            len(filled_anchor_ids), slots, editorial_count, len(filled_anchor_ids) - editorial_count, scanned,
         )
         if remaining > 0:
             logger.warning("%d slot(s) left unfilled this cycle — ran out of coherent candidates within the scan cap", remaining)
 
-        if not args.dry_run:
+        if not dry_run:
             for anchor_cluster_id in attempted_anchor_ids:
                 await set_last_seen_in_top(session, anchor_cluster_id, anchor_cluster_id in filled_anchor_ids, dry_run=False)
 
@@ -325,6 +322,16 @@ async def main() -> None:
             await session.commit()
 
     logger.info("done.")
+
+
+async def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--days", type=int, default=DAYS)
+    parser.add_argument("--slots", type=int, default=DEFAULT_SLOTS)
+    parser.add_argument("--scan-cap", type=int, default=None, help=f"max fallback candidates to try (default: slots x {DEFAULT_SCAN_CAP_MULTIPLIER})")
+    parser.add_argument("--dry-run", action="store_true", help="select and log only; still calls the LLM for any new/changed candidate (see module docstring), just skips all writes")
+    args = parser.parse_args()
+    await run(days=args.days, slots=args.slots, scan_cap=args.scan_cap, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

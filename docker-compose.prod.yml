@@ -109,3 +109,34 @@ services:
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
     volumes:
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
+
+  # Singleton, like crossword_scheduler/poll_scheduler above — start this
+  # with `docker compose up -d timeline_scheduler` (or a plain `up -d`) on
+  # newsapp ONLY, never on newsapp-2 (`up -d app` there, as with the other
+  # two schedulers). Two independent daemons would race to write the same
+  # story_timeline_features rows and double the LLM spend; the DB
+  # connection budget (one 15-client Supabase pooler shared by both
+  # droplets) is also sized assuming these schedulers are single-instance.
+  timeline_scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_timeline_scheduler_prod
+    restart: always
+    command: ["python3", "scripts/run_timeline_scheduler.py"]
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      # Connection budget — see app/database.py for the arithmetic.
+      # Every container here builds its own engine, and both droplets
+      # share one 15-client Supabase session pooler.
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-2}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-0}
+      - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      # true ONLY when DATABASE_URL is the transaction pooler (6543).
+      - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
+      # story_chains.py's load_clusters/load_baseline_rates cache their DB
+      # reads here (best-effort — _cache_get/_cache_set swallow Redis
+      # errors) rather than duplicating the egress on every scheduler run
+      # AND every /clusters/{id}/timeline or /related request.
+      - REDIS_URL=${REDIS_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
