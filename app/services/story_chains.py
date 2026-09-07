@@ -10,12 +10,11 @@ an algorithm nobody is running.
 
 NOT WIRED INTO ANY ENDPOINT YET. This module is Phase 3 of the plan
 (candidate generation + actor selection + chain assembly). CHAIN_PARAMS
-below are now confirmed against the 3-class relabelled set (2026-09-07) —
-the API/UI layer (Phase 4) is unstarted for its own reasons, not blocked
-on this anymore. Precision is ~0.635 on genuine continuations: workable to
+below are confirmed against the 3-class relabelled set (2026-09-07) — the
+API/UI layer (Phase 4) is unstarted for its own reasons, not blocked on
+this anymore. Precision is ~0.72 on genuine continuations (with the
+institution filter below), trading recall down to ~0.40 — workable to
 build against, not a number to represent to a user as high-confidence.
-See CHAIN_PARAMS' comments for what's still an accepted limitation
-(institutional-entity false positives) rather than fixed.
 
 What's reused from the first attempt (validated by manual review there,
 and in related_stories.py's port of the same logic):
@@ -61,11 +60,9 @@ from app.redis_client import get_redis_client
 DAYS = 30
 
 # CONFIRMED against the 3-class relabel (same_event/continues/unrelated,
-# 625 pairs) on 2026-09-07: P=0.635, R=0.576 (recall measured on genuine
-# "continues" pairs only — same_event duplicates are tracked separately,
-# see get_story_timeline's docstring). Same numbers as the earlier
-# provisional 2-class run, so the relabel didn't move these constants —
-# it moved what we understood the false positives to BE (see below).
+# 625 pairs) on 2026-09-07. Base config (no institution filter): P=0.635,
+# R=0.576 (recall measured on genuine "continues" pairs only — same_event
+# duplicates are tracked separately, see get_story_timeline's docstring).
 GENERIC_PERCENTILE = 0.99
 GENERIC_METRIC = "in_set_df"  # "in_set_df" beat "baseline_rate" on real data:
 # entity_stats (9.3k rows as of 2026-09-07) isn't dense enough yet to catch
@@ -74,23 +71,28 @@ GENERIC_METRIC = "in_set_df"  # "in_set_df" beat "baseline_rate" on real data:
 # fresh from the window itself, stayed under the plausibility cap.
 SUBSUMPTION_RATIO = 0.9
 
-# KNOWN, ACCEPTED LIMITATION (2026-09-07 false-positive analysis): a
-# meaningful share of the remaining ~36% false-positive rate is
-# institutional entities — a specific court, a named cricket-board
-# official — that survive the genericity/backdrop filters (they aren't
-# frequent enough to be "generic," and they aren't a location/LLM-flagged/
-# Source-name match) yet recur across many genuinely unrelated stories the
-# same way a location would. Two fixes were tried and rejected by the
-# grid: requiring 3 shared entities per link collapsed recall
-# (0.576->0.337) for ~0.2pp of precision; requiring 2 reintroduced
-# Round 2's original "topic bucket" drift (a 114-cluster generic European
-# football roundup, chained via club/player-name transitivity — see
-# scripts/eval_story_chains.py's Params.subsumption_ratio docstring for
-# the full account). Left as one shared entity being sufficient (Node 5),
-# same as the first attempt validated. A real fix would need an
-# institution/venue classifier analogous to Round 5's location/backdrop
-# handling for organizations specifically — not attempted; no cheap
-# structural signal (unlike "matches a Source name") was found for it.
+# Institution/diffuseness filter (2026-09-07, second attempt at the
+# institutional-entity false-positive problem — see the rejected
+# min-shared-entities experiment in scripts/eval_story_chains.py's
+# Params.subsumption_ratio docstring for what didn't work first). An
+# entity whose occurrences pair with mostly DIFFERENT companion entities
+# each time (low average pairwise companion-set overlap) is acting as
+# connective tissue — a standing institution (a specific court, a named
+# official), or a prolific person's genuinely unrelated stories — rather
+# than one evolving story's subject. Measured directly, no denylist; see
+# compute_institution_keys.
+#
+# Verified: at threshold 0.15 (this project's choice, weighing precision
+# over recall — same philosophy as clustering's "a false merge is worse
+# than a missed merge" and related_stories.py's "under-showing is the
+# accepted failure mode"), precision rises 0.635 -> 0.719 for recall
+# 0.576 -> 0.401, confirmed jointly near-optimal against a small sweep of
+# the other params too, with no new blob risk (max chain size unchanged
+# or improved). Institutional-entity false positives are no longer an
+# unaddressed limitation, though the trade costs real recall.
+USE_INSTITUTION_FILTER = True
+INSTITUTION_OVERLAP_THRESHOLD = 0.15
+INSTITUTION_MIN_POSTINGS = 3
 
 # A chain past this size in a 30-day window is a topic blob, not one
 # story — same reasoning as related_stories.py's MAX_DF_RATIO-adjacent
@@ -272,12 +274,56 @@ def _generic_cutoff(values: List[float], percentile: float) -> float:
     return s[idx]
 
 
+def compute_institution_keys(
+    clusters: List[Cluster], qualifying: Dict[int, Set[str]],
+    overlap_threshold: float, min_postings: int,
+) -> Set[str]:
+    """Entities behaving as connective tissue rather than a story's subject:
+    their occurrences pair with mostly DIFFERENT companion entities each
+    time, instead of recurring with the same few (as a real evolving
+    story's cast would). Measured, not typed — catches standing
+    institutions (a specific court, a sports board official) the same way
+    it catches a prolific person whose many news items are genuinely
+    unrelated stories, not one to fragment via Node 7/8 (deliberately not
+    rebuilt — see this module's docstring). Entities with too few mentions
+    to judge (< min_postings) are left alone — innocent until shown
+    otherwise, not filtered on missing evidence. Mirrors
+    eval_story_chains.py's compute_institution_keys (id-keyed here); keep
+    the two in lockstep.
+    """
+    postings: Dict[str, List[int]] = {}
+    for cid, keys in qualifying.items():
+        for key in keys:
+            postings.setdefault(key, []).append(cid)
+
+    institutions: Set[str] = set()
+    for key, ids in postings.items():
+        if len(ids) < min_postings:
+            continue
+        companions = [qualifying[cid] - {key} for cid in ids]
+        overlaps = []
+        for a in range(len(companions)):
+            for b in range(a + 1, len(companions)):
+                ca, cb = companions[a], companions[b]
+                if not ca or not cb:
+                    overlaps.append(0.0)
+                    continue
+                overlaps.append(len(ca & cb) / min(len(ca), len(cb)))
+        avg_overlap = sum(overlaps) / len(overlaps) if overlaps else 0.0
+        if avg_overlap < overlap_threshold:
+            institutions.add(key)
+    return institutions
+
+
 def build_chains(
     clusters: List[Cluster],
     baseline_rates: Dict[str, float],
     generic_percentile: float = GENERIC_PERCENTILE,
     generic_metric: str = GENERIC_METRIC,
     subsumption_ratio: float = SUBSUMPTION_RATIO,
+    use_institution_filter: bool = USE_INSTITUTION_FILTER,
+    institution_overlap_threshold: float = INSTITUTION_OVERLAP_THRESHOLD,
+    institution_min_postings: int = INSTITUTION_MIN_POSTINGS,
 ) -> Dict[int, FrozenSet[int]]:
     """Returns cluster id -> the frozenset of cluster ids in its final
     chain (including itself). A cluster with no chain maps to {its own id}.
@@ -312,14 +358,29 @@ def build_chains(
     # actor arbitration isn't needed once backdrop/generic entities are
     # excluded at the entity level: any surviving specific entity is a
     # valid group-forming key on its own.
-    groups: Dict[str, Set[int]] = {}
+    qualifying: Dict[int, Set[str]] = {}
     for c in clusters:
+        keys = set()
         for key, is_backdrop in c.entity_backdrop.items():
             if is_backdrop:
                 continue
             if is_generic(key):
                 continue
-            groups.setdefault(key, set()).add(c.id)
+            keys.add(key)
+        qualifying[c.id] = keys
+
+    institutions: Set[str] = set()
+    if use_institution_filter:
+        institutions = compute_institution_keys(
+            clusters, qualifying, institution_overlap_threshold, institution_min_postings,
+        )
+
+    groups: Dict[str, Set[int]] = {}
+    for cid, keys in qualifying.items():
+        for key in keys:
+            if key in institutions:
+                continue
+            groups.setdefault(key, set()).add(cid)
 
     # Node 6b, adapted to merge instead of drop — see module docstring.
     ordered = sorted(groups.values(), key=len, reverse=True)
