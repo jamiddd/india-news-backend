@@ -93,9 +93,9 @@
      output for that story, verbatim. */
   .coverflow{
     display:flex; align-items:center; justify-content:center; gap:6px;
-    padding:8px 0 18px; min-height:452px;
+    padding:8px 0 18px; min-height:478px;
   }
-  .cf-track{position:relative; width:100%; max-width:360px; height:434px}
+  .cf-track{position:relative; width:100%; max-width:360px; height:460px}
   .cf-card{
     position:absolute; top:0; left:50%; width:270px; margin-left:-135px;
     border:1px solid var(--line); border-radius:14px; background:var(--surface);
@@ -150,17 +150,26 @@
      heading. The padding/negative-margin pair widens the clipping box just
      enough for each card's shadow to render without shifting the layout --
      overflow clips at the padding box, not the border box. */
-  .framer-stage{position:relative; height:118px; overflow:hidden; padding:12px; margin:-12px}
+  .framer-stage{position:relative; height:144px; overflow:hidden; padding:12px; margin:-12px}
   .frame-card{
     position:absolute; inset:12px; display:flex; flex-direction:column; gap:6px;
     justify-content:center; padding:14px 16px; border-radius:10px;
     border-left:3px solid var(--accent); background:var(--bg);
     box-shadow:0 8px 20px -10px rgba(0,0,0,.45), 0 0 0 1px var(--line);
-    opacity:0; transform:translateY(100%);
+    opacity:0; transform:translateY(100%); overflow:hidden;
     transition:opacity .5s ease, transform .55s cubic-bezier(.3,.8,.3,1);
   }
-  .frame-card b{font-size:13.5px; font-weight:700}
-  .frame-card i{font-style:italic; font-size:14px; color:var(--ink-2); line-height:1.5}
+  /* Outlet names and framing descriptions are real, unbounded-length text
+     -- clamp both to a fixed number of lines with an ellipsis rather than
+     letting a long one push past the fixed-height stage above (which used
+     to just clip mid-word with no indication anything was cut). */
+  .frame-card b{
+    font-size:13.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .frame-card i{
+    font-style:italic; font-size:14px; color:var(--ink-2); line-height:1.5;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden;
+  }
   .frame-card.is-active{opacity:1; transform:none}
   .frame-card.is-out{opacity:0; transform:translateY(-100%)}
 
@@ -189,8 +198,8 @@
     .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82)}
     .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68)}
     .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68)}
-    .cf-track{max-width:300px; height:372px}
-    .coverflow{min-height:392px}
+    .cf-track{max-width:300px; height:398px}
+    .coverflow{min-height:418px}
   }
 
   /* ---------- games gallery ---------- */
