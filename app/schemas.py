@@ -142,6 +142,23 @@ class RelatedClustersOut(BaseModel):
     actor: Optional[str] = None
 
 
+class TimelineOut(BaseModel):
+    """GET /clusters/{id}/timeline — see app/services/story_chains.py.
+    `items` is the FULL chain in chronological order (oldest first),
+    INCLUDING the cluster the client asked about — unlike
+    RelatedClustersOut, which excludes it. A client renders this as one
+    continuous "story so far" arc and highlights whichever item's id
+    matches the one it navigated from, rather than diffing a
+    doesn't-include-itself list against what it already has.
+    Precision on this chain is ~0.72 on real data (see story_chains.py's
+    CHAIN_PARAMS) — not high-confidence; UI copy should reflect that this
+    is "possibly related developments," not an authoritative timeline."""
+    items: List[StoryClusterListOut]
+    # Display name of the anchor entity the chain was found through (e.g.
+    # "Govinda") — None if no chain was found.
+    anchor: Optional[str] = None
+
+
 class UserPreferences(BaseModel):
     theme_mode: str = "system"
     accent_color: str = "blue"

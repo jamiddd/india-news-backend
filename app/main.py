@@ -54,6 +54,7 @@ from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCr
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
+    TimelineOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -85,6 +86,7 @@ from app.services.feed_gate import (
     listing_age_anchor,
 )
 from app.services.related_stories import find_related_clusters
+from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
@@ -1839,6 +1841,48 @@ async def get_related_clusters(
     items = [_cluster_to_out(by_id[cid]) for cid in cluster_ids if cid in by_id]
 
     result_out = RelatedClustersOut(items=items, actor=actor)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/timeline", response_model=TimelineOut)
+@limiter.limit("60/minute")
+async def get_cluster_timeline(
+    request: Request,
+    cluster_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Story-so-far timeline — see app/services/story_chains.py. Unlike
+    /related, this is chronological and INCLUDES cluster_id in `items`
+    (see TimelineOut). Precision on this chain is ~0.72 measured on real
+    data, not high-confidence — this is a "possibly related developments"
+    feature, not an authoritative one."""
+    cache_key = f"timeline:{cluster_id}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return TimelineOut.model_validate_json(cached)
+
+    members, anchor = await get_story_timeline(db, cluster_id)
+    if anchor is None and not members:
+        # Same distinction as /related: "cluster not in the lookback window
+        # at all" (404) vs "found, but no chain" (200, empty list).
+        exists = await db.execute(select(StoryCluster.id).where(StoryCluster.id == cluster_id))
+        if exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Story cluster not found")
+
+    member_ids = [c.id for c in members]
+    articles_result = await db.execute(
+        select(StoryCluster)
+        .where(StoryCluster.id.in_(member_ids))
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+    )
+    by_id = {c.id: c for c in articles_result.scalars().all()}
+    # members is already chronological (get_story_timeline sorts by
+    # first_seen_at) — preserve that order rather than the arbitrary one
+    # the IN-clause query returns.
+    items = [_cluster_to_list_out(by_id[cid]) for cid in member_ids if cid in by_id]
+
+    result_out = TimelineOut(items=items, anchor=anchor)
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 
