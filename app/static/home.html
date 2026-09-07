@@ -92,9 +92,19 @@
      per-outlet framing rows (see site.js's attachFraming) are the app's own
      output for that story, verbatim. */
   .coverflow{
-    display:flex; align-items:center; justify-content:center; gap:6px;
+    position:relative; display:flex; align-items:center; justify-content:center;
     padding:8px 0 18px; min-height:478px;
+    max-width:100%; overflow-x:hidden;
   }
+  /* The farleft/farright staging positions translate the card several
+     hundred px past the visible edge (see .cf-card.cf-p-farleft/farright
+     below) -- invisible at opacity:0, but still real layout that can
+     widen the page's scrollable area past the viewport if nothing clips
+     it, especially once the card got 20% wider on mobile. body already
+     carries overflow-x:hidden (site.css) as a general backstop, but
+     clipping right here at the source is what actually keeps those
+     off-canvas positions from ever making the page scroll horizontally,
+     rather than relying on that backstop to catch it after the fact. */
   .cf-track{position:relative; width:100%; max-width:360px; height:460px}
   .cf-card{
     position:absolute; top:0; left:50%; width:270px; margin-left:-135px;
@@ -186,15 +196,25 @@
      static fallback is always exactly one story. Solid accent fill (not a
      hover-only tint) so they read clearly against the page at rest --
      touch has no hover state to reveal them by. */
+  /* Positioned over the track's edges rather than as flex siblings that
+     used to force the track (and the cards inside it) to shrink to make
+     room for them -- on a narrow phone that shrink was severe enough that
+     the cards no longer fit their own declared size, which is what was
+     actually pushing the page wider than the viewport (see .coverflow's
+     overflow-x:hidden above, the direct fix for that; this is what stops
+     it from ever needing to clip real content in the first place). */
   .cf-nav{
-    display:none; flex:0 0 auto; width:46px; height:46px; align-items:center; justify-content:center;
+    position:absolute; top:50%; z-index:5; transform:translateY(-50%);
+    display:none; width:46px; height:46px; align-items:center; justify-content:center;
     border-radius:50%; border:none; background:var(--accent); color:var(--on-accent);
     font-size:24px; line-height:1; cursor:pointer;
     box-shadow:0 10px 24px -8px rgba(0,0,0,.5);
     transition:transform .15s ease, opacity .15s ease;
   }
+  .cf-prev{left:0}
+  .cf-next{right:0}
   .cf-nav:hover{opacity:.88}
-  .cf-nav:active{transform:scale(.92)}
+  .cf-nav:active{transform:translateY(-50%) scale(.92)}
   .coverflow.has-multi .cf-nav{display:flex}
 
   @media (max-width:900px){
