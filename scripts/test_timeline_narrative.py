@@ -81,6 +81,17 @@ narrative:
 - If the events don't actually form one coherent trail (e.g. they only share \
   a name, not a throughline), say so plainly in "context" and return an empty \
   beats list rather than forcing a narrative.
+- Specifically: a chain linked only by one recurring PERSON appearing in \
+  each event, where the events themselves cover substantively unrelated \
+  topics (e.g. the same official shows up in an unrelated trade dispute, a \
+  personnel appointment, and a sanctions announcement, with no event \
+  building on another's substance), is NOT a coherent story — mark \
+  coherent:false, even if a superficial narrative COULD be written by \
+  treating that person as the protagonist. A real story-so-far has events \
+  that causally or substantively connect to each other, not merely a \
+  cast member in common. When in doubt, prefer coherent:false to writing a \
+  narrative that leans on a person's presence to paper over otherwise \
+  disconnected events.
 
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
