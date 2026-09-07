@@ -1304,12 +1304,18 @@ async def search_story_clusters(
 
 
 # Categories the marketing site's homepage hero (below) is allowed to pull
-# from. Deliberately excludes national/politics/official: a live, unreviewed
-# feed on a public marketing page cannot make the judgement call the current
-# hand-picked story was chosen for — e.g. not putting an identifiable,
-# unconvicted individual in a criminal story on the front door. See
+# from. National and World are deliberately included even though they can
+# be the most debatable stories on the site — that's the point: the hero
+# demonstrates the framing-comparison feature on the stories where seeing
+# how different outlets frame the same facts matters most. Politics/
+# official/regional/etc. stay excluded — narrower categories the app itself
+# doesn't foreground as a top-level tab. See
 # backend/docs/website-roadmap.md item 4, "Editorial risk".
-HERO_SAFE_CATEGORIES = ["business", "sports", "tech", "entertainment"]
+HERO_SAFE_CATEGORIES = ["national", "world", "business"]
+# Below this many distinct outlets, a story isn't corroborated enough to be
+# the face of the site — this is well above the app feed's own
+# FEED_MIN_DISTINCT_SOURCES gate.
+HERO_MIN_SOURCES = 5
 # A story with only one outlet's framing has nothing to compare — the
 # carousel exists to demonstrate the comparison, so it is not a candidate.
 HERO_MIN_FRAMING_OUTLETS = 2
@@ -1349,6 +1355,7 @@ async def get_hero_stories(request: Request, db: AsyncSession = Depends(get_db))
         .where(listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
         .where(StoryCluster.id.in_(category_subq))
         .where(StoryCluster.framing_comparison.isnot(None))
+        .where(StoryCluster.distinct_source_count > HERO_MIN_SOURCES)
     )
     query = apply_feed_gate(query)
     query = query.order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id)).limit(HERO_CANDIDATE_LIMIT)
@@ -1372,6 +1379,10 @@ async def get_hero_stories(request: Request, db: AsyncSession = Depends(get_db))
             (a.source.category for a in cluster.articles if a.source and a.source.category in HERO_SAFE_CATEGORIES),
             "general",
         )
+        # cluster.summary is stored as "\n• bullet\n• bullet..." (see
+        # apply_baseline_enrichment) — split back into a list rather than
+        # shipping the bullet markers as literal text.
+        summary_bullets = [b.strip() for b in (cluster.summary or "").split("\n•") if b.strip()]
         items.append(HeroStoryOut(
             id=cluster.id,
             headline=cluster.headline,
@@ -1379,6 +1390,7 @@ async def get_hero_stories(request: Request, db: AsyncSession = Depends(get_db))
             source_count=cluster.distinct_source_count,
             category=source_category,
             framing=[HeroFramingOut(**row) for row in framing[:6]],
+            summary_bullets=summary_bullets,
         ))
         if len(items) >= HERO_STORY_COUNT:
             break

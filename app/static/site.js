@@ -19,44 +19,45 @@
     var year = document.getElementById("year");
     if (year) year.textContent = new Date().getFullYear();
 
-    // Hero carousel: real top stories, swipeable, each with its own framing
-    // rows cycling underneath (backend/docs/website-roadmap.md item 4).
-    // Framing cards cycle one at a time; the outgoing card leaves upward
-    // while the incoming one arrives from below, so the motion reads as a
-    // single column advancing rather than a crossfade.
-    var stage = document.getElementById("framer");
-    if (stage) {
-      var host = document.getElementById("hero-framer");
-      var dots = document.getElementById("framer-dots");
-      var imgLight = document.getElementById("framer-img-light");
-      var imgDark = document.getElementById("framer-img-dark");
-      var caption = document.getElementById("framer-caption");
-      var countEl = document.getElementById("framer-count");
-      var prevBtn = document.getElementById("framer-prev");
-      var nextBtn = document.getElementById("framer-next");
-      var cards = [], buttons = [], at = 0, timer = null;
-      var STEP = 3400;
+    // Hero coverflow: real top stories, three visible at once with the
+    // current one centred and raised above its two neighbours, looping
+    // endlessly in both directions (backend/docs/website-roadmap.md item
+    // 4). The centred card's per-outlet framing rows cycle one at a time;
+    // the outgoing row leaves upward while the incoming one arrives from
+    // below, so the motion reads as a single column advancing rather than
+    // a crossfade.
+    var coverflow = document.getElementById("hero-coverflow");
+    if (coverflow) {
+      var track = document.getElementById("cf-track");
+      var prevBtn = document.getElementById("cf-prev");
+      var nextBtn = document.getElementById("cf-next");
+      var frameCards = [], frameButtons = [], frameAt = 0, frameTimer = null;
+      var FRAME_STEP = 3400;
       var still = window.matchMedia("(prefers-reduced-motion: reduce)");
 
-      // What's baked into the page at load, so the hero always shows
-      // something even if the live endpoint never answers -- see the
-      // roadmap doc's "A static fallback" note. `image` stays null here:
-      // the fallback screenshot pair already in the DOM (framer-img-light/
-      // dark) is left alone rather than replaced.
+      // What's on screen at load, so the hero always shows something even
+      // if the live endpoint never answers -- see the roadmap doc's "A
+      // static fallback" note. A single story: side peeks and looping stay
+      // off (see render()) until real stories replace this.
       var stories = [{
-        image: null,
-        caption: "",
+        image: "/static/img/storycard-light.webp",
+        caption: "Trump says US may strike Iran's Pickaxe Mountain nuclear site ‘very soon’.",
         count: "14 outlets",
-        framing: Array.prototype.slice.call(stage.querySelectorAll(".frame-card")).map(function (c) {
-          return { outlet: c.querySelector("b").textContent, headline_angle: c.querySelector("i").textContent };
-        })
+        framing: [
+          { outlet: "India Today World", headline_angle: "Focuses on Trump's warning and context of recent strikes and Iran's condemnation." },
+          { outlet: "Reuters (via Google News)", headline_angle: "Brief factual statement of Trump's threat." },
+          { outlet: "Al Jazeera", headline_angle: "Frames within ongoing 'Iran war live' coverage, includes Iranian military response." },
+          { outlet: "NDTV", headline_angle: "Emphasizes 'fresh threat' framing of Trump's statement." },
+          { outlet: "Deccan Chronicle", headline_angle: "Straightforward report on Trump's statement with added quotes on nuclear weapon prevention." },
+          { outlet: "Livemint", headline_angle: "Combines Pickaxe threat with Trump's dismissive 'small potatoes' remark on conflict casualties." }
+        ]
       }];
-      var storyAt = 0;
+      var centerAt = 0;
 
-      function buildFraming(list) {
+      function buildFraming(stage, dots, list) {
         stage.innerHTML = "";
         dots.innerHTML = "";
-        cards = list.map(function (f, i) {
+        frameCards = list.map(function (f, i) {
           var el = document.createElement("article");
           el.className = "frame-card" + (i === 0 ? " is-active" : "");
           var b = document.createElement("b"); b.textContent = f.outlet;
@@ -65,77 +66,134 @@
           stage.appendChild(el);
           return el;
         });
-        buttons = cards.map(function (_, i) {
+        frameButtons = frameCards.map(function (_, i) {
           var b = document.createElement("button");
           b.type = "button";
-          b.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + cards.length);
+          b.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + frameCards.length);
           b.setAttribute("aria-current", i === 0 ? "true" : "false");
-          b.addEventListener("click", function () { show(i); restart(); });
+          b.addEventListener("click", function () { showFrame(i); restartFraming(); });
           dots.appendChild(b);
           return b;
         });
-        at = 0;
+        frameAt = 0;
       }
 
-      function show(next) {
-        if (next === at || !cards[next]) return;
-        cards[at].classList.remove("is-active");
-        cards[at].classList.add("is-out");
-        var prev = at;
-        // Park the outgoing card back below the stage once it is out of
-        // sight, so it slides up again on its next turn instead of dropping
-        // in from the top.
-        window.setTimeout(function () { cards[prev].classList.remove("is-out"); }, 600);
-        at = next;
-        cards[at].classList.add("is-active");
-        buttons.forEach(function (b, i) { b.setAttribute("aria-current", i === at ? "true" : "false"); });
+      function showFrame(next) {
+        if (next === frameAt || !frameCards[next]) return;
+        frameCards[frameAt].classList.remove("is-active");
+        frameCards[frameAt].classList.add("is-out");
+        var prev = frameAt;
+        // Park the outgoing row back below the stage once it is out of
+        // sight, so it slides up again on its next turn instead of
+        // dropping in from the top.
+        window.setTimeout(function () { frameCards[prev].classList.remove("is-out"); }, 600);
+        frameAt = next;
+        frameCards[frameAt].classList.add("is-active");
+        frameButtons.forEach(function (b, i) { b.setAttribute("aria-current", i === frameAt ? "true" : "false"); });
       }
 
-      function tick() { show((at + 1) % cards.length); }
-      function restart() {
-        window.clearInterval(timer);
-        if (!still.matches && cards.length > 1) timer = window.setInterval(tick, STEP);
+      function frameTick() { showFrame((frameAt + 1) % frameCards.length); }
+      function restartFraming() {
+        window.clearInterval(frameTimer);
+        if (!still.matches && frameCards.length > 1) frameTimer = window.setInterval(frameTick, FRAME_STEP);
       }
 
-      function renderStory(i) {
-        storyAt = ((i % stories.length) + stories.length) % stories.length;
-        var s = stories[storyAt];
-        if (s.image) {
-          // A live story is a real news photo, not a themed UI capture, so
-          // one <img> replaces the light/dark screenshot pair rather than
-          // swapping each of their srcs.
-          imgLight.style.display = "block";
-          imgLight.src = s.image;
-          imgLight.alt = s.caption;
-          imgDark.style.display = "none";
+      function makeFigure(story) {
+        var fig = document.createElement("figure");
+        fig.className = "cf-figure";
+        var img = document.createElement("img");
+        img.src = story.image;
+        img.alt = "";
+        img.loading = "lazy";
+        var cap = document.createElement("p");
+        cap.className = "cf-caption";
+        cap.textContent = story.caption;
+        fig.appendChild(img);
+        fig.appendChild(cap);
+        return fig;
+      }
+
+      // Builds the three visible slots (or just one, with only one real
+      // story) fresh on every navigation -- simpler and cheap enough at
+      // three DOM nodes than diffing/animating positions in place, and it
+      // is what lets prev/next loop for free: the slot always shows
+      // (center-1, center, center+1) mod stories.length.
+      function render() {
+        window.clearInterval(frameTimer);
+        track.innerHTML = "";
+        var n = stories.length;
+        var multi = n > 1;
+        coverflow.classList.toggle("has-multi", multi);
+
+        if (multi) {
+          var leftStory = stories[((centerAt - 1) % n + n) % n];
+          var left = document.createElement("div");
+          left.className = "cf-card cf-left";
+          left.appendChild(makeFigure(leftStory));
+          left.addEventListener("click", function () { go(-1); });
+          track.appendChild(left);
         }
-        caption.textContent = s.caption;
-        countEl.textContent = s.count;
-        buildFraming(s.framing);
-        restart();
-        host.classList.toggle("has-multi", stories.length > 1);
+
+        var story = stories[centerAt];
+        var center = document.createElement("div");
+        center.className = "cf-card cf-center";
+        center.appendChild(makeFigure(story));
+        var body = document.createElement("div");
+        body.className = "cf-body";
+        var head = document.createElement("div");
+        head.className = "framer-head";
+        head.innerHTML = "<b>Media framing</b><span></span>";
+        head.querySelector("span").textContent = story.count;
+        var stage = document.createElement("div");
+        stage.className = "framer-stage";
+        var dots = document.createElement("div");
+        dots.className = "framer-dots";
+        body.appendChild(head);
+        body.appendChild(stage);
+        body.appendChild(dots);
+        center.appendChild(body);
+        track.appendChild(center);
+        buildFraming(stage, dots, story.framing);
+        restartFraming();
+
+        if (multi) {
+          var rightStory = stories[(centerAt + 1) % n];
+          var right = document.createElement("div");
+          right.className = "cf-card cf-right";
+          right.appendChild(makeFigure(rightStory));
+          right.addEventListener("click", function () { go(1); });
+          track.appendChild(right);
+        }
       }
 
-      prevBtn.addEventListener("click", function () { renderStory(storyAt - 1); restart(); });
-      nextBtn.addEventListener("click", function () { renderStory(storyAt + 1); restart(); });
+      function go(delta) {
+        var n = stories.length;
+        centerAt = ((centerAt + delta) % n + n) % n;
+        render();
+      }
 
-      renderStory(0);
+      prevBtn.addEventListener("click", function () { go(-1); });
+      nextBtn.addEventListener("click", function () { go(1); });
 
-      // Stop while the reader is hovering, keyboard-focused inside, or has
-      // the tab in the background -- an unattended interval keeps firing
-      // transitions on a page nobody is looking at.
-      host.addEventListener("mouseenter", function () { window.clearInterval(timer); });
-      host.addEventListener("mouseleave", restart);
-      host.addEventListener("focusin", function () { window.clearInterval(timer); });
-      host.addEventListener("focusout", restart);
+      render();
+
+      // Stop the framing auto-cycle while the reader is hovering,
+      // keyboard-focused inside, or has the tab in the background -- an
+      // unattended interval keeps firing transitions on a page nobody is
+      // looking at.
+      coverflow.addEventListener("mouseenter", function () { window.clearInterval(frameTimer); });
+      coverflow.addEventListener("mouseleave", restartFraming);
+      coverflow.addEventListener("focusin", function () { window.clearInterval(frameTimer); });
+      coverflow.addEventListener("focusout", restartFraming);
       document.addEventListener("visibilitychange", function () {
-        if (document.hidden) { window.clearInterval(timer); } else { restart(); }
+        if (document.hidden) { window.clearInterval(frameTimer); } else { restartFraming(); }
       });
 
-      // Replace the fallback with real clusters once they load. Silently
-      // keeps the fallback on any failure (bad response, network error,
-      // empty list) -- see the roadmap doc: the hero must never end up
-      // showing nothing.
+      // Replace the fallback with real clusters once they load, and reuse
+      // the first one to illustrate the "How it works" steps below with
+      // real content instead of the placeholder bar diagrams. Silently
+      // keeps both fallbacks on any failure (bad response, network error,
+      // empty list) -- the hero and the steps must never end up empty.
       fetch("/api/v1/public/hero").then(function (r) {
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
@@ -147,11 +205,67 @@
             image: it.image_url,
             caption: it.headline,
             count: n + (n === 1 ? " outlet" : " outlets"),
-            framing: it.framing || []
+            framing: it.framing || [],
+            summary_bullets: it.summary_bullets || []
           };
         });
-        renderStory(0);
+        centerAt = 0;
+        render();
+        renderHowItWorks(stories[0]);
       }).catch(function () {});
+    }
+
+    // Illustrates the three "How it works" steps with the hero coverflow's
+    // first real story instead of the abstract bar/dot placeholders
+    // already in the DOM (kept as the fallback -- see the coverflow's
+    // fetch above, which is the only caller of this).
+    function renderHowItWorks(story) {
+      var clusterViz = document.getElementById("viz-cluster");
+      var summarizeViz = document.getElementById("viz-summarize");
+      var compareViz = document.getElementById("viz-compare");
+      if (!clusterViz || !summarizeViz || !compareViz) return;
+
+      // Headlines/outlet names/summary bullets are real scraped/AI-generated
+      // text, not markup this page wrote -- escape before the innerHTML
+      // interpolation below, same as any other untrusted string.
+      function esc(s) {
+        var div = document.createElement("div");
+        div.textContent = s;
+        return div.innerHTML;
+      }
+
+      var outlets = story.framing.map(function (f) { return esc(f.outlet); });
+      var headline = esc(story.caption);
+      var count = esc(story.count);
+
+      if (clusterViz && outlets.length) {
+        var srcRows = outlets.slice(0, 3).map(function (o) {
+          return '<div class="vcard tight"><div class="viz-src">' + o + "</div></div>";
+        }).join("");
+        clusterViz.innerHTML =
+          '<div class="vstack">' + srcRows + "</div>" +
+          '<div class="vdown">↓</div>' +
+          '<div class="vcard"><div class="viz-headline">' + headline + "</div>" +
+          '<span class="vchip">' + count + "</span></div>";
+      }
+
+      if (summarizeViz && story.summary_bullets && story.summary_bullets.length) {
+        var bullets = story.summary_bullets.slice(0, 3).map(function (b) {
+          return '<div class="viz-bullet">' + esc(b) + "</div>";
+        }).join("");
+        summarizeViz.innerHTML =
+          '<div class="vcard tight"><div class="viz-src">' + headline + "</div></div>" +
+          '<div class="vdown">↓</div>' +
+          '<div class="vcard">' + bullets + '<span class="vchip">Real summary</span></div>';
+      }
+
+      if (compareViz && story.framing.length > 1) {
+        var rows = story.framing.slice(0, 4).map(function (f) {
+          return '<div class="vrow"><span class="bar accent" style="width:3px;height:26px"></span>' +
+                 '<div class="viz-frame-row"><b>' + esc(f.outlet) + "</b><i>" + esc(f.headline_angle) + "</i></div></div>";
+        }).join("");
+        compareViz.innerHTML = '<div class="vcard">' + rows + '<span class="vchip">Same facts, different lead</span></div>';
+      }
     }
 
     var items = document.querySelectorAll(".reveal");

@@ -510,6 +510,11 @@ class HeroStoryOut(BaseModel):
     source_count: int
     category: str
     framing: List[HeroFramingOut] = []
+    # Parsed from StoryCluster.summary's "\n• bullet" formatting (see
+    # apply_baseline_enrichment) — reused by the "How it works" section on
+    # the same page, which illustrates the Summarise step with the first
+    # hero story's real bullets rather than placeholder text.
+    summary_bullets: List[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
