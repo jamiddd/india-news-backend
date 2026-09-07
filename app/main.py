@@ -50,7 +50,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
@@ -67,6 +67,7 @@ from app.schemas import (
     ReadEventRequest,
     DonationLinkRequest, DonationLinkResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
+    TimelinePickRequest,
     StarredSourcesOut,
     BlockedSourcesOut,
     ReportStoryRequest,
@@ -2273,6 +2274,82 @@ async def admin_engagement(request: Request, db: AsyncSession = Depends(get_db))
             for row in result
         ]
     }
+
+
+@app.get("/admin/timelines/picks")
+async def admin_list_timeline_picks(request: Request, db: AsyncSession = Depends(get_db)):
+    """Every story_timeline_features row, editorial picks first — the
+    generation script's algorithmic fallback slots aren't rows here until
+    they've actually been generated at least once, so this is "what's been
+    picked or has run before", not "what's live in the tab right now"."""
+    _require_admin(request)
+    result = await db.execute(
+        select(StoryTimelineFeature).order_by(
+            desc(StoryTimelineFeature.is_editorial_pick), desc(StoryTimelineFeature.picked_at)
+        )
+    )
+    return {
+        "picks": [
+            {
+                "id": row.id,
+                "anchor_cluster_id": row.anchor_cluster_id,
+                "is_editorial_pick": row.is_editorial_pick,
+                "anchor_label": row.anchor_label,
+                "title": row.title,
+                "coherent": row.coherent,
+                "last_seen_in_top": row.last_seen_in_top,
+                "narrative_generated_at": row.narrative_generated_at.isoformat() if row.narrative_generated_at else None,
+                "picked_at": row.picked_at.isoformat(),
+            }
+            for row in result.scalars().all()
+        ]
+    }
+
+
+@app.post("/admin/timelines/pick")
+async def admin_pick_timeline(
+    request: Request, payload: TimelinePickRequest, db: AsyncSession = Depends(get_db),
+):
+    """Marks cluster_id's chain as an editorial pick. Idempotent — picking an
+    already-picked cluster just confirms it; the generation script (not this
+    endpoint) fills in the narrative on its next cycle, not immediately, so
+    this returns the bare row rather than a generated narrative."""
+    _require_admin(request)
+    cluster_result = await db.execute(select(StoryCluster.id).where(StoryCluster.id == payload.cluster_id))
+    if cluster_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    statement = pg_insert(StoryTimelineFeature).values(
+        anchor_cluster_id=payload.cluster_id, is_editorial_pick=True,
+    ).on_conflict_do_update(
+        index_elements=["anchor_cluster_id"],
+        set_={"is_editorial_pick": True, "updated_at": utc_now()},
+    )
+    await db.execute(statement)
+    await db.commit()
+    return {"message": f"cluster {payload.cluster_id} marked as an editorial pick"}
+
+
+@app.post("/admin/timelines/unpick")
+async def admin_unpick_timeline(
+    request: Request, payload: TimelinePickRequest, db: AsyncSession = Depends(get_db),
+):
+    """Clears the editorial flag but leaves the row (and any narrative
+    already generated for it) in place — the generation script's
+    algorithmic fallback can still pick this chain up on length/recency, and
+    a reader mid-story shouldn't see it vanish from under them just because
+    an editor changed their mind between generation cycles."""
+    _require_admin(request)
+    result = await db.execute(
+        select(StoryTimelineFeature).where(StoryTimelineFeature.anchor_cluster_id == payload.cluster_id)
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="No pick found for that cluster")
+    row.is_editorial_pick = False
+    row.updated_at = utc_now()
+    await db.commit()
+    return {"message": f"cluster {payload.cluster_id} is no longer an editorial pick"}
 
 
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", status_code=200)

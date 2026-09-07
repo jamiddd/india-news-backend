@@ -830,3 +830,46 @@ class Feedback(Base):
         # first, that I have not dealt with yet."
         Index("ix_feedback_status_created_at", "status", "created_at"),
     )
+
+
+class StoryTimelineFeature(Base):
+    """
+    Timeline/Context tab (see backend/docs and scripts/test_timeline_narrative.py):
+    a curated few chains (see app.services.story_chains.build_chains) get an
+    LLM-stitched "story so far" narrative, refreshed a few times a day and
+    surfaced in a dedicated tab — a separate feature from both StoryCluster's
+    per-story "related stories" (no chaining) and the unused-so-far
+    GET /clusters/{id}/timeline chain view.
+
+    Keyed on `anchor_cluster_id`, not a persisted chain id — chains
+    themselves aren't first-class rows (build_chains recomputes membership
+    from scratch each run), so a pick names one cluster and the generation
+    script re-derives that cluster's current chain each cycle. is_editorial_pick
+    is the admin's manual selection; the generation script fills the rest,
+    choosing the remaining slots up to 5 algorithmically (chain length x
+    recency) when there aren't enough editorial picks.
+
+    A row is never deleted just because its chain fell out of this cycle's
+    top-5 — last_seen_in_top boolean tracks that, and the previously-generated
+    narrative stays in place, per the "don't blank a story someone might
+    still be reading" reasoning discussed for the generation script.
+    """
+    __tablename__ = "story_timeline_features"
+
+    id = Column(Integer, primary_key=True, index=True)
+    anchor_cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    is_editorial_pick = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    # Filled in by the generation script (unwritten as of this table's
+    # creation) — null until the first narrative is generated for a pick.
+    anchor_label = Column(String(255), nullable=True)
+    title = Column(Text, nullable=True)
+    context = Column(Text, nullable=True)
+    beats = Column(JSON, nullable=True)  # [{date_label, label, narration, cluster_ids}], see test_timeline_narrative.py's SYSTEM_PROMPT
+    cluster_ids = Column(JSON, nullable=True)  # ordered chain membership at last generation
+    coherent = Column(Boolean, nullable=True)  # last generation's own coherence verdict — a pick whose chain stopped cohering shouldn't silently keep showing a stale narrative forever
+
+    last_seen_in_top = Column(Boolean, nullable=False, default=True, server_default="true")
+    narrative_generated_at = Column(DateTime(timezone=True), nullable=True)
+    picked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

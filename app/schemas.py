@@ -440,6 +440,15 @@ class SaveStoryRequest(BaseModel):
     cluster_id: int
 
 
+class TimelinePickRequest(BaseModel):
+    """Admin marks cluster_id's current chain (see
+    app.services.story_chains.build_chains) as an editorial pick for the
+    Timeline/Context tab. cluster_id is the anchor — any cluster in the
+    intended chain works, since the generation script re-derives full
+    membership from it each cycle rather than trusting a snapshot."""
+    cluster_id: int
+
+
 class ReportStoryRequest(BaseModel):
     reason: Literal["misleading", "factually_incorrect", "offensive", "duplicate_spam", "other"]
     note: Optional[str] = Field(default=None, max_length=1000)
