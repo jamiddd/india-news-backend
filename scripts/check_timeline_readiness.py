@@ -30,13 +30,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from sqlalchemy import text  # noqa: E402
 
-from app.database import async_session_maker  # noqa: E402
+from app.database import AsyncSessionLocal  # noqa: E402
 
 
 async def main(days: int) -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    async with async_session_maker() as session:
+    async with AsyncSessionLocal() as session:
         # 1. Volume + corroboration shape over the window.
         result = await session.execute(
             text(
