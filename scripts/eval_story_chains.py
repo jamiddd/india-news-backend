@@ -492,48 +492,70 @@ def _label_prompt(pair_id: str, a: ClusterRec, b: ClusterRec) -> str:
     )
 
 
-def _do_label(pairs_path: str, out_path: str) -> None:
+def _do_label(pairs_path: str, out_path: str, resume_batch_id: Optional[str] = None) -> None:
     try:
         import anthropic
     except ImportError:
         sys.exit("pip install anthropic  (see requirements-dev.txt)")
 
-    with open(pairs_path) as fh:
-        blob = json.load(fh)
-    by_id = {c["id"]: c for c in blob["clusters"]}
-    pairs = [tuple(p) for p in blob["pairs"]]
-
-    def rec(d: dict) -> ClusterRec:
-        return ClusterRec(
-            id=d["id"], headline=d["headline"],
-            first_seen_at=datetime.fromisoformat(d["first_seen_at"]),
-            last_updated_at=datetime.fromisoformat(d["last_updated_at"]),
-            distinct_source_count=d["distinct_source_count"],
-            entity_backdrop={},
-        )
-
     client = anthropic.Anthropic()
-    requests = [
-        {
-            "custom_id": f"{x}-{y}",
-            "params": {
-                "model": LABEL_MODEL,
-                "max_tokens": 64,
-                "system": LABEL_SYSTEM,
-                "messages": [{"role": "user",
-                              "content": _label_prompt(f"{x}-{y}", rec(by_id[x]), rec(by_id[y]))}],
-            },
-        }
-        for x, y in pairs if x in by_id and y in by_id
-    ]
-
-    print(f"Submitting {len(requests)} pairs to the Batch API ({LABEL_MODEL}, 50% off)...", flush=True)
-    batch = client.messages.batches.create(requests=requests)
-    print(f"Batch {batch.id} submitted. Polling...", flush=True)
-
     import time
+
+    if resume_batch_id:
+        # Reattach to an already-submitted batch instead of resubmitting —
+        # a poll-loop network blip (ConnectTimeout on retrieve/results, seen
+        # 2026-09-07) must not silently double the labelling job. Submission
+        # itself already succeeded by the time polling can fail.
+        batch = client.messages.batches.retrieve(resume_batch_id)
+        print(f"Resuming batch {batch.id} (status={batch.processing_status}). Polling...", flush=True)
+    else:
+        with open(pairs_path) as fh:
+            blob = json.load(fh)
+        by_id = {c["id"]: c for c in blob["clusters"]}
+        pairs = [tuple(p) for p in blob["pairs"]]
+
+        def rec(d: dict) -> ClusterRec:
+            return ClusterRec(
+                id=d["id"], headline=d["headline"],
+                first_seen_at=datetime.fromisoformat(d["first_seen_at"]),
+                last_updated_at=datetime.fromisoformat(d["last_updated_at"]),
+                distinct_source_count=d["distinct_source_count"],
+                entity_backdrop={},
+            )
+
+        requests = [
+            {
+                "custom_id": f"{x}-{y}",
+                "params": {
+                    "model": LABEL_MODEL,
+                    "max_tokens": 64,
+                    "system": LABEL_SYSTEM,
+                    "messages": [{"role": "user",
+                                  "content": _label_prompt(f"{x}-{y}", rec(by_id[x]), rec(by_id[y]))}],
+                },
+            }
+            for x, y in pairs if x in by_id and y in by_id
+        ]
+
+        print(f"Submitting {len(requests)} pairs to the Batch API ({LABEL_MODEL}, 50% off)...", flush=True)
+        batch = client.messages.batches.create(requests=requests)
+        print(f"Batch {batch.id} submitted. Polling...", flush=True)
+
     while True:
-        batch = client.messages.batches.retrieve(batch.id)
+        try:
+            batch = client.messages.batches.retrieve(batch.id)
+        except anthropic.APIConnectionError as e:
+            # Transient network blips must not lose the batch id — the job
+            # keeps running server-side regardless of whether this process
+            # can currently reach the API. Log which batch to resume and
+            # keep retrying rather than crashing (2026-09-07 incident: a
+            # ConnectTimeout here killed the process with no batch id in
+            # the visible scrollback).
+            print(f"  poll failed ({e}); retrying in 20s. "
+                  f"If this process dies, resume with --resume-batch-id {batch.id}",
+                  flush=True)
+            time.sleep(20)
+            continue
         if batch.processing_status == "ended":
             break
         print(f"  status={batch.processing_status} counts={batch.request_counts}", flush=True)
@@ -541,7 +563,19 @@ def _do_label(pairs_path: str, out_path: str) -> None:
 
     labels: Dict[str, str] = {}
     failed = 0
-    for result in client.messages.batches.results(batch.id):
+    for attempt in range(5):
+        try:
+            results_iter = list(client.messages.batches.results(batch.id))
+            break
+        except anthropic.APIConnectionError as e:
+            print(f"  results fetch failed ({e}); retrying "
+                  f"(attempt {attempt + 1}/5). Batch id: {batch.id}", flush=True)
+            time.sleep(10)
+    else:
+        sys.exit(f"Could not fetch results after 5 attempts. Batch {batch.id} "
+                  f"is still done server-side — retry with --resume-batch-id {batch.id}.")
+
+    for result in results_iter:
         if result.result.type != "succeeded":
             failed += 1
             continue
@@ -670,8 +704,12 @@ def main() -> None:
     pr.add_argument("--max-pairs", type=int, default=600)
 
     lb = sub.add_parser("label", help="label pairs via the Haiku Batch API")
-    lb.add_argument("--pairs", required=True)
+    lb.add_argument("--pairs", help="required unless --resume-batch-id is given")
     lb.add_argument("--out", default="labels.json")
+    lb.add_argument("--resume-batch-id",
+                    help="reattach to an already-submitted batch instead of "
+                         "resubmitting, e.g. after a local network blip "
+                         "killed the polling loop (--pairs is ignored)")
 
     gr = sub.add_parser("grid", help="sweep configs and rank them")
     gr.add_argument("--fixture", required=True)
@@ -718,7 +756,9 @@ def main() -> None:
         return
 
     if args.mode == "label":
-        _do_label(args.pairs, args.out)
+        if not args.resume_batch_id and not args.pairs:
+            sys.exit("--pairs is required unless --resume-batch-id is given")
+        _do_label(args.pairs, args.out, resume_batch_id=args.resume_batch_id)
         return
 
     if args.mode == "inspect":
