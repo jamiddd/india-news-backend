@@ -223,6 +223,22 @@ class Params:
     # dropping outright is what the first attempt's Node 7/8 got in trouble
     # for (a member that's only in the smaller group would vanish). Merging
     # preserves every member while still collapsing the duplicate label.
+    #
+    # A 2026-09-07 experiment tried replacing this whole group+subsumption
+    # design with a pairwise entity-overlap graph + connected components,
+    # requiring >=2 or >=3 shared entities per edge instead of Node 5's
+    # "one is enough" — motivated by a false-positive analysis showing
+    # single-shared-institutional-entity pairs (a specific court, a named
+    # official) getting wrongly linked. Result: >=3 collapsed recall
+    # (0.576->0.337) for a ~0.2pp precision gain; >=2 reintroduced Round
+    # 2's original "topic bucket" drift in a new form (a 114-cluster
+    # generic-European-football-roundup chain via club/player-name
+    # transitivity, none of which individually looked generic enough to
+    # filter). Neither beat this design on the full labelled set. Reverted;
+    # institutional-entity false positives are a known, accepted
+    # limitation for now rather than a solved one — see
+    # backend/docs/story-graph-design.md for how this mirrors Round 2/4's
+    # unresolved fragmentation issues in the first attempt.
     subsumption_ratio: float = 0.8
     # Candidate window for pair generation / chain membership. Fixed by
     # the fixture in practice; kept as a field so it prints in the label.
