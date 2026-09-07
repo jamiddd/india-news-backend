@@ -89,8 +89,14 @@
   /* The one feature no other Indian aggregator has, so the hero demonstrates
      it rather than showing a picture of it: real top clusters, three visible
      at once with the current story centred and raised above its two
-     neighbours, looping endlessly in both directions. The centred card's
-     per-outlet framing rows (see site.js buildFraming) are the app's own
+     neighbours, looping endlessly in both directions.
+     Five fixed positions (farleft/left/center/right/farright), each just a
+     transform -- site.js keeps a rolling pool of five card elements and
+     reassigns which position class each one wears on every navigate, so an
+     existing element sliding from e.g. cf-p-right to cf-p-center animates
+     via the transition below, the way a RecyclerView scrolls its items
+     rather than swapping static content in place. The centred card's
+     per-outlet framing rows (see site.js's attachFraming) are the app's own
      output for that story, verbatim. */
   .coverflow{
     display:flex; align-items:center; justify-content:center; gap:6px;
@@ -98,25 +104,36 @@
   }
   .cf-track{position:relative; width:100%; max-width:360px; height:434px}
   .cf-card{
-    position:absolute; top:0; left:50%; width:270px;
+    position:absolute; top:0; left:50%; width:270px; margin-left:-135px;
     border:1px solid var(--line); border-radius:14px; background:var(--surface);
     overflow:hidden; box-shadow:0 26px 54px -30px rgba(0,0,0,.5);
     transition:transform .5s cubic-bezier(.3,.8,.3,1), opacity .5s, filter .5s;
     cursor:pointer;
   }
-  .cf-card.cf-center{
-    width:330px; z-index:3; cursor:default;
-    transform:translate(-50%,0) scale(1); opacity:1; filter:none;
+  .cf-card.cf-p-center{
+    z-index:3; cursor:default;
+    transform:translate(0,0) scale(1.06); opacity:1; filter:none;
   }
-  .cf-card.cf-left{
-    z-index:1; transform:translate(-118%,28px) scale(.8) rotate(-3deg);
-    opacity:.55; filter:brightness(.72) saturate(.85);
+  .cf-card.cf-p-left{
+    z-index:2; transform:translate(-192px,20px) scale(.82) rotate(-3deg);
+    opacity:.6; filter:brightness(.74) saturate(.85);
   }
-  .cf-card.cf-right{
-    z-index:1; transform:translate(-10%,28px) scale(.8) rotate(3deg);
-    opacity:.55; filter:brightness(.72) saturate(.85);
+  .cf-card.cf-p-right{
+    z-index:2; transform:translate(192px,20px) scale(.82) rotate(3deg);
+    opacity:.6; filter:brightness(.74) saturate(.85);
   }
-  .cf-card.cf-left:hover, .cf-card.cf-right:hover{opacity:.8}
+  /* Off-canvas staging positions -- invisible, but real DOM positions (not
+     display:none) so the transition into/out of cf-p-left/cf-p-right has
+     somewhere to animate from/to instead of popping. */
+  .cf-card.cf-p-farleft{
+    z-index:1; transform:translate(-320px,28px) scale(.68) rotate(-5deg);
+    opacity:0; pointer-events:none;
+  }
+  .cf-card.cf-p-farright{
+    z-index:1; transform:translate(320px,28px) scale(.68) rotate(5deg);
+    opacity:0; pointer-events:none;
+  }
+  .cf-card.cf-p-left:hover, .cf-card.cf-p-right:hover{opacity:.85}
   .cf-figure{position:relative; margin:0; background:#000}
   .cf-figure img{display:block; width:100%; height:auto; aspect-ratio:540/380; object-fit:cover}
   .cf-caption{
@@ -124,13 +141,13 @@
     font-size:13.5px; font-weight:700; line-height:1.35; color:#fff;
     background:linear-gradient(to top, rgba(0,0,0,.8), rgba(0,0,0,0));
   }
-  .cf-card.cf-left .cf-caption, .cf-card.cf-right .cf-caption{
+  .cf-card:not(.cf-p-center) .cf-caption{
     display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden;
   }
-  .cf-body{padding:16px 18px 18px}
+  .cf-body{display:none; padding:16px 18px 18px}
   /* Only the centred card shows the framing rows -- a peek card is here to
      be recognised and clicked toward, not read. */
-  .cf-card.cf-left .cf-body, .cf-card.cf-right .cf-body{display:none}
+  .cf-card.cf-p-center .cf-body{display:block}
 
   .framer-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px}
   .framer-head b{font-family:var(--serif); font-size:17px}
@@ -177,8 +194,11 @@
   .coverflow.has-multi .cf-nav{display:flex}
 
   @media (max-width:900px){
-    .cf-card{width:220px}
-    .cf-card.cf-center{width:264px}
+    .cf-card{width:210px; margin-left:-105px}
+    .cf-card.cf-p-left{transform:translate(-150px,16px) scale(.82) rotate(-3deg)}
+    .cf-card.cf-p-right{transform:translate(150px,16px) scale(.82) rotate(3deg)}
+    .cf-card.cf-p-farleft{transform:translate(-250px,22px) scale(.68) rotate(-5deg)}
+    .cf-card.cf-p-farright{transform:translate(250px,22px) scale(.68) rotate(5deg)}
     .cf-track{max-width:300px; height:372px}
     .coverflow{min-height:392px}
   }
@@ -587,7 +607,7 @@
   </div>
 </footer>
 
-<script src="/static/site.js?v=8" defer></script>
+<script src="/static/site.js?v=9" defer></script>
 
 </body>
 </html>

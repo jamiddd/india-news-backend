@@ -22,23 +22,32 @@
     // Hero coverflow: real top stories, three visible at once with the
     // current one centred and raised above its two neighbours, looping
     // endlessly in both directions (backend/docs/website-roadmap.md item
-    // 4). The centred card's per-outlet framing rows cycle one at a time;
-    // the outgoing row leaves upward while the incoming one arrives from
-    // below, so the motion reads as a single column advancing rather than
-    // a crossfade.
+    // 4). Navigating doesn't rebuild the visible cards -- it keeps a
+    // rolling pool of five existing card elements (farleft/left/center/
+    // right/farright) and reassigns which position class each one wears,
+    // so the ones that stay in the DOM physically slide between positions
+    // via the CSS transition on .cf-card, the way a RecyclerView scrolls
+    // its items rather than swapping content in place instantly. Each
+    // card's own per-outlet framing rows (only shown while centred) cycle
+    // the same way the old single-story version did: the outgoing row
+    // leaves upward while the incoming one arrives from below.
     var coverflow = document.getElementById("hero-coverflow");
     if (coverflow) {
       var track = document.getElementById("cf-track");
       var prevBtn = document.getElementById("cf-prev");
       var nextBtn = document.getElementById("cf-next");
-      var frameCards = [], frameButtons = [], frameAt = 0, frameTimer = null;
       var FRAME_STEP = 3400;
       var still = window.matchMedia("(prefers-reduced-motion: reduce)");
+      // Position classes in filmstrip order -- index i is always the
+      // element i steps from the left edge of the pool, and slots[2] is
+      // always the centred one (see go() below, which preserves that
+      // invariant on every shift).
+      var POSITIONS = ["cf-p-farleft", "cf-p-left", "cf-p-center", "cf-p-right", "cf-p-farright"];
 
       // What's on screen at load, so the hero always shows something even
       // if the live endpoint never answers -- see the roadmap doc's "A
       // static fallback" note. A single story: side peeks and looping stay
-      // off (see render()) until real stories replace this.
+      // off (see buildPool()) until real stories replace this.
       var stories = [{
         image: "/static/img/storycard-light.webp",
         caption: "Trump says US may strike Iran's Pickaxe Mountain nuclear site ‘very soon’.",
@@ -53,49 +62,52 @@
         ]
       }];
       var centerAt = 0;
+      var slots = [];
 
-      function buildFraming(stage, dots, list) {
-        stage.innerHTML = "";
-        dots.innerHTML = "";
-        frameCards = list.map(function (f, i) {
+      // Per-card framing auto-cycle, independent per card so a card
+      // carries its own timer as it moves through positions -- only ever
+      // running while that card is the one in cf-p-center (see
+      // setActiveFraming). Same show/tick behaviour as the single-story
+      // version: outgoing row leaves upward, incoming arrives from below.
+      function attachFraming(cardEl, list) {
+        var stage = cardEl.querySelector(".framer-stage");
+        var dots = cardEl.querySelector(".framer-dots");
+        var cards = [], buttons = [], at = 0, timer = null;
+        list.forEach(function (f, i) {
           var el = document.createElement("article");
           el.className = "frame-card" + (i === 0 ? " is-active" : "");
           var b = document.createElement("b"); b.textContent = f.outlet;
           var it = document.createElement("i"); it.textContent = f.headline_angle;
           el.appendChild(b); el.appendChild(it);
           stage.appendChild(el);
-          return el;
+          cards.push(el);
         });
-        frameButtons = frameCards.map(function (_, i) {
-          var b = document.createElement("button");
-          b.type = "button";
-          b.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + frameCards.length);
-          b.setAttribute("aria-current", i === 0 ? "true" : "false");
-          b.addEventListener("click", function () { showFrame(i); restartFraming(); });
-          dots.appendChild(b);
-          return b;
+        cards.forEach(function (_, i) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("aria-label", "Show framing " + (i + 1) + " of " + cards.length);
+          btn.setAttribute("aria-current", i === 0 ? "true" : "false");
+          btn.addEventListener("click", function () { show(i); start(); });
+          dots.appendChild(btn);
+          buttons.push(btn);
         });
-        frameAt = 0;
-      }
-
-      function showFrame(next) {
-        if (next === frameAt || !frameCards[next]) return;
-        frameCards[frameAt].classList.remove("is-active");
-        frameCards[frameAt].classList.add("is-out");
-        var prev = frameAt;
-        // Park the outgoing row back below the stage once it is out of
-        // sight, so it slides up again on its next turn instead of
-        // dropping in from the top.
-        window.setTimeout(function () { frameCards[prev].classList.remove("is-out"); }, 600);
-        frameAt = next;
-        frameCards[frameAt].classList.add("is-active");
-        frameButtons.forEach(function (b, i) { b.setAttribute("aria-current", i === frameAt ? "true" : "false"); });
-      }
-
-      function frameTick() { showFrame((frameAt + 1) % frameCards.length); }
-      function restartFraming() {
-        window.clearInterval(frameTimer);
-        if (!still.matches && frameCards.length > 1) frameTimer = window.setInterval(frameTick, FRAME_STEP);
+        function show(next) {
+          if (next === at || !cards[next]) return;
+          cards[at].classList.remove("is-active");
+          cards[at].classList.add("is-out");
+          var prev = at;
+          window.setTimeout(function () { cards[prev] && cards[prev].classList.remove("is-out"); }, 600);
+          at = next;
+          cards[at].classList.add("is-active");
+          buttons.forEach(function (b, i) { b.setAttribute("aria-current", i === at ? "true" : "false"); });
+        }
+        function tick() { show((at + 1) % cards.length); }
+        function start() {
+          stop();
+          if (!still.matches && cards.length > 1) timer = window.setInterval(tick, FRAME_STEP);
+        }
+        function stop() { window.clearInterval(timer); timer = null; }
+        return { start: start, stop: stop };
       }
 
       function makeFigure(story) {
@@ -113,31 +125,22 @@
         return fig;
       }
 
-      // Builds the three visible slots (or just one, with only one real
-      // story) fresh on every navigation -- simpler and cheap enough at
-      // three DOM nodes than diffing/animating positions in place, and it
-      // is what lets prev/next loop for free: the slot always shows
-      // (center-1, center, center+1) mod stories.length.
-      function render() {
-        window.clearInterval(frameTimer);
-        track.innerHTML = "";
+      function setPos(el, posClass) {
+        POSITIONS.forEach(function (p) { el.classList.remove(p); });
+        el.classList.add(posClass);
+      }
+
+      function storyAt(offsetFromCenter) {
         var n = stories.length;
-        var multi = n > 1;
-        coverflow.classList.toggle("has-multi", multi);
+        return ((centerAt + offsetFromCenter) % n + n) % n;
+      }
 
-        if (multi) {
-          var leftStory = stories[((centerAt - 1) % n + n) % n];
-          var left = document.createElement("div");
-          left.className = "cf-card cf-left";
-          left.appendChild(makeFigure(leftStory));
-          left.addEventListener("click", function () { go(-1); });
-          track.appendChild(left);
-        }
-
-        var story = stories[centerAt];
-        var center = document.createElement("div");
-        center.className = "cf-card cf-center";
-        center.appendChild(makeFigure(story));
+      function makeCard(storyIdx, posClass) {
+        var story = stories[storyIdx];
+        var el = document.createElement("div");
+        el.className = "cf-card";
+        setPos(el, posClass);
+        el.appendChild(makeFigure(story));
         var body = document.createElement("div");
         body.className = "cf-body";
         var head = document.createElement("div");
@@ -151,42 +154,92 @@
         body.appendChild(head);
         body.appendChild(stage);
         body.appendChild(dots);
-        center.appendChild(body);
-        track.appendChild(center);
-        buildFraming(stage, dots, story.framing);
-        restartFraming();
+        el.appendChild(body);
+        el._framing = attachFraming(el, story.framing);
+        // Only the left/right peeks are meaningfully clickable -- farleft/
+        // farright are pointer-events:none (off-canvas) and the centred
+        // card itself has nowhere further to go. Reads the class live at
+        // click time rather than closing over posClass, since this same
+        // element's position class changes as the pool shifts under it.
+        el.addEventListener("click", function () {
+          if (el.classList.contains("cf-p-left")) go(-1);
+          else if (el.classList.contains("cf-p-right")) go(1);
+        });
+        return el;
+      }
 
-        if (multi) {
-          var rightStory = stories[(centerAt + 1) % n];
-          var right = document.createElement("div");
-          right.className = "cf-card cf-right";
-          right.appendChild(makeFigure(rightStory));
-          right.addEventListener("click", function () { go(1); });
-          track.appendChild(right);
+      function pauseFraming() { slots.forEach(function (el) { el._framing.stop(); }); }
+      function resumeFraming() {
+        if (!slots.length) return;
+        var center = slots.length >= 5 ? slots[2] : slots[0];
+        center._framing.start();
+      }
+
+      // Builds the initial pool from scratch -- called once at load and
+      // again the moment real stories replace the fallback. Every
+      // navigation after that goes through go(), which reuses/shifts these
+      // same elements instead of rebuilding.
+      function buildPool() {
+        slots.forEach(function (el) { el._framing.stop(); });
+        track.innerHTML = "";
+        slots = [];
+        var n = stories.length;
+        coverflow.classList.toggle("has-multi", n > 1);
+        if (n <= 1) {
+          var only = makeCard(0, "cf-p-center");
+          slots = [only];
+          track.appendChild(only);
+          only._framing.start();
+          return;
         }
+        for (var i = -2; i <= 2; i++) {
+          var el = makeCard(storyAt(i), POSITIONS[i + 2]);
+          slots.push(el);
+          track.appendChild(el);
+        }
+        resumeFraming();
       }
 
       function go(delta) {
         var n = stories.length;
-        centerAt = ((centerAt + delta) % n + n) % n;
-        render();
+        if (n <= 1) return;
+        if (delta > 0) {
+          var exitingLeft = slots.shift();
+          exitingLeft._framing.stop();
+          exitingLeft.parentNode.removeChild(exitingLeft);
+          slots.forEach(function (el, i) { setPos(el, POSITIONS[i]); });
+          centerAt = (centerAt + 1) % n;
+          var incomingRight = makeCard(storyAt(2), POSITIONS[4]);
+          slots.push(incomingRight);
+          track.appendChild(incomingRight);
+        } else {
+          var exitingRight = slots.pop();
+          exitingRight._framing.stop();
+          exitingRight.parentNode.removeChild(exitingRight);
+          slots.forEach(function (el, i) { setPos(el, POSITIONS[i + 1]); });
+          centerAt = (centerAt - 1 + n) % n;
+          var incomingLeft = makeCard(storyAt(-2), POSITIONS[0]);
+          slots.unshift(incomingLeft);
+          track.insertBefore(incomingLeft, track.firstChild);
+        }
+        resumeFraming();
       }
 
       prevBtn.addEventListener("click", function () { go(-1); });
       nextBtn.addEventListener("click", function () { go(1); });
 
-      render();
+      buildPool();
 
       // Stop the framing auto-cycle while the reader is hovering,
       // keyboard-focused inside, or has the tab in the background -- an
       // unattended interval keeps firing transitions on a page nobody is
       // looking at.
-      coverflow.addEventListener("mouseenter", function () { window.clearInterval(frameTimer); });
-      coverflow.addEventListener("mouseleave", restartFraming);
-      coverflow.addEventListener("focusin", function () { window.clearInterval(frameTimer); });
-      coverflow.addEventListener("focusout", restartFraming);
+      coverflow.addEventListener("mouseenter", pauseFraming);
+      coverflow.addEventListener("mouseleave", resumeFraming);
+      coverflow.addEventListener("focusin", pauseFraming);
+      coverflow.addEventListener("focusout", resumeFraming);
       document.addEventListener("visibilitychange", function () {
-        if (document.hidden) { window.clearInterval(frameTimer); } else { restartFraming(); }
+        if (document.hidden) pauseFraming(); else resumeFraming();
       });
 
       // Replace the fallback with real clusters once they load, and reuse
@@ -210,7 +263,7 @@
           };
         });
         centerAt = 0;
-        render();
+        buildPool();
         renderHowItWorks(stories[0]);
       }).catch(function () {});
     }
