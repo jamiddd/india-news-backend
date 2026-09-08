@@ -5,13 +5,12 @@ actually in the article.
 
 Two different bugs prompted this:
 
-1. Crypto/Science/Education/Health are seeded from broad publisher section
-   feeds (e.g. Indian Express's combined "technology/science" section, HT's
-   general "lifestyle/health" section) that carry plenty of stories with
-   nothing to do with the tab they're filed under — a gadget review isn't
-   science, a diet fad piece isn't exam/policy news. For these four, source
-   category alone is too coarse, so membership also requires the title or
-   snippet to actually mention something on-topic.
+1. Crypto/Education/Health are seeded from broad publisher section feeds
+   (e.g. HT's general "lifestyle/health" section) that carry plenty of
+   stories with nothing to do with the tab they're filed under — a diet fad
+   piece isn't exam/policy news. For these three, source category alone is
+   too coarse, so membership also requires the title or snippet to actually
+   mention something on-topic.
 
 2. Northeast/regional_* tabs occasionally pick up an off-topic wire story
    that happened to run on a regional outlet (e.g. a general-newspaper feed
@@ -33,16 +32,6 @@ CRYPTO_KEYWORDS = [
     "stablecoin", "stablecoins", "binance", "coinbase", "wazirx", "coindcx",
     "dogecoin", "litecoin", "solana", "ripple", "xrp", "satoshi", "cbdc",
     "digital rupee", "crypto exchange", "crypto wallet", "token sale",
-]
-
-SCIENCE_KEYWORDS = [
-    "scientist", "scientists", "research", "researchers", "discovery",
-    "discovered", "nasa", "isro", "spacex", "space station", "telescope",
-    "astronomy", "astronomer", "physics", "quantum", "genome", "dna",
-    "species", "fossil", "fossils", "archaeology", "rocket launch",
-    "satellite launch", "black hole", "exoplanet", "particle", "evolution",
-    "laboratory", "breakthrough", "climate study", "asteroid", "mars rover",
-    "lunar mission", "solar eclipse",
 ]
 
 EDUCATION_KEYWORDS = [
@@ -113,7 +102,6 @@ BUSINESS_KEYWORDS = [
 
 CONTENT_GATED_CATEGORIES: Dict[str, List[str]] = {
     "crypto": CRYPTO_KEYWORDS,
-    "science": SCIENCE_KEYWORDS,
     "education": EDUCATION_KEYWORDS,
     "health": HEALTH_KEYWORDS,
     "business": BUSINESS_KEYWORDS,

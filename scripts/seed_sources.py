@@ -119,14 +119,6 @@ VERIFIED_SOURCES = [
         "region": "national"
     },
     {
-        "name": "PIB Press Releases",
-        "slug": "pib",
-        "feed_url": "https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=2&Regid=3&reg=48",
-        "homepage_url": "https://www.pib.gov.in",
-        "category": "official",
-        "region": "national"
-    },
-    {
         "name": "EastMojo (Northeast)",
         "slug": "eastmojo-ne",
         "feed_url": "https://www.eastmojo.com/feed/",
@@ -465,13 +457,17 @@ VERIFIED_SOURCES = [
         "region": "national"
     },
 
-    # Science
+    # Science: no longer a dedicated category (2026-09-08 — it never had
+    # enough distinct sources to clear the multi-source feed gate, so the
+    # tab was permanently empty). These two ex-science feeds are folded
+    # into "tech" instead; a reader who wants science coverage adds it as
+    # a custom topic search rather than relying on a curated tab.
     {
         "name": "Indian Express Science",
         "slug": "indian-express-science",
         "feed_url": "https://indianexpress.com/section/technology/science/feed/",
         "homepage_url": "https://indianexpress.com/section/technology/science/",
-        "category": "science",
+        "category": "tech",
         "region": "national"
     },
     {
@@ -479,16 +475,9 @@ VERIFIED_SOURCES = [
         "slug": "toi-science",
         "feed_url": "https://timesofindia.indiatimes.com/rssfeeds/-2128672765.cms",
         "homepage_url": "https://timesofindia.indiatimes.com/science",
-        "category": "science",
+        "category": "tech",
         "region": "national"
     },
-    # Note: HT's technology/science feed (hindustantimes.com/feeds/rss/technology/science/rssfeed.xml)
-    # returns HTTP 200 but is a broken stub (title: null, 0 items) — a
-    # status-code false positive, deliberately not seeded. News18 has no
-    # science section feed (returns a JSON 404, not XML). Science is the
-    # thinnest topical category as a result — worth a future gap-fill
-    # search (e.g. a reputable international science outlet) if parity
-    # with the other categories matters.
 
     # Education
     {

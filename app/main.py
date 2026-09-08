@@ -513,7 +513,7 @@ async def add_etag_and_revalidate(request: Request, call_next):
     )
 
 DEFAULT_PREFERENCES = UserPreferences(
-    enabled_categories=["all", "national", "business", "official", "sports", "entertainment", "tech", "politics"]
+    enabled_categories=["all", "national", "business", "sports", "entertainment", "tech", "politics"]
 )
 
 @app.post(f"{settings.API_V1_STR}/auth/login", response_model=UserAuthResponse)
