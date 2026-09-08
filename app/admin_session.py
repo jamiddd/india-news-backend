@@ -92,11 +92,16 @@ STYLE = """
       --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
       --radius:14px;
     }
-    @media (prefers-color-scheme:dark){ :root{
+    @media (prefers-color-scheme:dark){ :root:not([data-theme=light]){
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
       --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
       --accent:#64B5F6; --on-accent:#171717; --danger:#EF5350; --done:#66BB6A;
     }}
+    :root[data-theme=dark]{
+      --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
+      --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
+      --accent:#64B5F6; --on-accent:#171717; --danger:#EF5350; --done:#66BB6A;
+    }
     *{box-sizing:border-box}
     body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.55}
     h1,h2{font-family:var(--serif);font-weight:700;letter-spacing:-0.01em;margin:0}
@@ -114,6 +119,20 @@ STYLE = """
     header.bar .wordmark{font-family:var(--serif);font-weight:700;font-size:16px;color:var(--ink)}
     header.bar .wordmark .stop{color:var(--accent)}
     header.bar .tag{font-size:11px;color:var(--ink-3);border-left:1px solid var(--line);padding-left:10px;margin-left:2px}
+    header.bar .theme-toggle{
+      margin-left:auto;width:32px;height:32px;flex:0 0 auto;border-radius:50%;
+      border:1px solid var(--line);background:var(--surface);color:var(--ink-2);
+      display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+    }
+    header.bar .theme-toggle:hover{border-color:var(--accent);color:var(--ink)}
+    header.bar .theme-toggle svg{width:16px;height:16px}
+    header.bar .theme-toggle .sun{display:none}
+    :root[data-theme=dark] header.bar .theme-toggle .sun{display:block}
+    :root[data-theme=dark] header.bar .theme-toggle .moon{display:none}
+    @media (prefers-color-scheme:dark){
+      :root:not([data-theme=light]) header.bar .theme-toggle .sun{display:block}
+      :root:not([data-theme=light]) header.bar .theme-toggle .moon{display:none}
+    }
     .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
     main{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
     input,textarea{
@@ -181,16 +200,53 @@ def nav(current: str) -> str:
     return f"<nav class=admin-nav>{links}</nav>"
 
 
+# Runs before first paint so a stored preference applies without a flash of
+# the wrong theme; falls back to the OS preference (handled by CSS) when
+# nothing is stored yet.
+THEME_INIT_SCRIPT = (
+    "<script>(function(){try{"
+    "var t=localStorage.getItem('oin_admin_theme');"
+    "if(t)document.documentElement.setAttribute('data-theme',t);"
+    "}catch(e){}})()</script>"
+)
+
+THEME_TOGGLE_SCRIPT = (
+    "<script>(function(){"
+    "var root=document.documentElement;"
+    "var btn=document.getElementById('theme-toggle');"
+    "btn.addEventListener('click',function(){"
+    "var dark=matchMedia('(prefers-color-scheme:dark)').matches;"
+    "var current=root.getAttribute('data-theme')||(dark?'dark':'light');"
+    "var next=current==='dark'?'light':'dark';"
+    "root.setAttribute('data-theme',next);"
+    "try{localStorage.setItem('oin_admin_theme',next);}catch(e){}"
+    "});"
+    "})()</script>"
+)
+
+THEME_TOGGLE_BTN = (
+    "<button id=theme-toggle class=theme-toggle type=button aria-label='Toggle dark mode'>"
+    "<svg class=moon viewBox='0 0 24 24' fill=none stroke=currentColor stroke-width=2 "
+    "stroke-linecap=round stroke-linejoin=round><path d='M21 12.79A9 9 0 1 1 11.21 3 "
+    "7 7 0 0 0 21 12.79Z'/></svg>"
+    "<svg class=sun viewBox='0 0 24 24' fill=none stroke=currentColor stroke-width=2 "
+    "stroke-linecap=round stroke-linejoin=round><circle cx=12 cy=12 r=4/>"
+    "<path d='M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"
+    "M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41'/></svg>"
+    "</button>"
+)
+
+
 def layout(title: str, body: str) -> HTMLResponse:
     header = (
         "<header class=bar><a class=brand href='/'>"
         f"{MARK_SVG}<span class=wordmark>Open Indian News<span class=stop>.</span></span>"
-        "</a><span class=tag>Admin</span></header>"
+        f"</a><span class=tag>Admin</span>{THEME_TOGGLE_BTN}</header>"
     )
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width'>"
-        f"<title>{title}</title><style>{STYLE}</style></head>"
-        f"<body>{header}<div class=wrap><main>{body}</main></div></body></html>")
+        f"<title>{title}</title><style>{STYLE}</style>{THEME_INIT_SCRIPT}</head>"
+        f"<body>{header}<div class=wrap><main>{body}</main></div>{THEME_TOGGLE_SCRIPT}</body></html>")
 
 
 def login_form(title: str, action: str) -> HTMLResponse:
