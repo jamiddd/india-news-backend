@@ -314,6 +314,29 @@ class DailyQuiz(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class QuizBankQuestion(Base):
+    """Admin-curated fallback bank for the Daily Quiz.
+
+    Separate from the hardcoded QUIZ_SETS in services/daily_games.py: that
+    list ships in code and only changes on deploy, while this table lets an
+    admin add/retire questions from /admin/quiz-bank without touching code.
+    generate_quiz() draws from here (round-robin by least-recently-used)
+    when Claude's draft fails validation and there are enough active rows,
+    falling back to QUIZ_SETS only if the bank is too small.
+    """
+    __tablename__ = "quiz_bank_questions"
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(Text, nullable=False)
+    options = Column(JSON, nullable=False)  # exactly 4 strings
+    correct_index = Column(Integer, nullable=False)
+    explanation = Column(Text, nullable=False, default="")
+    category = Column(String(50), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    used_count = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class DailyEditorial(Base):
     __tablename__ = "daily_editorial_features"
     id = Column(Integer, primary_key=True, index=True)

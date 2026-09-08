@@ -163,6 +163,7 @@ NAV = [
     ("/admin", "Daily review"),
     ("/admin/polls", "Polls"),
     ("/admin/quiz", "Quiz"),
+    ("/admin/quiz-bank", "Quiz bank"),
     ("/admin/feedback", "Feedback"),
     ("/admin/reports", "Story reports"),
     ("/admin/donations", "Donations"),

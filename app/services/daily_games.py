@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import DailyQuiz, DailySpellingBee, DailyWordle, DailyWordLadder
+from app.models import DailyQuiz, DailySpellingBee, DailyWordle, DailyWordLadder, utc_now
 from app.services import wordlists
 from app.services.llm_gen import call_claude_json
 
@@ -375,10 +375,48 @@ async def _ai_quiz(puzzle_date: date) -> list[dict] | None:
         return None
 
 
-async def generate_quiz(puzzle_date: date) -> tuple[list[dict], str]:
+async def bank_quiz_questions(db) -> list[dict] | None:
+    """5 questions from the admin-curated bank (app.models.QuizBankQuestion),
+    least-recently-used first so a small bank still rotates instead of
+    repeating the same 5 every time it's drawn on. Returns None if the bank
+    doesn't have 5 active questions yet, so the caller can fall back further.
+    """
+    from sqlalchemy import select, nulls_first
+    from app.models import QuizBankQuestion
+
+    rows = (await db.execute(
+        select(QuizBankQuestion)
+        .where(QuizBankQuestion.is_active.is_(True))
+        .order_by(nulls_first(QuizBankQuestion.last_used_at.asc()))
+        .limit(5)
+    )).scalars().all()
+    if len(rows) < 5:
+        return None
+    now = utc_now()
+    for row in rows:
+        row.used_count += 1
+        row.last_used_at = now
+    await db.commit()
+    return [
+        {
+            "id": index + 1,
+            "question": row.question,
+            "options": list(row.options),
+            "correct_index": row.correct_index,
+            "explanation": row.explanation,
+        }
+        for index, row in enumerate(rows)
+    ]
+
+
+async def generate_quiz(puzzle_date: date, db=None) -> tuple[list[dict], str]:
     questions = await _ai_quiz(puzzle_date)
     if questions is not None:
         return questions, "ai"
+    if db is not None:
+        bank_questions = await bank_quiz_questions(db)
+        if bank_questions is not None:
+            return bank_questions, "bank"
     return fallback_quiz_questions(puzzle_date), "curated"
 
 

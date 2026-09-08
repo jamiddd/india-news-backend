@@ -122,7 +122,7 @@ async def _redraft(db: AsyncSession, day) -> None:
     """Replace today's questions with a fresh Claude draft. Unlimited by
     design — the reviewer regenerates until satisfied, and it costs no
     APIVerve credits."""
-    questions, source = await generate_quiz(day)
+    questions, source = await generate_quiz(day, db)
     quiz = await db.scalar(select(DailyQuiz).where(DailyQuiz.puzzle_date == day))
     if quiz is None:
         quiz = DailyQuiz(puzzle_date=day, questions=questions, source=source,

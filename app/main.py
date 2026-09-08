@@ -115,6 +115,7 @@ from app.services.firebase_auth import (
 )
 from app.poll_admin import router as poll_admin_router
 from app.quiz_admin import router as quiz_admin_router
+from app.quiz_bank_admin import router as quiz_bank_admin_router
 from app.admin_home import router as admin_home_router
 from app.story_reports_admin import router as story_reports_admin_router
 from app.feedback_admin import router as feedback_admin_router
@@ -388,6 +389,7 @@ app = FastAPI(
 )
 app.include_router(poll_admin_router)
 app.include_router(quiz_admin_router)
+app.include_router(quiz_bank_admin_router)
 app.include_router(admin_home_router)
 app.include_router(story_reports_admin_router)
 app.include_router(feedback_admin_router)
