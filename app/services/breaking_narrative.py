@@ -113,7 +113,28 @@ async def call_claude(system_prompt: str, user_content: str) -> dict:
             },
             json={
                 "model": MODEL,
-                "max_tokens": 4000,
+                # Raised from 4000 after a real 90-197 article cluster hit
+                # stop_reason=max_tokens with ZERO text emitted (dry-run
+                # 2026-09-08, clusters 46759/62039). Root cause: claude-
+                # sonnet-5 runs adaptive extended thinking by default —
+                # omitting `thinking` doesn't disable it — so the response
+                # is a `thinking` block first, THEN a `text` block (see
+                # app/services/enrichment.py's parse_json_response and
+                # llm_gen.py's disable_thinking for the same fact hitting
+                # two other call sites). At 197 articles the thinking block
+                # alone exhausted the old 4000-token budget before any text
+                # block began. 16000 total, with effort bounded below,
+                # leaves real room for output after reasoning.
+                "max_tokens": 16000,
+                # Bounded rather than disabled outright — unlike llm_gen.py's
+                # disable_thinking (used for tasks that are pure JSON
+                # extraction), this task genuinely benefits from reasoning:
+                # sorting which of up to ~200 articles are the same fact
+                # reworded vs. a genuinely new one. "medium" caps how much
+                # of the 16000-token budget thinking can claim before output
+                # starts, the same purpose effort serves for crossword's
+                # symmetry check in llm_gen.py.
+                "output_config": {"effort": "medium"},
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": user_content}],
             },
