@@ -125,7 +125,12 @@ STYLE = """
       display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
     }
     header.bar .theme-toggle:hover{border-color:var(--accent);color:var(--ink)}
-    header.bar .theme-toggle svg{width:16px;height:16px}
+    /* stroke set directly here rather than left to inherit currentColor
+       from the button's `color` through button>svg>path — that chain is
+       exactly where the icon was rendering blank. A direct stroke can't
+       fail to resolve the same way. */
+    header.bar .theme-toggle svg{width:16px;height:16px;stroke:var(--ink-2)}
+    header.bar .theme-toggle:hover svg{stroke:var(--ink)}
     /* Which icon is showing is set directly via inline style by JS (see
        applyThemeIcon in THEME_INIT_SCRIPT/THEME_TOGGLE_SCRIPT), not by a
        CSS selector keyed off data-theme — a display:none default here was
@@ -181,11 +186,20 @@ STYLE = """
 
 # The app's own OIN mark (see app/static/home.html), inlined so the admin
 # masthead reads as the same product without a fetched image.
+#
+# No clip-path: Safari has a long-standing bug where clip-path: url(#id)
+# on an inline SVG sized purely by CSS (no width/height attributes, only
+# viewBox) computes an empty clip region, silently dropping everything
+# inside — which is exactly what a screenshot showed happening here (the
+# navy background circle rendered, the cream lettering did not). The
+# letter paths only poke ~1.6% past the circle's edge at their extreme
+# tips (O's left curve, N's right stroke), invisible at the 28-32px this
+# renders at, so dropping the clip changes nothing visible and removes
+# the dependency entirely.
 MARK_SVG = (
     "<svg class=mark viewBox='0 0 512 512' role=img aria-label='Open Indian News'>"
-    "<defs><clipPath id=oin><circle cx=256 cy=256 r=248/></clipPath></defs>"
     "<circle cx=256 cy=256 r=248 fill='#1B3A66'/>"
-    "<g clip-path='url(#oin)' fill='#F4F0E4'>"
+    "<g fill='#F4F0E4'>"
     "<path fill-rule=evenodd d='M95,96 C30,96 0,146 0,256 C0,366 30,416 95,416 C160,416 190,366 190,256 "
     "C190,146 160,96 95,96 Z M95,168 C114,168 120,193 120,256 C120,319 114,344 95,344 C76,344 70,319 70,256 "
     "C70,193 76,168 95,168 Z'/>"
