@@ -125,18 +125,11 @@ STYLE = """
       display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
     }
     header.bar .theme-toggle:hover{border-color:var(--accent);color:var(--ink)}
-    /* stroke set directly here rather than left to inherit currentColor
-       from the button's `color` through button>svg>path — that chain is
-       exactly where the icon was rendering blank. A direct stroke can't
-       fail to resolve the same way. */
-    header.bar .theme-toggle svg{width:16px;height:16px;stroke:var(--ink-2)}
-    header.bar .theme-toggle:hover svg{stroke:var(--ink)}
+    header.bar .theme-toggle span{font-size:15px;line-height:1;color:inherit}
     /* Which icon is showing is set directly via inline style by JS (see
-       applyThemeIcon in THEME_INIT_SCRIPT/THEME_TOGGLE_SCRIPT), not by a
-       CSS selector keyed off data-theme — a display:none default here was
-       silently outliving the CSS override in some cascade, leaving the sun
-       invisible in dark mode. JS setting style.display every time removes
-       the ambiguity; these are just the pre-JS/no-JS fallback. */
+       THEME_TOGGLE_SCRIPT's paint()), not by a CSS selector keyed off
+       data-theme, so it can't fall out of sync with the actual state.
+       This is just the pre-JS/no-JS fallback. */
     header.bar .theme-toggle .sun{display:none}
     .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
     @media (max-width:640px){
@@ -275,15 +268,16 @@ THEME_TOGGLE_SCRIPT = (
     "})()</script>"
 )
 
+# Plain glyphs, not inline SVG: this exact spot has now hit two separate
+# real SVG rendering bugs in Safari (the mark's clip-path clipping its
+# content to nothing, and this button's sun path painting nothing despite
+# every toggle/color mechanism around it provably working). Text picks up
+# `color` directly with none of the fill/stroke/inheritance machinery, so
+# it sidesteps the whole bug class rather than chasing a third cause.
 THEME_TOGGLE_BTN = (
     "<button id=theme-toggle class=theme-toggle type=button aria-label='Toggle dark mode'>"
-    "<svg class=moon viewBox='0 0 24 24' fill=none stroke=currentColor stroke-width=2 "
-    "stroke-linecap=round stroke-linejoin=round><path d='M21 12.79A9 9 0 1 1 11.21 3 "
-    "7 7 0 0 0 21 12.79Z'/></svg>"
-    "<svg class=sun viewBox='0 0 24 24' fill=none stroke=currentColor stroke-width=2 "
-    "stroke-linecap=round stroke-linejoin=round><circle cx=12 cy=12 r=4/>"
-    "<path d='M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"
-    "M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41'/></svg>"
+    "<span class=moon aria-hidden=true>☾</span>"
+    "<span class=sun aria-hidden=true>☀</span>"
     "</button>"
 )
 
