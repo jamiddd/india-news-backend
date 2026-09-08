@@ -198,6 +198,46 @@ class TimelineFeatureDetailOut(BaseModel):
     beats: List[TimelineBeatOut]
 
 
+class BreakingBeatOut(BaseModel):
+    """One entry in a BreakingStoryDetailOut's timeline — see
+    app/services/breaking_narrative.py's SYSTEM_PROMPT for the exact shape
+    the LLM produces. `articles` is that beat's article_ids hydrated into
+    slim article refs server-side, same "no second round-trip" convention
+    as TimelineBeatOut.clusters."""
+    time_label: str
+    label: str
+    narration: str
+    articles: List[ArticleListOut] = []
+
+
+class BreakingStoryOut(BaseModel):
+    """GET /breaking list item — see app/models.py's BreakingStory. Thin:
+    the pinned feed card needs a headline/badge/lead-image, not the full
+    timeline. `cluster` carries that (same StoryClusterListOut the feed
+    already renders), with `title` as the LLM's own headline for the
+    developing story where it differs from the cluster's own."""
+    id: int
+    cluster_id: int
+    title: Optional[str] = None
+    promoted_at: datetime
+    last_beat_at: Optional[datetime] = None
+    beat_count: int
+    cluster: Optional[StoryClusterListOut] = None
+
+
+class BreakingStoriesOut(BaseModel):
+    items: List[BreakingStoryOut]
+
+
+class BreakingStoryDetailOut(BaseModel):
+    id: int
+    cluster_id: int
+    title: Optional[str] = None
+    promoted_at: datetime
+    last_beat_at: Optional[datetime] = None
+    beats: List[BreakingBeatOut]
+
+
 class UserPreferences(BaseModel):
     theme_mode: str = "system"
     accent_color: str = "blue"

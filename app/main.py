@@ -50,12 +50,13 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
     TimelineFeaturesOut, TimelineFeatureListItemOut, TimelineFeatureDetailOut, TimelineBeatOut,
+    BreakingStoriesOut, BreakingStoryOut, BreakingStoryDetailOut, BreakingBeatOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -1998,6 +1999,128 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         context=row.context or "",
         is_editorial_pick=row.is_editorial_pick,
         narrative_generated_at=row.narrative_generated_at,
+        beats=beats_out,
+    )
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/breaking", response_model=BreakingStoriesOut)
+@limiter.limit("60/minute")
+async def list_breaking_stories(request: Request, db: AsyncSession = Depends(get_db)):
+    """The "Breaking" slot — see app/models.py's BreakingStory and the
+    2026-09-08 planning session. At most MAX_ACTIVE_BREAKING (2) rows,
+    populated by app.services.breaking's velocity gate + LLM
+    developing-vs-echo judgement on the poll cycle, not on request. Clients
+    pin this above the ranked feed (For You when logged in, Top Headlines
+    when not) and MUST filter these cluster ids out of the list below so
+    the story never appears twice — see NewsFeedScreen.kt."""
+    cache_key = "breaking:list"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return BreakingStoriesOut.model_validate_json(cached)
+
+    result = await db.execute(
+        select(BreakingStory)
+        .where(BreakingStory.status == "active")
+        .order_by(desc(BreakingStory.promoted_at))
+    )
+    rows = result.scalars().all()
+
+    cluster_ids = [r.cluster_id for r in rows]
+    clusters_by_id: Dict[int, StoryCluster] = {}
+    if cluster_ids:
+        clusters_result = await db.execute(
+            select(StoryCluster)
+            .where(StoryCluster.id.in_(cluster_ids))
+            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        )
+        clusters_by_id = {c.id: c for c in clusters_result.scalars().all()}
+
+    items = [
+        BreakingStoryOut(
+            id=row.id,
+            cluster_id=row.cluster_id,
+            title=row.title,
+            promoted_at=row.promoted_at,
+            last_beat_at=row.last_beat_at,
+            beat_count=len(row.beats or []),
+            cluster=_cluster_to_list_out(clusters_by_id[row.cluster_id])
+            if row.cluster_id in clusters_by_id else None,
+        )
+        for row in rows
+    ]
+    result_out = BreakingStoriesOut(items=items)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/breaking/{{cluster_id}}", response_model=BreakingStoryDetailOut)
+@limiter.limit("60/minute")
+async def get_breaking_story(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
+    """The Breaking screen's live timeline — beats in the order they were
+    generated (append-only, see app.services.breaking's refresh cycle),
+    each with its citing articles hydrated so the client can show a
+    per-beat source reference without a second round-trip. Resolves for
+    'expired' rows too (a reader mid-story shouldn't hit a 404 the moment
+    it ages out) — only GET /breaking (the pinned slot) hides those."""
+    cache_key = f"breaking:{cluster_id}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return BreakingStoryDetailOut.model_validate_json(cached)
+
+    row_result = await db.execute(select(BreakingStory).where(BreakingStory.cluster_id == cluster_id))
+    row = row_result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Breaking story not found")
+
+    raw_beats = row.beats or []
+    all_article_ids = {aid for beat in raw_beats for aid in (beat.get("article_ids") or [])}
+    articles_by_id: Dict[int, Article] = {}
+    if all_article_ids:
+        articles_result = await db.execute(
+            select(Article)
+            .where(Article.id.in_(list(all_article_ids)))
+            .options(selectinload(Article.source))
+        )
+        articles_by_id = {a.id: a for a in articles_result.scalars().all()}
+
+    beats_out = [
+        BreakingBeatOut(
+            time_label=beat.get("time_label", ""),
+            label=beat.get("label", ""),
+            narration=beat.get("narration", ""),
+            articles=[
+                # Built by hand, not ArticleListOut.model_validate — see
+                # _cluster_to_list_out: source_name isn't a plain column,
+                # it comes from art.source.name (selectinload'd above).
+                ArticleListOut(
+                    id=articles_by_id[aid].id,
+                    source_id=articles_by_id[aid].source_id,
+                    source_name=articles_by_id[aid].source.name if articles_by_id[aid].source else "Unknown",
+                    url=articles_by_id[aid].url,
+                    title=articles_by_id[aid].title,
+                    snippet=articles_by_id[aid].snippet,
+                    content=_truncate_content_preview(articles_by_id[aid].content),
+                    published_at=articles_by_id[aid].published_at,
+                    image_url=articles_by_id[aid].image_url,
+                    video_url=articles_by_id[aid].video_url,
+                    video_is_short=articles_by_id[aid].video_is_short,
+                    video_duration_seconds=articles_by_id[aid].video_duration_seconds,
+                )
+                for aid in (beat.get("article_ids") or [])
+                if aid in articles_by_id
+            ],
+        )
+        for beat in raw_beats
+    ]
+
+    result_out = BreakingStoryDetailOut(
+        id=row.id,
+        cluster_id=row.cluster_id,
+        title=row.title,
+        promoted_at=row.promoted_at,
+        last_beat_at=row.last_beat_at,
         beats=beats_out,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
