@@ -96,6 +96,26 @@ STYLE = """
 """
 
 
+NAV = [
+    ("/admin", "Daily review"),
+    ("/admin/polls", "Polls"),
+    ("/admin/quiz", "Quiz"),
+    ("/admin/feedback", "Feedback"),
+    ("/admin/reports", "Story reports"),
+    ("/admin/donations", "Donations"),
+    ("/admin/users", "Users"),
+]
+
+
+def nav(current: str) -> str:
+    """The cross-page nav bar. `current` is the href of the page rendering
+    it, so that page shows as plain text rather than a link to itself."""
+    links = " · ".join(
+        label if href == current else f"<a href='{href}'>{label}</a>"
+        for href, label in NAV)
+    return f"<p class=meta>{links}</p>"
+
+
 def layout(title: str, body: str) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width'>"
