@@ -126,17 +126,18 @@ STYLE = """
     }
     header.bar .theme-toggle:hover{border-color:var(--accent);color:var(--ink)}
     header.bar .theme-toggle svg{width:16px;height:16px}
-    /* The init script always stamps data-theme explicitly (never leaves it to
-       the prefers-color-scheme media query alone), so a single attribute
-       selector is the only thing these two icons need to key off. */
+    /* Which icon is showing is set directly via inline style by JS (see
+       applyThemeIcon in THEME_INIT_SCRIPT/THEME_TOGGLE_SCRIPT), not by a
+       CSS selector keyed off data-theme — a display:none default here was
+       silently outliving the CSS override in some cascade, leaving the sun
+       invisible in dark mode. JS setting style.display every time removes
+       the ambiguity; these are just the pre-JS/no-JS fallback. */
     header.bar .theme-toggle .sun{display:none}
-    :root[data-theme=dark] header.bar .theme-toggle .sun{display:block}
-    :root[data-theme=dark] header.bar .theme-toggle .moon{display:none}
     .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
     @media (max-width:640px){
       header.bar .mark{width:28px;height:28px}
-      .wrap{padding:16px 12px 40px}
-      main{padding:16px;border-radius:10px}
+      .wrap{padding:0}
+      main{padding:16px;border-radius:0;border-left:none;border-right:none;border-bottom:none}
       table{display:block;overflow-x:auto;white-space:nowrap;max-width:100%;-webkit-overflow-scrolling:touch}
     }
     main{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
@@ -228,16 +229,26 @@ THEME_INIT_SCRIPT = (
     "}catch(e){}})()</script>"
 )
 
+# The moon/sun swap is done here in JS, not via a CSS selector keyed off
+# data-theme: a CSS-only display:none/block pairing left the sun invisible
+# in dark mode in practice, so this sets style.display on both icons
+# directly, on load and on every click, removing any cascade ambiguity.
 THEME_TOGGLE_SCRIPT = (
     "<script>(function(){"
     "var root=document.documentElement;"
     "var btn=document.getElementById('theme-toggle');"
+    "var moon=btn.querySelector('.moon'),sun=btn.querySelector('.sun');"
+    "function paint(){"
+    "var dark=root.getAttribute('data-theme')==='dark';"
+    "moon.style.display=dark?'none':'block';"
+    "sun.style.display=dark?'block':'none';"
+    "}"
+    "paint();"
     "btn.addEventListener('click',function(){"
-    "var dark=matchMedia('(prefers-color-scheme:dark)').matches;"
-    "var current=root.getAttribute('data-theme')||(dark?'dark':'light');"
-    "var next=current==='dark'?'light':'dark';"
+    "var next=root.getAttribute('data-theme')==='dark'?'light':'dark';"
     "root.setAttribute('data-theme',next);"
     "try{localStorage.setItem('oin_admin_theme',next);}catch(e){}"
+    "paint();"
     "});"
     "})()</script>"
 )
@@ -263,6 +274,10 @@ def layout(title: str, body: str) -> HTMLResponse:
     )
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<link rel=icon href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' "
+        f"viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/>"
+        f"<text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' "
+        f"fill='%23fff' text-anchor='middle'>O</text></svg>\">"
         f"<title>{title}</title><style>{STYLE}</style>{THEME_INIT_SCRIPT}</head>"
         f"<body>{header}<div class=wrap><main>{body}</main></div>{THEME_TOGGLE_SCRIPT}</body></html>")
 
