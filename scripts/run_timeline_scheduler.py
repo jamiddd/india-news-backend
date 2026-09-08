@@ -1,13 +1,14 @@
 """Daemon loop for the Timeline/Context tab's generation cycle — same
 sleep-until-next-run shape as run_poll_scheduler.py/run_crossword_scheduler.py,
 not OS crontab (this repo doesn't use one; see docker-compose.prod.yml's
-per-job scheduler services). Runs scripts/build_story_timelines.run() three
-times a day at fixed Asia/Kolkata times, matching the "2-3x/day" cadence
-discussed for this feature — enough for a genuinely new development to
-show up within a few hours, not so often that most cycles just burn LLM
-calls re-confirming nothing changed (build_story_timelines already skips
-the LLM call for an unchanged chain, but still does the DB read/selection
-work every run).
+per-job scheduler services). Runs scripts/build_story_timelines.run() once a
+day at a fixed Asia/Kolkata time.
+
+Was 3x/day (08:00/14:00/20:00 IST) until 2026-09-08: once the picks
+themselves are curated (see app/admin_timelines.py), a story holding steady
+for a full day reads as a stable "story so far", not staleness — refreshing
+it mid-day just to re-run a chain that hasn't moved was the cost, not the
+benefit, of the higher cadence.
 
 Usage:
     python3 scripts/run_timeline_scheduler.py               # normal daemon loop
@@ -31,10 +32,10 @@ from scripts.build_story_timelines import run as run_generation  # noqa: E402
 
 IST = ZoneInfo("Asia/Kolkata")
 
-# 08:00 / 14:00 / 20:00 IST — spread across the day rather than clustered,
-# so a development in any news cycle (morning/afternoon/evening) is picked
-# up within a few hours rather than waiting for one overnight batch.
-RUN_TIMES = [time(8, 0), time(14, 0), time(20, 0)]
+# 06:00 IST — once a day, before the morning news cycle starts, so readers
+# get a fresh "story so far" first thing and it holds steady the rest of the
+# day rather than shifting under them 2-3 times.
+RUN_TIMES = [time(6, 0)]
 
 
 async def run_once() -> None:

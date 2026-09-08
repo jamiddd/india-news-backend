@@ -1,6 +1,6 @@
-"""Timeline/Context tab's production generator — run 2-3x/day via cron (see
-backend-deploy-workflow: same manual-SSH pattern as any other scheduled
-script, no in-process scheduler here). Reads story_chains.py's chain
+"""Timeline/Context tab's production generator — run once a day at 06:00 IST
+by scripts/run_timeline_scheduler.py's in-process daemon (see that module's
+docstring for the 2026-09-08 change from 3x/day). Reads story_chains.py's chain
 assignment and fills up to 5 slots: editorial picks from
 story_timeline_features first, then an algorithmic length x recency
 fallback scan for the rest — calling the validated LLM narrative prompt
