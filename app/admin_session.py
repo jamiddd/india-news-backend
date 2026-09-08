@@ -234,13 +234,21 @@ def nav(current: str) -> str:
 # first visit) applies without a flash of the wrong theme. Always writes the
 # attribute explicitly rather than leaving the OS-preference case to the
 # prefers-color-scheme media query alone, so the toggle button's icon swap
-# (keyed off [data-theme=dark] only) can't fall out of sync with it.
+# (keyed off the data-theme attribute only) can't fall out of sync with it.
+#
+# The localStorage read is try/caught on its own, separately from the
+# setAttribute call: Safari Private Browsing throws on localStorage access,
+# and the two used to share one try block, so the throw was also skipping
+# setAttribute — data-theme never got set, the page still looked dark via
+# the plain prefers-color-scheme CSS, but the toggle button (which only
+# checks the attribute) always believed it was in light mode and rendered
+# the moon regardless of actual theme, hiding the sun.
 THEME_INIT_SCRIPT = (
-    "<script>(function(){try{"
-    "var t=localStorage.getItem('oin_admin_theme')"
-    "||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');"
+    "<script>(function(){"
+    "var stored=null;try{stored=localStorage.getItem('oin_admin_theme');}catch(e){}"
+    "var t=stored||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');"
     "document.documentElement.setAttribute('data-theme',t);"
-    "}catch(e){}})()</script>"
+    "})()</script>"
 )
 
 # The moon/sun swap is done here in JS, not via a CSS selector keyed off
