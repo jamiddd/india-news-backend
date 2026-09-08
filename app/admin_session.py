@@ -108,6 +108,8 @@ STYLE = """
       background:var(--bg);border-bottom:1px solid var(--line);
       padding:14px 24px;display:flex;align-items:center;gap:10px;
     }
+    header.bar .brand{display:flex;align-items:center;gap:10px}
+    header.bar .brand:hover{text-decoration:none}
     header.bar .mark{width:22px;height:22px;flex:0 0 auto;border-radius:50%}
     header.bar .wordmark{font-family:var(--serif);font-weight:700;font-size:16px;color:var(--ink)}
     header.bar .wordmark .stop{color:var(--accent)}
@@ -180,9 +182,9 @@ def nav(current: str) -> str:
 
 def layout(title: str, body: str) -> HTMLResponse:
     header = (
-        "<header class=bar>"
+        "<header class=bar><a class=brand href='/'>"
         f"{MARK_SVG}<span class=wordmark>Open Indian News<span class=stop>.</span></span>"
-        "<span class=tag>Admin</span></header>"
+        "</a><span class=tag>Admin</span></header>"
     )
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width'>"
