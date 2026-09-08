@@ -93,6 +93,8 @@ STYLE = """
     label.opt input[type=radio]{width:auto;margin:0}
     .task{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:12px}
     .task h2{margin:0 0 4px;font-size:1.05rem}
+    .report{border-bottom:1px solid #eee;padding:16px 0}
+    .report:last-child{border-bottom:none}
 """
 
 
