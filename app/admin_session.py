@@ -115,7 +115,7 @@ STYLE = """
     }
     header.bar .brand{display:flex;align-items:center;gap:10px}
     header.bar .brand:hover{text-decoration:none}
-    header.bar .mark{width:22px;height:22px;flex:0 0 auto;border-radius:50%}
+    header.bar .mark{width:32px;height:32px;flex:0 0 auto;border-radius:50%;display:block}
     header.bar .wordmark{font-family:var(--serif);font-weight:700;font-size:16px;color:var(--ink)}
     header.bar .wordmark .stop{color:var(--accent)}
     header.bar .tag{font-size:11px;color:var(--ink-3);border-left:1px solid var(--line);padding-left:10px;margin-left:2px}
@@ -126,14 +126,19 @@ STYLE = """
     }
     header.bar .theme-toggle:hover{border-color:var(--accent);color:var(--ink)}
     header.bar .theme-toggle svg{width:16px;height:16px}
+    /* The init script always stamps data-theme explicitly (never leaves it to
+       the prefers-color-scheme media query alone), so a single attribute
+       selector is the only thing these two icons need to key off. */
     header.bar .theme-toggle .sun{display:none}
     :root[data-theme=dark] header.bar .theme-toggle .sun{display:block}
     :root[data-theme=dark] header.bar .theme-toggle .moon{display:none}
-    @media (prefers-color-scheme:dark){
-      :root:not([data-theme=light]) header.bar .theme-toggle .sun{display:block}
-      :root:not([data-theme=light]) header.bar .theme-toggle .moon{display:none}
-    }
     .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+    @media (max-width:640px){
+      header.bar .mark{width:28px;height:28px}
+      .wrap{padding:16px 12px 40px}
+      main{padding:16px;border-radius:10px}
+      table{display:block;overflow-x:auto;white-space:nowrap;max-width:100%;-webkit-overflow-scrolling:touch}
+    }
     main{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
     input,textarea{
       box-sizing:border-box;width:100%;padding:10px 12px;margin:5px 0 12px;
@@ -158,9 +163,19 @@ STYLE = """
     table{border-collapse:collapse}
     th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:.94em}
     th{color:var(--ink-3);font-weight:600;font-size:.82em;text-transform:uppercase;letter-spacing:.04em}
-    nav.admin-nav{display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 22px;font-size:.92em}
+    nav.admin-nav{
+      display:flex;flex-wrap:nowrap;gap:2px;margin:2px 0 22px;font-size:.92em;
+      overflow-x:auto;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--line);
+      scrollbar-width:none;
+    }
+    nav.admin-nav::-webkit-scrollbar{display:none}
+    nav.admin-nav a,nav.admin-nav b{
+      flex:0 0 auto;white-space:nowrap;padding:8px 14px;border-bottom:2px solid transparent;
+      margin-bottom:-1px;
+    }
     nav.admin-nav a{color:var(--ink-2)}
-    nav.admin-nav b{color:var(--ink);border-bottom:2px solid var(--accent);padding-bottom:2px}
+    nav.admin-nav a:hover{color:var(--ink);text-decoration:none}
+    nav.admin-nav b{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
 """
 
 # The app's own OIN mark (see app/static/home.html), inlined so the admin
@@ -200,13 +215,16 @@ def nav(current: str) -> str:
     return f"<nav class=admin-nav>{links}</nav>"
 
 
-# Runs before first paint so a stored preference applies without a flash of
-# the wrong theme; falls back to the OS preference (handled by CSS) when
-# nothing is stored yet.
+# Runs before first paint so a stored preference (or the OS preference, on a
+# first visit) applies without a flash of the wrong theme. Always writes the
+# attribute explicitly rather than leaving the OS-preference case to the
+# prefers-color-scheme media query alone, so the toggle button's icon swap
+# (keyed off [data-theme=dark] only) can't fall out of sync with it.
 THEME_INIT_SCRIPT = (
     "<script>(function(){try{"
-    "var t=localStorage.getItem('oin_admin_theme');"
-    "if(t)document.documentElement.setAttribute('data-theme',t);"
+    "var t=localStorage.getItem('oin_admin_theme')"
+    "||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');"
+    "document.documentElement.setAttribute('data-theme',t);"
     "}catch(e){}})()</script>"
 )
 
@@ -244,7 +262,7 @@ def layout(title: str, body: str) -> HTMLResponse:
         f"</a><span class=tag>Admin</span>{THEME_TOGGLE_BTN}</header>"
     )
     return HTMLResponse(
-        f"<!doctype html><html><head><meta name=viewport content='width=device-width'>"
+        f"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{title}</title><style>{STYLE}</style>{THEME_INIT_SCRIPT}</head>"
         f"<body>{header}<div class=wrap><main>{body}</main></div>{THEME_TOGGLE_SCRIPT}</body></html>")
 
