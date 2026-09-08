@@ -15,6 +15,7 @@ from app.config import settings
 from app.models import Source, Article, StoryCluster, ClusterToken, EntityStat, utc_now
 from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
+from app.services.breaking import process_breaking_cycle
 from app.services.explore_bandit import recompute_explore_promotions
 from app.services.ranking import UPDATE_HEADLINE_SCORES_SQL
 from app.services.dedup import (
@@ -853,6 +854,15 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         # network calls, and must never be able to roll back ingestion.
         if crossed_to_multi_source:
             await _enrich_new_crossings(len(crossed_to_multi_source))
+
+        # Breaking-slot cycle (piggybacking this poll rather than a separate
+        # scheduler — see the 2026-09-08 planning session): expires stale
+        # promotions, judges any cluster that just crossed the velocity
+        # gate, and refreshes active ones with enough new coverage. Same
+        # posture as the enrichment call above — its own session, own paid
+        # LLM calls, deliberately after this cycle's commit so it can never
+        # roll back ingestion.
+        await process_breaking_cycle()
 
         return total_new
     finally:

@@ -896,3 +896,70 @@ class StoryTimelineFeature(Base):
     narrative_generated_at = Column(DateTime(timezone=True), nullable=True)
     picked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class BreakingStory(Base):
+    """The "Breaking" slot — a pinned, badged card above the ranked feed for
+    stories that crossed BREAKING_MIN_SOURCES distinct outlets within
+    BREAKING_WINDOW_HOURS of becoming multi-source (see
+    app.services.breaking) AND whose articles an LLM pass judged to be
+    genuinely developing, not N outlets echoing one fact. See the 2026-09-08
+    planning session and scripts/check_breaking_candidates.py, which
+    validated the trigger against real data before this was built.
+
+    Deliberately its own table, not columns on StoryCluster: this is a
+    short-lived lifecycle record (promoted, refreshed a few times, expired
+    within days) layered on top of a cluster that itself has no idea it was
+    ever "breaking" — same reasoning as StoryTimelineFeature being separate
+    from StoryCluster.
+
+    "Breaking" means the acute phase, not "still in the news" — a story that
+    keeps producing genuine developments for days (see cluster 46759, the
+    Nepal flood, still filing on day 6) is correctly demoted to `expired`
+    once EXPIRE_ABSOLUTE_HOURS has passed. What happens after that is the
+    ordinary story/related-stories experience, not this one.
+    """
+    __tablename__ = "breaking_stories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # 'active' occupies one of the (max 2) live slots. 'expired' means it was
+    # active and aged out (stale beats or the absolute cap) — terminal,
+    # never reactivated even if the same cluster somehow re-qualifies.
+    # 'rejected' means the LLM pass judged the articles NOT genuinely
+    # developing (an echo cluster) — also terminal, so the detector never
+    # re-asks about the same cluster every poll cycle. See
+    # app.services.breaking.detect_breaking_candidates, which excludes any
+    # cluster already present here in any status.
+    status = Column(String(16), nullable=False, default="active", index=True)
+
+    # LLM-authored headline for the developing story, distinct from
+    # StoryCluster.headline (which stays whatever the representative
+    # article's title is). Null when status='rejected' — nothing to show.
+    title = Column(Text, nullable=True)
+
+    # [{time_label, label, narration, article_ids}], append-only across
+    # refreshes — see app.services.breaking_narrative. Null when
+    # status='rejected'.
+    beats = Column(JSON(none_as_null=True), nullable=True)
+
+    promoted_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    # Timestamp of the newest article covered by the current `beats`, i.e.
+    # "last time this story genuinely moved" — NOT last_generated_at, which
+    # only says when the LLM was last asked. Drives the 6h stale-beat expiry.
+    last_beat_at = Column(DateTime(timezone=True), nullable=True)
+    last_generated_at = Column(DateTime(timezone=True), nullable=True)
+    # distinct_source_count at the last successful generation — the
+    # append-only refresh in app.services.breaking fires again once
+    # story_clusters.distinct_source_count has grown by
+    # BREAKING_REFRESH_SOURCE_DELTA past this, rather than on a fixed
+    # timer, so cost tracks actual new coverage instead of clock time.
+    last_generated_source_count = Column(Integer, nullable=True)
+
+    # Kept for offline threshold tuning (see the gate-volume report in
+    # scripts/check_breaking_candidates.py) — never read at request time.
+    sources_at_promotion = Column(Integer, nullable=False)
+    hours_to_threshold = Column(Float, nullable=False)
+
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
