@@ -274,6 +274,9 @@ def layout(title: str, body: str) -> HTMLResponse:
     )
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<meta name=color-scheme content='light dark'>"
+        f"<meta name=theme-color content='#ffffff' media='(prefers-color-scheme: light)'>"
+        f"<meta name=theme-color content='#121212' media='(prefers-color-scheme: dark)'>"
         f"<link rel=icon href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' "
         f"viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/>"
         f"<text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' "
