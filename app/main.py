@@ -119,6 +119,8 @@ from app.quiz_admin import router as quiz_admin_router
 from app.admin_home import router as admin_home_router
 from app.story_reports_admin import router as story_reports_admin_router
 from app.feedback_admin import router as feedback_admin_router
+from app.admin_donations import router as admin_donations_router
+from app.admin_users import router as admin_users_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -389,6 +391,8 @@ app.include_router(quiz_admin_router)
 app.include_router(admin_home_router)
 app.include_router(story_reports_admin_router)
 app.include_router(feedback_admin_router)
+app.include_router(admin_donations_router)
+app.include_router(admin_users_router)
 
 # Static assets for the landing page (device screenshots). Mounted rather
 # than inlined as data: URIs because the pages are served through the
@@ -2322,29 +2326,6 @@ def _require_admin(request: Request) -> None:
     if session_csrf(request) is None:
         raise HTTPException(status_code=403, detail="Admin sign-in required")
 
-
-@app.get("/admin/donations")
-async def admin_donations(request: Request, db: AsyncSession = Depends(get_db)):
-    """Donation totals, all-time and last 30 days."""
-    _require_admin(request)
-    cutoff = utc_now() - timedelta(days=30)
-
-    async def totals(*where):
-        result = await db.execute(
-            select(func.count(Donation.id), func.coalesce(func.sum(Donation.amount_paise), 0))
-            .where(Donation.status == "captured", *where)
-        )
-        count, paise = result.one()
-        return {"count": count, "total_inr": round((paise or 0) / 100, 2)}
-
-    return {
-        "all_time": await totals(),
-        "last_30_days": await totals(Donation.created_at >= cutoff),
-        "distinct_donors": (await db.execute(
-            select(func.count(func.distinct(Donation.user_id)))
-            .where(Donation.status == "captured", Donation.user_id.isnot(None))
-        )).scalar_one(),
-    }
 
 
 @app.get("/admin/engagement")

@@ -26,6 +26,7 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
+    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -92,8 +93,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     today = datetime.now(IST).date()
     quiz = await db.scalar(select(DailyQuiz).where(DailyQuiz.puzzle_date == today))
     if not quiz:
-        return layout(TITLE, 
-            f"<h1>Daily Quiz</h1><p>No quiz exists for {today}.</p>"
+        return layout(TITLE,
+            f"<h1>Daily Quiz</h1>{nav('/admin/quiz')}<p>No quiz exists for {today}.</p>"
             f"<form method=post action='/admin/quiz/generate'><input type=hidden name=csrf value='{csrf}'>"
             f"<button>Generate draft</button></form>")
 
@@ -109,8 +110,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     served = "" if quiz.status == "approved" else (
         "<p class=meta>Readers are currently being served the curated fallback set, "
         "not this draft.</p>")
-    return layout(TITLE, 
-        f"<h1>Daily Quiz — {quiz.puzzle_date}</h1>"
+    return layout(TITLE,
+        f"<h1>Daily Quiz — {quiz.puzzle_date}</h1>{nav('/admin/quiz')}"
         f"<p class=meta>Status: {quiz.status} · Source: {quiz.source}</p>{served}"
         f"<form method=post action='/admin/quiz/update'>"
         f"<input type=hidden name=csrf value='{csrf}'>"

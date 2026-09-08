@@ -20,6 +20,7 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
+    nav,
     session_csrf,
     set_session_cookie,
 )
@@ -112,7 +113,7 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
         f"<a href='/admin/feedback'>Open feedback →</a></div>")
 
     return layout(TITLE, (
-        f"<h1>Daily Review — {today}</h1><p class=meta>{heading}</p>"
+        f"<h1>Daily Review — {today}</h1>{nav('/admin')}<p class=meta>{heading}</p>"
         f"{_task_card('Poll', tasks['poll'])}"
         f"{_task_card('Quiz', tasks['quiz'])}"
         f"{feedback_card}"))

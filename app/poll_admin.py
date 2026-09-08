@@ -17,6 +17,7 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
+    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -50,14 +51,14 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     if not csrf: return RedirectResponse("/admin/polls/login", status_code=303)
     poll = await db.scalar(select(DailyPoll).where(DailyPoll.poll_date == datetime.now(IST).date()))
     if not poll:
-        return layout(TITLE, f"<h1>Daily Poll</h1><p>No draft exists for today.</p><form method=post action='/admin/polls/generate'><input type=hidden name=csrf value='{csrf}'><button>Generate draft</button></form>")
+        return layout(TITLE, f"<h1>Daily Poll</h1>{nav('/admin/polls')}<p>No draft exists for today.</p><form method=post action='/admin/polls/generate'><input type=hidden name=csrf value='{csrf}'><button>Generate draft</button></form>")
     options = (await db.execute(select(PollOption).where(PollOption.poll_id == poll.id).order_by(PollOption.position))).scalars().all()
     option_inputs = "".join(f"<label>Option {i+1}<input name=option value='{html.escape(option.text, quote=True)}'></label>" for i, option in enumerate(options))
     source_text = html.escape(poll.source_headline or "Evergreen fallback")
     source = f"<p><b>Source:</b> <a target=_blank href='/api/v1/clusters/{poll.source_cluster_id}'>{source_text}</a></p>" if poll.source_cluster_id else f"<p><b>Source:</b> {source_text}</p>"
     editable = poll.status == "draft" and datetime.now(IST) < poll.publish_at
     controls = "<button name=action value=approve>Approve for 9:00 AM</button><button name=action value=regenerate>Regenerate</button><button name=action value=reject>Reject and use fallback</button>" if editable else "<p>This poll can no longer be edited.</p>"
-    return layout(TITLE, f"<h1>Daily Poll — {poll.poll_date}</h1><p class=meta>Status: {poll.status} · Publishes 9:00 AM IST</p>{source}<form method=post action='/admin/polls/update'><input type=hidden name=csrf value='{csrf}'><input type=hidden name=poll_id value='{poll.id}'><label>Question<textarea name=question required>{html.escape(poll.question)}</textarea></label><label>Context<textarea name=context required>{html.escape(poll.context)}</textarea></label>{option_inputs}{controls}</form>")
+    return layout(TITLE, f"<h1>Daily Poll — {poll.poll_date}</h1>{nav('/admin/polls')}<p class=meta>Status: {poll.status} · Publishes 9:00 AM IST</p>{source}<form method=post action='/admin/polls/update'><input type=hidden name=csrf value='{csrf}'><input type=hidden name=poll_id value='{poll.id}'><label>Question<textarea name=question required>{html.escape(poll.question)}</textarea></label><label>Context<textarea name=context required>{html.escape(poll.context)}</textarea></label>{option_inputs}{controls}</form>")
 
 
 def _error_page(csrf: str, message: str) -> HTMLResponse:
