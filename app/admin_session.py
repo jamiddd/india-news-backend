@@ -211,6 +211,7 @@ NAV = [
     ("/admin/donations", "Donations"),
     ("/admin/users", "Users"),
     ("/admin/timelines", "Timelines"),
+    ("/admin/breaking", "Breaking review"),
 ]
 
 

@@ -123,6 +123,7 @@ from app.feedback_admin import router as feedback_admin_router
 from app.admin_donations import router as admin_donations_router
 from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
+from app.admin_breaking import router as admin_breaking_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -397,6 +398,7 @@ app.include_router(feedback_admin_router)
 app.include_router(admin_donations_router)
 app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
+app.include_router(admin_breaking_router)
 
 # Static assets for the landing page (device screenshots). Mounted rather
 # than inlined as data: URIs because the pages are served through the

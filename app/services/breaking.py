@@ -1,7 +1,17 @@
 """Detection + lifecycle for the "Breaking" slot — see app/models.py's
-BreakingStory docstring and the 2026-09-08 planning session.
+BreakingStory docstring and backend/docs/breaking-human-review-plan.md.
 
-Two entry points, both called once per poll cycle from
+As of the human-review redesign, NO function in this module makes an LLM
+call. detect_breaking_candidates and find_refresh_candidates are pure SQL:
+they raise pending_review / pending-refresh rows for a human to act on via
+app.admin_breaking, which is where judge_and_extract_beats actually runs
+(on approve only). This module's job is purely "who's waiting on a human
+right now" plus the non-LLM lifecycle (expiry) — same posture
+poller.py's _enrich_new_crossings uses to keep paid calls out of the
+ingestion transaction, except here the paid call moved out of the
+automated cycle entirely, not just into its own committed-then-called step.
+
+Entry points, all called once per poll cycle from
 app.services.poller._poll_all_sources_locked (piggybacking that cycle
 rather than a separate scheduler, since detection only needs to be as
 fresh as distinct_source_count/became_multi_source_at, which that cycle
@@ -10,11 +20,16 @@ already maintains):
 - expire_stale_breaking(session): ages `active` rows out. Run FIRST each
   cycle so an expiry frees a slot before detect_breaking_candidates counts
   how many are already occupied.
+- expire_unreviewed_candidates(session): times out `pending_review` rows
+  nobody acted on within EXPIRE_REVIEW_HOURS — a missed real story degrades
+  to "no badge", never to a stale "pending" one sitting forever. Run
+  alongside expire_stale_breaking, before the free-slot count.
 - detect_breaking_candidates(session): finds newly-qualifying clusters and
-  returns them for the caller to run the LLM pass over (kept OUT of this
-  module — see app.services.breaking_narrative — so this stays pure SQL/DB
-  and the paid call stays in its own committed-then-called step, same
-  split as poller.py's _enrich_new_crossings).
+  writes a pending_review row for each — no LLM call. A human decides via
+  app.admin_breaking.
+- find_refresh_candidates(session): finds active stories whose cluster
+  gained enough sources since the last REVIEW (not generation) and writes
+  a breaking_refresh_reviews row — no LLM call.
 
 Unlike scripts/check_breaking_candidates.py, which reconstructs history
 from articles because distinct_source_count is a live counter with no
@@ -52,9 +67,17 @@ MAX_ACTIVE_BREAKING = 2
 EXPIRE_STALE_BEAT_HOURS = 6
 EXPIRE_ABSOLUTE_HOURS = 36
 
-# Refresh fires again once distinct_source_count has grown this much past
-# the last successful generation, rather than on a fixed timer — cost
-# tracks actual new coverage, not clock time. See app.services.breaking_narrative.
+# How long a pending_review candidate waits on a human before it's treated
+# as a miss rather than left occupying a slot indefinitely. Long enough for
+# a push notification to actually be seen; short enough that a genuinely
+# breaking story doesn't go unbadged all day. See
+# backend/docs/breaking-human-review-plan.md.
+EXPIRE_REVIEW_HOURS = 3
+
+# Refresh review fires again once distinct_source_count has grown this much
+# past the last REVIEW decision (approve or reject), rather than on a fixed
+# timer — cost tracks actual new coverage, not clock time. See
+# app.services.breaking_narrative and BreakingStory.last_reviewed_source_count.
 REFRESH_SOURCE_DELTA = 5
 
 
@@ -95,19 +118,46 @@ async def expire_stale_breaking(session: AsyncSession) -> int:
     return len(expired_ids)
 
 
+async def expire_unreviewed_candidates(session: AsyncSession) -> int:
+    """Flips `pending_review` -> `rejected` for candidates nobody reviewed
+    within EXPIRE_REVIEW_HOURS. Terminal, same as an LLM-judged reject — the
+    detector never re-asks about this cluster (see detect_breaking_candidates'
+    NOT EXISTS check). Run before detect_breaking_candidates so a timed-out
+    row frees its slot in the same cycle it expires, same ordering reason as
+    expire_stale_breaking.
+    """
+    result = await session.execute(
+        text(
+            """
+            UPDATE breaking_stories
+            SET status = 'rejected', reviewed_at = now(), updated_at = now()
+            WHERE status = 'pending_review'
+              AND now() - promoted_at > make_interval(hours => :review_hours)
+            RETURNING id
+            """
+        ),
+        {"review_hours": EXPIRE_REVIEW_HOURS},
+    )
+    expired_ids = [row[0] for row in result.fetchall()]
+    if expired_ids:
+        logger.info(f"[Breaking] {len(expired_ids)} candidate(s) timed out unreviewed: {expired_ids}")
+    return len(expired_ids)
+
+
 async def detect_breaking_candidates(session: AsyncSession) -> List[BreakingCandidate]:
     """Returns clusters that just crossed the velocity gate and have no
     breaking_stories row yet (in ANY status — 'rejected' is terminal, see
     BreakingStory.status), capped to however many slots are actually free.
+    'pending_review' counts as occupied here, same as 'active', so a
+    candidate already waiting on a human isn't double-counted against the
+    free-slot budget.
 
-    Caller (poller.py) is responsible for running the LLM developing-vs-echo
-    pass on each candidate and writing the resulting breaking_stories row
-    (status='active' or 'rejected') — kept out of this function so a slow/
-    failed LLM call can never block or roll back the poll cycle's own
-    transaction, same split as _enrich_new_crossings.
+    Caller (poller.py) writes a pending_review row for each and notifies the
+    admin — no LLM call happens in this module. See app.admin_breaking for
+    where a human's approve/reject actually runs judge_and_extract_beats.
     """
     active_count_result = await session.execute(
-        text("SELECT count(*) FROM breaking_stories WHERE status = 'active'")
+        text("SELECT count(*) FROM breaking_stories WHERE status IN ('active', 'pending_review')")
     )
     active_count = active_count_result.scalar_one()
     free_slots = MAX_ACTIVE_BREAKING - active_count
@@ -141,9 +191,14 @@ async def detect_breaking_candidates(session: AsyncSession) -> List[BreakingCand
 
 async def find_refresh_candidates(session: AsyncSession) -> List[int]:
     """Active breaking_stories whose cluster has gained >= REFRESH_SOURCE_DELTA
-    distinct sources since the last successful generation — the append-only
-    refresh trigger. Returns cluster_ids; caller re-runs the LLM pass and
-    extends `beats`."""
+    distinct sources since the last REVIEW decision (last_reviewed_source_count,
+    NOT last_generated_source_count — a rejected/echo review still moves the
+    goalposts so the same batch isn't re-raised forever), and that don't
+    already have a pending refresh review. Returns cluster_ids; caller
+    writes a breaking_refresh_reviews row and notifies the admin — no LLM
+    call happens in this module. See app.admin_breaking for where approve
+    actually runs the refresh pass.
+    """
     result = await session.execute(
         text(
             """
@@ -151,7 +206,11 @@ async def find_refresh_candidates(session: AsyncSession) -> List[int]:
             FROM breaking_stories b
             JOIN story_clusters c ON c.id = b.cluster_id
             WHERE b.status = 'active'
-              AND c.distinct_source_count >= COALESCE(b.last_generated_source_count, b.sources_at_promotion) + :delta
+              AND c.distinct_source_count >= COALESCE(b.last_reviewed_source_count, b.sources_at_promotion) + :delta
+              AND NOT EXISTS (
+                  SELECT 1 FROM breaking_refresh_reviews r
+                  WHERE r.cluster_id = b.cluster_id AND r.status = 'pending'
+              )
             """
         ),
         {"delta": REFRESH_SOURCE_DELTA},
@@ -181,90 +240,57 @@ async def _fetch_articles_for_prompt(session: AsyncSession, cluster_id: int, sin
 
 
 async def process_breaking_cycle() -> None:
-    """The full Breaking-slot cycle: expire stale rows, judge new
-    candidates, refresh active ones whose clusters gained enough new
-    sources. Opens its own session and never raises — called from
-    poller.py AFTER that cycle's own commit, same split and same
-    never-block-ingestion posture as _enrich_new_crossings, since this
-    makes paid LLM calls.
+    """The full Breaking-slot cycle: expire stale/unreviewed rows, raise new
+    candidates and refresh reviews for a human, notify the admin. Makes NO
+    LLM call — see this module's docstring. Opens its own session and never
+    raises, same never-block-ingestion posture as _enrich_new_crossings
+    (kept even though there's no paid call left here, since a notification
+    failure still shouldn't touch the poller's own transaction).
     """
     from app.database import AsyncSessionLocal
-    from app.models import BreakingStory, utc_now
-    from app.services.breaking_narrative import judge_and_extract_beats
-    from app.services.breaking_narrative import BreakingNarrativeError
+    from app.models import BreakingRefreshReview, BreakingStory
+    from app.services.admin_notify import notify_admin_breaking_review
 
     try:
         async with AsyncSessionLocal() as session:
             expired = await expire_stale_breaking(session)
-            if expired:
+            timed_out = await expire_unreviewed_candidates(session)
+            if expired or timed_out:
                 await session.commit()
 
             candidates = await detect_breaking_candidates(session)
             for candidate in candidates:
-                articles = await _fetch_articles_for_prompt(session, candidate.cluster_id)
-                if not articles:
-                    continue
-                try:
-                    result = await judge_and_extract_beats(articles)
-                except BreakingNarrativeError as e:
-                    logger.error(f"[Breaking] judge pass failed for cluster {candidate.cluster_id}: {e}")
-                    continue
-
-                if not result.get("developing") or not result.get("beats"):
-                    session.add(BreakingStory(
-                        cluster_id=candidate.cluster_id,
-                        status="rejected",
-                        sources_at_promotion=candidate.distinct_source_count,
-                        hours_to_threshold=candidate.hours_to_threshold,
-                    ))
-                    logger.info(f"[Breaking] cluster {candidate.cluster_id} rejected (not developing)")
-                else:
-                    latest_beat_time = max(a["published_at"] for a in articles)
-                    session.add(BreakingStory(
-                        cluster_id=candidate.cluster_id,
-                        status="active",
-                        title=result.get("title") or None,
-                        beats=result["beats"],
-                        last_beat_at=latest_beat_time,
-                        last_generated_at=utc_now(),
-                        last_generated_source_count=candidate.distinct_source_count,
-                        sources_at_promotion=candidate.distinct_source_count,
-                        hours_to_threshold=candidate.hours_to_threshold,
-                    ))
-                    logger.info(
-                        f"[Breaking] promoted cluster {candidate.cluster_id} "
-                        f"({candidate.distinct_source_count} sources, {len(result['beats'])} beats)"
-                    )
+                session.add(BreakingStory(
+                    cluster_id=candidate.cluster_id,
+                    status="pending_review",
+                    sources_at_promotion=candidate.distinct_source_count,
+                    hours_to_threshold=candidate.hours_to_threshold,
+                ))
+                logger.info(
+                    f"[Breaking] cluster {candidate.cluster_id} flagged for review "
+                    f"({candidate.distinct_source_count} sources)"
+                )
+            if candidates:
                 await session.commit()
 
-            refresh_ids = await find_refresh_candidates(session)
-            for cluster_id in refresh_ids:
-                row_result = await session.execute(
-                    select(BreakingStory).where(BreakingStory.cluster_id == cluster_id)
-                )
-                row = row_result.scalar_one_or_none()
-                if row is None:
-                    continue
-                new_articles = await _fetch_articles_for_prompt(session, cluster_id, since=row.last_generated_at)
-                if not new_articles:
-                    continue
-                try:
-                    result = await judge_and_extract_beats(new_articles, existing_beats=row.beats or [])
-                except BreakingNarrativeError as e:
-                    logger.error(f"[Breaking] refresh pass failed for cluster {cluster_id}: {e}")
-                    continue
-
-                merged_beats = (row.beats or []) + result.get("beats", [])
-                row.beats = merged_beats
-                row.last_generated_at = utc_now()
-                cluster_row = await session.execute(
+            refresh_cluster_ids = await find_refresh_candidates(session)
+            for cluster_id in refresh_cluster_ids:
+                source_count = await session.execute(
                     text("SELECT distinct_source_count FROM story_clusters WHERE id = :cid"),
                     {"cid": cluster_id},
                 )
-                row.last_generated_source_count = cluster_row.scalar_one()
-                if result.get("beats"):
-                    row.last_beat_at = max(a["published_at"] for a in new_articles)
-                logger.info(f"[Breaking] refreshed cluster {cluster_id} (+{len(result.get('beats', []))} beats)")
+                session.add(BreakingRefreshReview(
+                    cluster_id=cluster_id,
+                    status="pending",
+                    source_count_at_review=source_count.scalar_one(),
+                ))
+                logger.info(f"[Breaking] cluster {cluster_id} flagged for refresh review")
+            if refresh_cluster_ids:
                 await session.commit()
+
+            if candidates or refresh_cluster_ids:
+                await notify_admin_breaking_review(
+                    session, new_count=len(candidates), refresh_count=len(refresh_cluster_ids)
+                )
     except Exception as e:
         logger.error(f"[Breaking] cycle failed: {e}")

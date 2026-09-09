@@ -924,15 +924,20 @@ class BreakingStory(Base):
     id = Column(Integer, primary_key=True, index=True)
     cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
 
-    # 'active' occupies one of the (max 2) live slots. 'expired' means it was
-    # active and aged out (stale beats or the absolute cap) — terminal,
-    # never reactivated even if the same cluster somehow re-qualifies.
-    # 'rejected' means the LLM pass judged the articles NOT genuinely
-    # developing (an echo cluster) — also terminal, so the detector never
-    # re-asks about the same cluster every poll cycle. See
+    # 'pending_review' occupies a slot the same way 'active' does (a human
+    # hasn't decided yet, but the detector shouldn't re-ask about this
+    # cluster every cycle while it waits) — see
+    # backend/docs/breaking-human-review-plan.md. 'active' occupies one of
+    # the (max 2) live slots. 'expired' means it was active and aged out
+    # (stale beats or the absolute cap) — terminal, never reactivated even
+    # if the same cluster somehow re-qualifies. 'rejected' means a human (or,
+    # pre-redesign, the LLM pass) judged the articles NOT genuinely
+    # developing (an echo cluster), or a pending_review row timed out
+    # unreviewed — also terminal, so the detector never re-asks about the
+    # same cluster every poll cycle. See
     # app.services.breaking.detect_breaking_candidates, which excludes any
     # cluster already present here in any status.
-    status = Column(String(16), nullable=False, default="active", index=True)
+    status = Column(String(16), nullable=False, default="pending_review", index=True)
 
     # LLM-authored headline for the developing story, distinct from
     # StoryCluster.headline (which stays whatever the representative
@@ -957,9 +962,56 @@ class BreakingStory(Base):
     # timer, so cost tracks actual new coverage instead of clock time.
     last_generated_source_count = Column(Integer, nullable=True)
 
+    # When an admin acted on this row (candidate approve/reject, or the
+    # pending_review timeout) — distinct from last_generated_at, same
+    # reasoning as last_beat_at vs. last_generated_at above.
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # distinct_source_count as of the last refresh REVIEW decision (approve
+    # or reject), separate from last_generated_source_count (which only
+    # advances when the LLM actually ran). find_refresh_candidates compares
+    # the live count against this column so a rejected/echo batch doesn't
+    # re-notify forever — see breaking-human-review-plan.md.
+    last_reviewed_source_count = Column(Integer, nullable=True)
+
     # Kept for offline threshold tuning (see the gate-volume report in
     # scripts/check_breaking_candidates.py) — never read at request time.
     sources_at_promotion = Column(Integer, nullable=False)
     hours_to_threshold = Column(Float, nullable=False)
 
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class BreakingRefreshReview(Base):
+    """One row per pending/decided refresh review for an already-`active`
+    BreakingStory — see backend/docs/breaking-human-review-plan.md.
+
+    Not folded into BreakingStory itself: a story has at most one *pending*
+    refresh review at a time, but the history of past decisions is worth
+    keeping for tuning the echo-rate assumption (same reasoning as
+    BreakingStory.sources_at_promotion being kept for offline threshold
+    work, not read at request time).
+
+    app.services.breaking.find_refresh_candidates writes a 'pending' row
+    here (no LLM call) when a cluster crosses BREAKING_REFRESH_SOURCE_DELTA
+    past BreakingStory.last_reviewed_source_count. The admin approve/reject
+    endpoints in app.admin_breaking flip it to 'approved'/'rejected' and, on
+    approve, run the actual LLM refresh pass.
+    """
+    __tablename__ = "breaking_refresh_reviews"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # 'pending': waiting on an admin. 'approved': admin judged genuinely new,
+    # the LLM refresh pass ran and beats were appended. 'rejected': admin
+    # judged echo, no LLM call made. Terminal once approved/rejected — a
+    # later +5 crossing writes a NEW row, this one is a historical decision.
+    status = Column(String(16), nullable=False, default="pending", index=True)
+
+    # story_clusters.distinct_source_count at the moment this review was
+    # raised — shown to the admin, and copied to
+    # BreakingStory.last_reviewed_source_count once decided either way.
+    source_count_at_review = Column(Integer, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
