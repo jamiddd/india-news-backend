@@ -247,27 +247,28 @@
     /* .cf-track's height must genuinely fit the tallest (centred) card,
        not just look about right -- see the NOTE on .coverflow above for
        why an undersized height here becomes a scrollbar, not just visual
-       overflow. Card content = the 540:380 figure at 88vw width (=~62vw
+       overflow. Card content = the 540:380 figure at 76vw width (=~53.5vw
        tall) plus the body below it (framer-head + the 144px framer-stage
        + framer-dots + padding, a fixed ~244px regardless of vw), times
        the centred card's 1.06 scale, plus a safety margin. */
     .coverflow{
       margin-inline:calc(50% - 50vw); padding-inline:0; max-width:100vw;
-      min-height:calc(68vw + 300px);
+      min-height:calc(58vw + 300px);
     }
-    .cf-card{width:88vw; margin-left:-44vw}
-    .cf-card.cf-p-left{transform:translate(-63vw,16px) scale(.82)}
-    .cf-card.cf-p-right{transform:translate(63vw,16px) scale(.82)}
-    .cf-card.cf-p-farleft{transform:translate(-105vw,22px) scale(.68)}
-    .cf-card.cf-p-farright{transform:translate(105vw,22px) scale(.68)}
-    .cf-track{max-width:100vw; height:calc(68vw + 280px); touch-action:pan-y}
-    /* Swipe is the primary way to move the coverflow at this width; the
-       arrows step aside rather than compete with the thumb for space, and
-       inset slightly from the now-flush edge rather than sitting flush
-       against the physical screen edge. */
-    .cf-nav{width:40px; height:40px; font-size:20px}
-    .cf-prev{left:8px}
-    .cf-next{right:8px}
+    .cf-card{width:76vw; margin-left:-38vw}
+    .cf-card.cf-p-left{transform:translate(-54vw,16px) scale(.82)}
+    .cf-card.cf-p-right{transform:translate(54vw,16px) scale(.82)}
+    .cf-card.cf-p-farleft{transform:translate(-95vw,22px) scale(.68)}
+    .cf-card.cf-p-farright{transform:translate(95vw,22px) scale(.68)}
+    .cf-track{max-width:100vw; height:calc(58vw + 280px); touch-action:pan-y}
+    /* Swipe is the primary way to move the coverflow at this width, and the
+       centred card is narrower than at desktop (76vw, not 88vw) specifically
+       so both neighbours peek out from behind it -- that peek is what tells
+       a first-time visitor the row is swipeable at all. The arrow buttons
+       sat on top of that peek and defeated the point, so they're hidden
+       here rather than just repositioned; .has-multi still adds them back
+       above this breakpoint. */
+    .coverflow.has-multi .cf-nav{display:none}
   }
 
   /* ---------- games gallery ---------- */
