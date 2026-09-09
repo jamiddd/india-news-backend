@@ -44,23 +44,17 @@
       // invariant on every shift).
       var POSITIONS = ["cf-p-farleft", "cf-p-left", "cf-p-center", "cf-p-right", "cf-p-farright"];
 
-      // What's on screen at load, so the hero always shows something even
-      // if the live endpoint never answers -- see the roadmap doc's "A
-      // static fallback" note. A single story: side peeks and looping stay
-      // off (see buildPool()) until real stories replace this.
-      var stories = [{
-        image: "/static/img/storycard-light.webp",
-        caption: "Trump says US may strike Iran's Pickaxe Mountain nuclear site ‘very soon’.",
-        count: "14 outlets",
-        framing: [
-          { outlet: "India Today World", headline_angle: "Focuses on Trump's warning and context of recent strikes and Iran's condemnation." },
-          { outlet: "Reuters (via Google News)", headline_angle: "Brief factual statement of Trump's threat." },
-          { outlet: "Al Jazeera", headline_angle: "Frames within ongoing 'Iran war live' coverage, includes Iranian military response." },
-          { outlet: "NDTV", headline_angle: "Emphasizes 'fresh threat' framing of Trump's statement." },
-          { outlet: "Deccan Chronicle", headline_angle: "Straightforward report on Trump's statement with added quotes on nuclear weapon prevention." },
-          { outlet: "Livemint", headline_angle: "Combines Pickaxe threat with Trump's dismissive 'small potatoes' remark on conflict casualties." }
-        ]
-      }];
+      // What's on screen at load, before the live endpoint has answered --
+      // a shimmering skeleton card (see makeSkeletonCard/buildPool below),
+      // not a hardcoded real story: a stale headline sitting there for
+      // however long the fetch takes reads as broken/outdated, where a
+      // loading placeholder reads as "still loading". `loading` gates
+      // buildPool between the skeleton and real cards; stories stays empty
+      // until the fetch actually resolves. See the roadmap doc's "A static
+      // fallback" note for why the hero must never end up looking empty --
+      // the skeleton is what satisfies that now instead of fixed content.
+      var stories = [];
+      var loading = true;
       var centerAt = 0;
       var slots = [];
 
@@ -168,21 +162,50 @@
         return el;
       }
 
-      function pauseFraming() { slots.forEach(function (el) { el._framing.stop(); }); }
+      // Skeleton placeholder shown while `loading` is true -- same overall
+      // shape as a real card (figure + head/stage/dots-ish blocks) so the
+      // coverflow's height doesn't jump when real content replaces it, but
+      // built from shimmering divs rather than an <img> or real text. Has
+      // no ._framing, unlike makeCard's cards -- pauseFraming/resumeFraming
+      // below guard for that.
+      function makeSkeletonCard() {
+        var el = document.createElement("div");
+        el.className = "cf-card cf-p-center cf-skeleton";
+        var fig = document.createElement("div");
+        fig.className = "cf-figure cf-skel-block";
+        el.appendChild(fig);
+        var body = document.createElement("div");
+        body.className = "cf-body";
+        body.innerHTML =
+          '<div class="cf-skel-block cf-skel-line" style="width:44%;height:13px;margin-bottom:16px"></div>' +
+          '<div class="cf-skel-block cf-skel-line" style="width:100%;height:38px;margin-bottom:10px"></div>' +
+          '<div class="cf-skel-block cf-skel-line" style="width:82%;height:38px;margin-bottom:10px"></div>' +
+          '<div class="cf-skel-block cf-skel-line" style="width:60%;height:38px"></div>';
+        el.appendChild(body);
+        return el;
+      }
+
+      function pauseFraming() { slots.forEach(function (el) { el._framing && el._framing.stop(); }); }
       function resumeFraming() {
         if (!slots.length) return;
         var center = slots.length >= 5 ? slots[2] : slots[0];
-        center._framing.start();
+        if (center._framing) center._framing.start();
       }
 
-      // Builds the initial pool from scratch -- called once at load and
-      // again the moment real stories replace the fallback. Every
-      // navigation after that goes through go(), which reuses/shifts these
-      // same elements instead of rebuilding.
+      // Builds the initial pool from scratch -- called once at load (as the
+      // skeleton, while `loading` is true) and again the moment real
+      // stories replace it. Every navigation after that goes through go(),
+      // which reuses/shifts these same elements instead of rebuilding.
       function buildPool() {
-        slots.forEach(function (el) { el._framing.stop(); });
+        slots.forEach(function (el) { el._framing && el._framing.stop(); });
         track.innerHTML = "";
         slots = [];
+        if (loading) {
+          var skel = makeSkeletonCard();
+          slots = [skel];
+          track.appendChild(skel);
+          return;
+        }
         var n = stories.length;
         coverflow.classList.toggle("has-multi", n > 1);
         if (n <= 1) {
@@ -297,6 +320,7 @@
             summary_bullets: it.summary_bullets || []
           };
         });
+        loading = false;
         centerAt = 0;
         buildPool();
         renderHowItWorks(stories[0]);

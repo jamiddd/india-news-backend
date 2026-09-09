@@ -168,6 +168,25 @@
      size/opacity/filter (above) tell the centred card apart from a peek. */
   .cf-body{padding:16px 18px 18px}
 
+  /* Loading placeholder (site.js's makeSkeletonCard) shown before the live
+     hero endpoint answers, in place of a hardcoded real story -- a shimmer
+     rather than fixed content, so a slow/failed fetch reads as "loading"
+     rather than as a stale headline. .cf-skel-block is the shimmering
+     surface itself (the figure area and each line reuse it); .cf-skeleton
+     just disables the click-to-navigate cursor a real card gets. */
+  .cf-skeleton{cursor:default}
+  .cf-skel-block{
+    position:relative; overflow:hidden; border-radius:6px; background:var(--line);
+  }
+  .cf-skeleton .cf-figure{aspect-ratio:540/380; border-radius:0}
+  .cf-skel-block::after{
+    content:""; position:absolute; inset:0; transform:translateX(-100%);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.16), transparent);
+    animation:cf-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes cf-shimmer{ 100%{ transform:translateX(100%) } }
+  @media (prefers-reduced-motion:reduce){ .cf-skel-block::after{animation:none} }
+
   .framer-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px}
   .framer-head b{font-family:var(--serif); font-size:17px}
   .framer-head span{font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3)}
@@ -269,6 +288,17 @@
        here rather than just repositioned; .has-multi still adds them back
        above this breakpoint. */
     .coverflow.has-multi .cf-nav{display:none}
+    /* The generic .reveal fade/translate (site.css) waits for
+       IntersectionObserver before showing an element, with a -10%
+       rootMargin on the bottom edge -- fine for content further down the
+       page, but the coverflow is the first thing in the hero and, at this
+       width, tall enough (min-height above) that its own bottom edge can
+       sit below the fold on load. That combination meant it stayed
+       invisible until the reader scrolled, showing a block of empty space
+       where the hero should be instead of the top of the card that's
+       already on screen. Show it immediately here rather than relying on
+       scroll to trigger it. */
+    .coverflow.reveal{opacity:1; transform:none; transition:none}
   }
 
   /* ---------- games gallery ---------- */
