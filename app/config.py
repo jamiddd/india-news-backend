@@ -67,6 +67,17 @@ class Settings(BaseSettings):
     # notification, or saved story must still open.
     FEED_GATE_ENABLED: bool = True
 
+    # Enrichment model routing (see app/services/enrichment.py) — a cluster
+    # needs at least this many distinct outlets to get Sonnet's framing
+    # comparison; below it (including every fresh 2-5-outlet first-pass
+    # crossing, the dominant enrichment call volume) gets Haiku instead.
+    # Verified via scripts/compare_haiku_sonnet_enrichment.py on real
+    # 2-source clusters (2026-09-11) — Haiku held up fine on the easier
+    # few-outlet comparison; Sonnet is reserved for stories that keep
+    # getting re-enriched as they accumulate outlets past this line, i.e.
+    # the ones actually staying in front of readers.
+    ENRICHMENT_SONNET_MIN_SOURCES: int = 6
+
     # For You pagination depth cap (see GET /clusters/for-you) — a
     # deliberate stop, not real exhaustion: past this many pages the
     # candidate window (100 clusters) is thin enough that further pages

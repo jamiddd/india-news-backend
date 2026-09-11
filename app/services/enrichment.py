@@ -14,11 +14,18 @@ logger = logging.getLogger(__name__)
 # three-bullet summary from one article is well within Haiku's range, and it
 # is the overwhelming majority of the volume, so it sets the cost floor.
 #
-# Multi-source clusters are the product's premium surface — they carry the
-# framing comparison, and after the clustering fix they are roughly 8-10% of
-# clusters, so a stronger model on them is affordable. If cost needs cutting
-# again, set MULTI_SOURCE_MODEL back to SINGLE_SOURCE_MODEL: it is the only
-# line that has to change.
+# Multi-source clusters carry the framing comparison, but "multi-source"
+# alone isn't reserved for Sonnet — see settings.ENRICHMENT_SONNET_MIN_SOURCES.
+# A cluster's FIRST crossing into multi-source (2-5 outlets) is the dominant
+# call volume (poller-triggered on every new crossing) and is, by definition,
+# comparing only a handful of outlets — well within Haiku's range, per
+# scripts/compare_haiku_sonnet_enrichment.py's side-by-side check on real
+# 2-source clusters (2026-09-11). Sonnet is reserved for stories that keep
+# getting re-enriched as they pick up outlets past that threshold — the ones
+# actually in front of readers repeatedly, where the framing comparison has
+# to reconcile 6+ outlets at once. If cost needs cutting further, lower
+# ENRICHMENT_SONNET_MIN_SOURCES; if quality on the high end needs headroom,
+# raise it — the threshold in config.py is the only line that has to change.
 SINGLE_SOURCE_MODEL = "claude-haiku-4-5"
 MULTI_SOURCE_MODEL = "claude-sonnet-5"
 
@@ -368,22 +375,30 @@ def build_enrichment_request(cluster: StoryCluster, can_compare_framing: bool) -
         }
         for art in select_articles_for_prompt(articles)
     ]
+    # Model routing is keyed on the cluster's CURRENT outlet count, not on
+    # can_compare_framing (which is just "2+ sources, so framing_comparison
+    # is applicable at all"). A cluster's first crossing (2-5 outlets, the
+    # dominant call volume — see SINGLE_SOURCE_MODEL's comment above) still
+    # gets Haiku even though it can_compare_framing; only once a story keeps
+    # accumulating outlets past ENRICHMENT_SONNET_MIN_SOURCES — the ones
+    # actually staying in front of readers — does it earn Sonnet.
+    use_sonnet = (cluster.distinct_source_count or 0) >= settings.ENRICHMENT_SONNET_MIN_SOURCES
+    model = MULTI_SOURCE_MODEL if use_sonnet else SINGLE_SOURCE_MODEL
+
     # claude-sonnet-5 thinks adaptively whether or not we ask it to, and
     # those tokens are billed. This is a short structured extraction over a
     # handful of headlines, not a reasoning problem, so cap the depth rather
-    # than pay the default "high" effort on every multi-source cluster.
+    # than pay the default "high" effort on every Sonnet-routed cluster.
     # Raise this if framing quality measurably suffers — it is the tuning
     # knob, not the model.
     #
     # Deliberately NOT sent on the SINGLE_SOURCE_MODEL path:
     # output_config.effort is rejected by claude-haiku-4-5.
     effort_config = (
-        {"output_config": {"effort": "low"}} if can_compare_framing else {}
+        {"output_config": {"effort": "low"}} if use_sonnet else {}
     )
     return {
-        "model": (
-            MULTI_SOURCE_MODEL if can_compare_framing else SINGLE_SOURCE_MODEL
-        ),
+        "model": model,
         "max_tokens": 1000,
         # cache_control turns this static system prompt into a cache-eligible
         # block — it's identical on every single enrichment call, so caching
