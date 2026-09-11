@@ -183,6 +183,7 @@ class TimelineFeatureListItemOut(BaseModel):
     is_editorial_pick: bool
     narrative_generated_at: Optional[datetime] = None
     anchor_cluster: Optional[StoryClusterListOut] = None
+    dropped_from_top_at: Optional[datetime] = None  # None for active items; set for archived ("Past stories") items
 
 
 class TimelineFeaturesOut(BaseModel):
@@ -196,6 +197,7 @@ class TimelineFeatureDetailOut(BaseModel):
     is_editorial_pick: bool
     narrative_generated_at: Optional[datetime] = None
     beats: List[TimelineBeatOut]
+    dropped_from_top_at: Optional[datetime] = None
 
 
 class BreakingBeatOut(BaseModel):

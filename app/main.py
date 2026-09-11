@@ -1957,6 +1957,65 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     return result_out
 
 
+TIMELINE_ARCHIVE_LIMIT = 20
+TIMELINE_ARCHIVE_MAX_AGE_DAYS = 30
+
+
+@app.get(f"{settings.API_V1_STR}/timelines/archived", response_model=TimelineFeaturesOut)
+@limiter.limit("60/minute")
+async def list_archived_timeline_features(request: Request, db: AsyncSession = Depends(get_db)):
+    """"Past stories" section of the Context tab — chains that fell out of
+    the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
+    Same coherent/title/beats guard as the active list; ordered by when
+    each one dropped, not by when it was last generated."""
+    cache_key = "timelines:archived"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return TimelineFeaturesOut.model_validate_json(cached)
+
+    cutoff = utc_now() - timedelta(days=TIMELINE_ARCHIVE_MAX_AGE_DAYS)
+    result = await db.execute(
+        select(StoryTimelineFeature)
+        .where(
+            StoryTimelineFeature.last_seen_in_top.is_(False),
+            StoryTimelineFeature.coherent.is_(True),
+            StoryTimelineFeature.dropped_from_top_at.isnot(None),
+            StoryTimelineFeature.dropped_from_top_at >= cutoff,
+        )
+        .order_by(desc(StoryTimelineFeature.dropped_from_top_at))
+        .limit(TIMELINE_ARCHIVE_LIMIT)
+    )
+    rows = [r for r in result.scalars().all() if r.title and r.beats]
+
+    anchor_ids = [r.anchor_cluster_id for r in rows]
+    anchors_by_id: Dict[int, StoryCluster] = {}
+    if anchor_ids:
+        anchors_result = await db.execute(
+            select(StoryCluster)
+            .where(StoryCluster.id.in_(anchor_ids))
+            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        )
+        anchors_by_id = {c.id: c for c in anchors_result.scalars().all()}
+
+    items = [
+        TimelineFeatureListItemOut(
+            id=row.id,
+            title=row.title or "",
+            context=row.context or "",
+            story_count=len(row.cluster_ids or []),
+            is_editorial_pick=row.is_editorial_pick,
+            narrative_generated_at=row.narrative_generated_at,
+            anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
+            if row.anchor_cluster_id in anchors_by_id else None,
+            dropped_from_top_at=row.dropped_from_top_at,
+        )
+        for row in rows
+    ]
+    result_out = TimelineFeaturesOut(timelines=items)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
 @app.get(f"{settings.API_V1_STR}/timelines/{{timeline_id}}", response_model=TimelineFeatureDetailOut)
 @limiter.limit("60/minute")
 async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSession = Depends(get_db)):
@@ -2008,6 +2067,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         is_editorial_pick=row.is_editorial_pick,
         narrative_generated_at=row.narrative_generated_at,
         beats=beats_out,
+        dropped_from_top_at=row.dropped_from_top_at,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out

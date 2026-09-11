@@ -230,6 +230,14 @@ async def set_last_seen_in_top(session, anchor_cluster_id: int, value: bool, *, 
     )
     row = result.scalar_one_or_none()
     if row is not None:
+        # dropped_from_top_at marks the True->False transition specifically
+        # (drives the "Past stories" archive + its 30-day cutoff) — not
+        # every touch, since a re-attempted-and-still-incoherent row would
+        # otherwise look freshly dropped every cycle.
+        if value is False and row.last_seen_in_top is True:
+            row.dropped_from_top_at = datetime.now(timezone.utc)
+        elif value is True:
+            row.dropped_from_top_at = None
         row.last_seen_in_top = value
 
 
@@ -317,6 +325,8 @@ async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optiona
             all_rows_result = await session.execute(select(StoryTimelineFeature))
             for row in all_rows_result.scalars().all():
                 if row.anchor_cluster_id not in attempted_anchor_ids:
+                    if row.last_seen_in_top is True:
+                        row.dropped_from_top_at = datetime.now(timezone.utc)
                     row.last_seen_in_top = False
 
             await session.commit()

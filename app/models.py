@@ -893,6 +893,7 @@ class StoryTimelineFeature(Base):
     coherent = Column(Boolean, nullable=True)  # last generation's own coherence verdict — a pick whose chain stopped cohering shouldn't silently keep showing a stale narrative forever
 
     last_seen_in_top = Column(Boolean, nullable=False, default=True, server_default="true")
+    dropped_from_top_at = Column(DateTime(timezone=True), nullable=True)  # set on the last_seen_in_top True->False transition; cleared if it re-enters. Drives the "Past stories" archive section and its 30-day cutoff.
     narrative_generated_at = Column(DateTime(timezone=True), nullable=True)
     picked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
