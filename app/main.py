@@ -1918,10 +1918,16 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
 
     result = await db.execute(
         select(StoryTimelineFeature)
-        .where(StoryTimelineFeature.last_seen_in_top.is_(True))
+        .where(
+            StoryTimelineFeature.last_seen_in_top.is_(True),
+            StoryTimelineFeature.coherent.is_(True),
+        )
         .order_by(desc(StoryTimelineFeature.narrative_generated_at))
     )
-    rows = result.scalars().all()
+    # coherent=True is set by the generation script alongside a real
+    # narrative, but guard against a row that has it without title/beats
+    # (e.g. an incoherent chain whose flag hasn't been flipped yet).
+    rows = [r for r in result.scalars().all() if r.title and r.beats]
 
     anchor_ids = [r.anchor_cluster_id for r in rows]
     anchors_by_id: Dict[int, StoryCluster] = {}
