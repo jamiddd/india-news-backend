@@ -82,7 +82,7 @@ async def regen_quiz(session, puzzle_date: date, force: bool) -> None:
     if existing is not None:
         await session.delete(existing)
         await session.flush()
-    questions, source = await generate_quiz(puzzle_date)
+    questions, source = await generate_quiz(puzzle_date, session)
     session.add(DailyQuiz(puzzle_date=puzzle_date, questions=questions, source=source))
     print(f"quiz: regenerated, source={source}")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import re
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import DailyQuiz, DailySpellingBee, DailyWordle, DailyWordLadder, utc_now
 from app.services import wordlists
 from app.services.llm_gen import call_claude_json
+from app.services.word_search import THEMES as _WORD_SEARCH_THEMES
 
 logger = logging.getLogger(__name__)
 
@@ -339,16 +341,66 @@ QUIZ_SYSTEM = (
     "\"correct_index\": int 0-3, \"explanation\": str}]} with exactly 5 questions.\n"
     "Rules:\n"
     "- Exactly 4 options per question, all plausible, exactly one correct.\n"
-    "- Write for a general Indian readership. Mix Indian and world subjects; "
-    "do not make every question about the US or Europe.\n"
+    "- Write for a general Indian readership.\n"
+    "- All 5 questions must fit the theme given in the user message, but each "
+    "should cover a different specific fact or subject within it — don't let "
+    "two questions be about the same person/place/thing.\n"
     "- Timeless general knowledge, not this week's news — the quiz is reviewed "
     "before it publishes and must not go stale.\n"
     "- Avoid death, disaster, crime and communal subjects entirely.\n"
     "- One sentence of explanation per question, saying why the answer is right."
 )
 
+# Rotated by day so each quiz has a narrow lane instead of open-ended "general
+# knowledge" — that openness is what let Claude default to the same "safest"
+# facts (Taj Mahal, capital of Australia, Jupiter's moons...) day after day.
+# A theme plus the recent-questions avoid-list below (which still applies
+# within a theme, since themes repeat every len(QUIZ_THEMES) days) is meant
+# to break that pattern.
+#
+# Reuses the word search's curated THEMES list (140 entries) instead of a
+# separate hand-picked list, so there's one source of truth for "topics this
+# app covers" — and a 140-day repeat cycle instead of a short hand-picked one.
+# Shuffled once with a fixed seed so the rotation doesn't just walk the list
+# in its written-down order (Space, India, Nature, Science, ...); the fixed
+# seed keeps the shuffle stable across restarts/deploys.
+QUIZ_THEMES = [name for name, _ in _WORD_SEARCH_THEMES]
+random.Random(20260911).shuffle(QUIZ_THEMES)
 
-async def _ai_quiz(puzzle_date: date) -> list[dict] | None:
+
+def _quiz_theme_for(puzzle_date: date) -> str:
+    return QUIZ_THEMES[puzzle_date.toordinal() % len(QUIZ_THEMES)]
+
+
+async def _recent_quiz_questions(db, puzzle_date: date, days: int = 30) -> list[str]:
+    """Question texts from past quizzes that share today's theme, within the
+    last `days` days, so the prompt can tell Claude what to avoid repeating.
+    Without this Claude keeps reaching for the same handful of "greatest
+    hits" trivia facts (Taj Mahal, capital of Australia, Jupiter's moon
+    count, Bharatanatyam...) almost every time it's asked — confirmed by
+    inspecting daily_quizzes on 2026-09-11: several questions recurred nearly
+    verbatim every 2-3 days. Filtering to the same theme (which only recurs
+    every len(QUIZ_THEMES) days) keeps the avoid-list short and relevant
+    instead of dumping every unrelated question from the last month."""
+    theme = _quiz_theme_for(puzzle_date)
+    rows = (await db.execute(
+        select(DailyQuiz.puzzle_date, DailyQuiz.questions)
+        .where(DailyQuiz.puzzle_date < puzzle_date)
+        .order_by(DailyQuiz.puzzle_date.desc())
+        .limit(days)
+    )).all()
+    seen: list[str] = []
+    for row_date, questions in rows:
+        if _quiz_theme_for(row_date) != theme:
+            continue
+        for q in questions:
+            text_ = q.get("question")
+            if text_:
+                seen.append(text_)
+    return seen
+
+
+async def _ai_quiz(puzzle_date: date, db=None) -> list[dict] | None:
     """Draft 5 questions with Claude.
 
     Replaces the APIVerve /trivia path, which could not fit any sane budget:
@@ -361,9 +413,23 @@ async def _ai_quiz(puzzle_date: date) -> list[dict] | None:
     verifiable answer, so there is no algorithm to check Claude's facts —
     which is exactly why the output lands as a draft for human review rather
     than going straight to readers."""
+    theme = _quiz_theme_for(puzzle_date)
+    user_content = (
+        f"Write the quiz for {puzzle_date.isoformat()}. "
+        f"Today's theme: {theme}."
+    )
+    if db is not None:
+        recent = await _recent_quiz_questions(db, puzzle_date)
+        if recent:
+            avoid_list = "\n".join(f"- {q}" for q in recent)
+            user_content += (
+                "\n\nDo not reuse any of these questions or their exact topic "
+                "(same monument, same planet fact, same dance form, etc.) — "
+                "pick different subjects entirely:\n" + avoid_list
+            )
     payload = await call_claude_json(
         QUIZ_SYSTEM,
-        f"Write the quiz for {puzzle_date.isoformat()}.",
+        user_content,
         max_tokens=2000,
     )
     if payload is None:
@@ -410,7 +476,7 @@ async def bank_quiz_questions(db) -> list[dict] | None:
 
 
 async def generate_quiz(puzzle_date: date, db=None) -> tuple[list[dict], str]:
-    questions = await _ai_quiz(puzzle_date)
+    questions = await _ai_quiz(puzzle_date, db)
     if questions is not None:
         return questions, "ai"
     if db is not None:
@@ -448,7 +514,7 @@ async def get_or_create_daily_games(session: AsyncSession, puzzle_date: date):
 
     quiz = (await session.execute(select(DailyQuiz).where(DailyQuiz.puzzle_date == puzzle_date))).scalar_one_or_none()
     if quiz is None:
-        questions, source = await generate_quiz(puzzle_date)
+        questions, source = await generate_quiz(puzzle_date, session)
         # An AI draft waits for a human; the deterministic curated fallback has
         # already been reviewed (it is a committed constant) so it publishes
         # straight away. Without that distinction a day where Claude is
