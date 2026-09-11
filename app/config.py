@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # notification, or saved story must still open.
     FEED_GATE_ENABLED: bool = True
 
+    # For You pagination depth cap (see GET /clusters/for-you) — a
+    # deliberate stop, not real exhaustion: past this many pages the
+    # candidate window (100 clusters) is thin enough that further pages
+    # would mostly be affinity-score noise, not genuinely more content. At
+    # limit=20 this is ~80 items. Tune here, not by growing the candidate
+    # window, if this ever feels short.
+    FOR_YOU_MAX_PAGES: int = 4
+
     # AI Enrichment
     ANTHROPIC_API_KEY: Optional[str] = None
 

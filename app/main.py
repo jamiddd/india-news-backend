@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+import secrets
 from functools import lru_cache
 from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -1503,7 +1504,16 @@ async def list_story_clusters(
         query = select(StoryCluster).options(
             selectinload(StoryCluster.articles).selectinload(Article.source)
         ).where(listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
-        query = apply_feed_gate(query)
+        # The 2+ distinct-source gate is meant for curated top-of-feed
+        # surfaces (All Stories, and Top Headlines via its own explicit
+        # min_sources) — a named category tab (sports, northeast, tech, ...)
+        # is someone deliberately browsing a narrow lens, where it should
+        # page as deep as the tab actually has content, not be starved by a
+        # gate meant for "did this make the cut" surfaces. See the pagination
+        # depth fix discussion — niche categories have smaller raw pools than
+        # "all" and were hitting this gate harder than Top Headlines did.
+        if is_all or min_sources is not None:
+            query = apply_feed_gate(query)
 
         if min_sources:
             query = query.where(StoryCluster.distinct_source_count >= min_sources)
@@ -1704,12 +1714,16 @@ async def list_story_clusters(
         has_more=has_more,
     )
 
+FOR_YOU_SESSION_TTL_SECONDS = 20 * 60
+
+
 @app.get(f"{settings.API_V1_STR}/clusters/for-you", response_model=PaginatedClustersOut)
 @limiter.limit("60/minute")
 async def list_for_you_clusters(
     request: Request,
     user_id: str = Query(...),
     limit: int = Query(20, ge=1, le=50),
+    cursor: Optional[str] = Query(None),
     caller_id: Optional[str] = Depends(optional_user_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1726,10 +1740,17 @@ async def list_for_you_clusters(
     (headline_score, same as "All Stories") — deliberately no separate
     empty state for cold start.
 
-    v1: no real pagination yet — returns the top `limit` of a bounded
-    candidate window (most recent, highest headline_score clusters with
-    entities). Real cursor-based pagination is a follow-up once there's
-    enough usage to justify it.
+    Real pagination, but session-snapshotted rather than re-scored per page:
+    page 1 (no cursor) scores the full 100-cluster candidate window once and
+    caches that ranked snapshot in Redis under a fresh snapshot_token, keyed
+    off the cursor. Later pages in the same scroll session look the
+    snapshot up and slice it — no re-scoring, and no drift from affinity
+    decaying mid-scroll. Capped at settings.FOR_YOU_MAX_PAGES pages: past
+    that, has_more is false even though the (stale, TTL-expired-by-then)
+    snapshot might technically have more — this is intentional, not a bug,
+    see FOR_YOU_MAX_PAGES's own comment in config.py. If the snapshot has
+    expired (long-idle session) or the cursor is malformed, this falls back
+    to treating the request as a fresh page 1 rather than erroring.
 
     Registered ABOVE /clusters/{cluster_id} deliberately — FastAPI/Starlette
     matches routes in registration order, so a literal path segment like
@@ -1753,50 +1774,101 @@ async def list_for_you_clusters(
     if user_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Per-user (unlike /clusters, this genuinely varies per requester) —
-    # this endpoint previously hydrated a 200-cluster candidate window with
-    # full articles/content on every single request, uncached, to return
-    # only `limit`. Same short-TTL pattern as /clusters/_cache_get below;
-    # a user reloading "For You" repeatedly within the window now hits
-    # Redis instead of re-scoring 200 clusters against Postgres each time.
-    cache_key = f"cache:for-you:{user_id}:{limit}"
-    cached = await _cache_get(cache_key)
-    if cached is not None:
-        return Response(content=cached, media_type="application/json")
+    # Parse the cursor: "<snapshot_token>:<page>:<score>:<headline_score>:<id>".
+    # Any parse failure, or a snapshot that's expired/missing, is treated as
+    # "start a fresh page 1" rather than a 500 — same defensive posture as
+    # /clusters' own cursor parsing.
+    snapshot_token: Optional[str] = None
+    page = 0
+    cursor_tuple: Optional[tuple] = None
+    if cursor:
+        try:
+            token_str, page_str, score_str, headline_str, id_str = cursor.split(":", 4)
+            snapshot_token = token_str
+            page = int(page_str)
+            cursor_tuple = (float(score_str), float(headline_str), int(id_str))
+        except (ValueError, TypeError):
+            snapshot_token = None
+            page = 0
+            cursor_tuple = None
 
-    # Bounded candidate window so scoring stays cheap — affinity is scored
-    # in Python (score_clusters_for_user), not SQL, since it has to unpack
-    # each cluster's entities JSON and canonicalize them. Window cut from
-    # 200 to 100 — score_clusters_for_user's inputs (entities, starred
-    # sources) don't meaningfully benefit from a deeper window, and this
-    # halves how many clusters' full articles get hydrated for a request
-    # that only returns `limit` (<=50) of them.
-    candidates_query = apply_feed_gate(
-        select(StoryCluster)
-        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .where(
-            listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
-            StoryCluster.entities.isnot(None),
+    snapshot_key = f"cache:for-you:session:{user_id}:{snapshot_token}" if snapshot_token else None
+    cached_snapshot = await _cache_get(snapshot_key) if snapshot_key else None
+
+    if cached_snapshot is not None:
+        ranked_serialized = json.loads(cached_snapshot)
+    else:
+        # No usable snapshot (fresh page 1, expired session, or malformed
+        # cursor) — (re)score the candidate window and start a new session.
+        page = 0
+        snapshot_token = secrets.token_hex(8)
+        snapshot_key = f"cache:for-you:session:{user_id}:{snapshot_token}"
+
+        # Bounded candidate window so scoring stays cheap — affinity is scored
+        # in Python (score_clusters_for_user), not SQL, since it has to unpack
+        # each cluster's entities JSON and canonicalize them. Window cut from
+        # 200 to 100 — score_clusters_for_user's inputs (entities, starred
+        # sources) don't meaningfully benefit from a deeper window, and this
+        # halves how many clusters' full articles get hydrated for a request.
+        # The whole window is scored and cached once per session, not just
+        # `limit` of it, so later pages in the same session don't re-query.
+        candidates_query = apply_feed_gate(
+            select(StoryCluster)
+            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+            .where(
+                listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
+                StoryCluster.entities.isnot(None),
+            )
         )
-    )
-    candidates_result = await db.execute(
-        candidates_query
-        .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
-        .limit(100)
-    )
-    candidates = candidates_result.scalars().all()
+        candidates_result = await db.execute(
+            candidates_query
+            .order_by(desc(StoryCluster.headline_score), desc(StoryCluster.id))
+            .limit(100)
+        )
+        candidates = candidates_result.scalars().all()
 
-    scores = await score_clusters_for_user(db, user_id, candidates)
-    ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score), reverse=True)
-    items = ranked[:limit]
+        scores = await score_clusters_for_user(db, user_id, candidates)
+        # id included as an explicit tiebreaker (not just score/headline_score)
+        # so the cursor's 3-field comparison below stays consistent with this
+        # list's actual order even when two candidates tie on both scores.
+        ranked = sorted(candidates, key=lambda c: (scores.get(c.id, 0.0), c.headline_score, c.id), reverse=True)
+        ranked_serialized = [
+            {
+                "score": scores.get(c.id, 0.0),
+                "headline_score": c.headline_score,
+                "id": c.id,
+                "item": _cluster_to_out(c).model_dump(mode="json"),
+            }
+            for c in ranked
+        ]
+        await _cache_set(snapshot_key, json.dumps(ranked_serialized), ttl=FOR_YOU_SESSION_TTL_SECONDS)
 
-    result_out = PaginatedClustersOut(
-        items=[_cluster_to_out(c) for c in items],
-        next_cursor=None,
-        has_more=False,
+    # Slice the (now-guaranteed-fresh) snapshot from the cursor position.
+    if cursor_tuple is not None:
+        start_idx = next(
+            (i for i, r in enumerate(ranked_serialized)
+             if (r["score"], r["headline_score"], r["id"]) < cursor_tuple),
+            len(ranked_serialized),
+        )
+    else:
+        start_idx = 0
+    page_slice = ranked_serialized[start_idx:start_idx + limit + 1]
+
+    has_more_in_snapshot = len(page_slice) > limit
+    items_serialized = page_slice[:limit]
+    next_page = page + 1
+    has_more = has_more_in_snapshot and next_page < settings.FOR_YOU_MAX_PAGES
+
+    next_cursor = None
+    if has_more and items_serialized:
+        last = items_serialized[-1]
+        next_cursor = f"{snapshot_token}:{next_page}:{last['score']}:{last['headline_score']}:{last['id']}"
+
+    return PaginatedClustersOut(
+        items=[r["item"] for r in items_serialized],
+        next_cursor=next_cursor,
+        has_more=has_more,
     )
-    await _cache_set(cache_key, result_out.model_dump_json())
-    return result_out
 
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)

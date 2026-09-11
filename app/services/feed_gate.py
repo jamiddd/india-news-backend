@@ -71,10 +71,16 @@ def gate_min_sources() -> int:
 def apply_feed_gate(query):
     """Restrict a cluster listing to corroborated stories.
 
-    Applied to every listing — default feed, category tabs, source filter,
-    search, for-you, related stories — so the app cannot show on one surface
-    what it hides on another. NOT applied to detail-by-id: a deep link, a
-    notification, or a saved story from before the gate must still open.
+    Applied to curated top-of-feed surfaces — the default "All Stories" feed,
+    for-you, related stories, and any listing that explicitly passes
+    min_sources (Top Headlines) — where "did this make the cut" is the
+    point. NOT applied to a named category tab or a source filter: those are
+    someone deliberately browsing a narrow lens, which should page as deep
+    as the tab actually has content rather than being starved by a gate
+    meant for a curated surface (see GET /clusters in main.py for the
+    is_all/min_sources condition that decides this per request). Also NOT
+    applied to detail-by-id: a deep link, a notification, or a saved story
+    from before the gate must still open.
 
     A no-op unless FEED_GATE_ENABLED, so this ships ahead of the decision to
     turn it on. See docs/multi-source-feed-plan.md §5.A.
