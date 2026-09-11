@@ -1,11 +1,12 @@
 """One-off comparison: run the real enrichment prompt (build_enrichment_request)
-against 3 recent high-source-count clusters, once with claude-sonnet-5
-(today's actual multi-source model) and once with claude-haiku-4-5, so we
-can eyeball whether Haiku's framing-comparison quality is close enough to
-justify the cost difference. Read-only — does not write anything to the DB.
+against N recent clusters in a given source-count range, once with
+claude-sonnet-5 (today's actual multi-source model) and once with
+claude-haiku-4-5, so we can eyeball whether Haiku's framing-comparison
+quality is close enough to justify the cost difference. Read-only — does
+not write anything to the DB.
 
 Usage:
-    python3 scripts/compare_haiku_sonnet_enrichment.py [--n 3]
+    python3 scripts/compare_haiku_sonnet_enrichment.py [--n 3] [--min-sources 2] [--max-sources 5]
 """
 import argparse
 import asyncio
@@ -45,13 +46,16 @@ async def call_model(request_body: dict, model: str) -> dict:
         return resp.json()
 
 
-async def main(n: int):
+async def main(n: int, min_sources: int, max_sources: int):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(StoryCluster)
             .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-            .where(StoryCluster.distinct_source_count >= 2)
-            .order_by(desc(StoryCluster.distinct_source_count), desc(StoryCluster.id))
+            .where(
+                StoryCluster.distinct_source_count >= min_sources,
+                StoryCluster.distinct_source_count <= max_sources,
+            )
+            .order_by(desc(StoryCluster.id))
             .limit(n)
         )
         clusters = result.scalars().all()
@@ -85,5 +89,7 @@ async def main(n: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n", type=int, default=3)
+    parser.add_argument("--min-sources", type=int, default=2)
+    parser.add_argument("--max-sources", type=int, default=10_000)
     args = parser.parse_args()
-    asyncio.run(main(args.n))
+    asyncio.run(main(args.n, args.min_sources, args.max_sources))
