@@ -104,7 +104,7 @@ from scripts.send_notifications import main as run_send_notifications
 from app.services.crossword import get_or_create_puzzle, india_today
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
-from app.services.daily_games import get_or_create_daily_games, fallback_quiz_questions, WORDLE_MAX_GUESSES
+from app.services.daily_games import get_or_create_daily_games, fallback_quiz_questions, _quiz_theme_for, WORDLE_MAX_GUESSES
 from app.services import wordlists
 from app.services.editorial_features import get_or_create_editorial
 from app.services.horoscope import get_or_create_horoscope
@@ -841,7 +841,8 @@ async def daily_quiz(request: Request, date: str | None = Query(None), db: Async
     # of leaking the draft. See app/quiz_admin.py.
     if quiz.status != "approved":
         return {"date": puzzle_date, "questions": fallback_quiz_questions(puzzle_date)}
-    return {"date": quiz.puzzle_date, "questions": quiz.questions}
+    theme = _quiz_theme_for(quiz.puzzle_date) if quiz.source == "ai" else None
+    return {"date": quiz.puzzle_date, "theme": theme, "questions": quiz.questions}
 
 
 @app.get(f"{settings.API_V1_STR}/word-of-the-day", response_model=WordOfTheDayOut)

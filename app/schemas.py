@@ -381,6 +381,7 @@ class DailyQuizQuestionOut(BaseModel):
 
 class DailyQuizOut(BaseModel):
     date: date
+    theme: Optional[str] = None
     questions: List[DailyQuizQuestionOut]
 
 
