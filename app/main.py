@@ -53,7 +53,7 @@ from app.redis_client import get_redis_client
 from app.admin_session import session_csrf
 from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, utc_now
 from app.schemas import (
-    SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut,
+    SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
     TimelineFeaturesOut, TimelineFeatureListItemOut, TimelineFeatureDetailOut, TimelineBeatOut,
@@ -79,7 +79,9 @@ from app.schemas import (
 from app.services.affinity import record_engagement, score_clusters_for_user
 from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
 from uuid import uuid4
+from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from app.services.poller import poll_all_sources
+from app.services.extractor import _resolve_brightcove_policy_key, _resolve_brightcove_video
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.feed_gate import (
@@ -298,6 +300,9 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
             video_url=art.video_url,
             video_is_short=art.video_is_short,
             video_duration_seconds=art.video_duration_seconds,
+            has_pending_video=not art.video_url and bool(
+                art.brightcove_account_id and art.brightcove_player_id and art.brightcove_video_id
+            ),
         )
         for art in cluster.articles
     ]
@@ -1927,6 +1932,39 @@ async def get_story_cluster(request: Request, cluster_id: int, db: AsyncSession 
         raise HTTPException(status_code=404, detail="Story cluster not found")
 
     return _cluster_to_out(cluster)
+
+
+@app.get(f"{settings.API_V1_STR}/articles/{{article_id}}/video-url", response_model=ArticleVideoUrlOut)
+@limiter.limit("60/minute")
+async def get_article_video_url(request: Request, article_id: int, db: AsyncSession = Depends(get_db)):
+    """Re-resolves a fresh, playable Brightcove manifest URL for this
+    article right now, instead of relying on the one (if any) resolved at
+    scrape time — see Article.brightcove_account_id/player_id/video_id and
+    is_expiring_signed_video_url. The app calls this immediately before
+    starting playback on a story whose stored video_url is null but whose
+    lead article has brightcove_account_id set, so the manifest's
+    fastly_token grant is always seconds old rather than hours/days old.
+
+    Returns {"video_url": null} (not a 404) when the article has no
+    Brightcove embed at all or Brightcove itself refuses this request —
+    both read the same to the caller: "no video available right now."
+    """
+    article = await db.get(Article, article_id)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if not article.brightcove_account_id or not article.brightcove_video_id or not article.brightcove_player_id:
+        return ArticleVideoUrlOut(video_url=None)
+
+    async with CurlAsyncSession() as client:
+        policy_key = await _resolve_brightcove_policy_key(
+            client, article.brightcove_account_id, article.brightcove_player_id
+        )
+        if not policy_key:
+            return ArticleVideoUrlOut(video_url=None)
+        video_url = await _resolve_brightcove_video(
+            client, article.brightcove_account_id, article.brightcove_video_id, policy_key
+        )
+    return ArticleVideoUrlOut(video_url=video_url)
 
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/related", response_model=RelatedClustersOut)

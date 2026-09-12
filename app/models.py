@@ -648,6 +648,16 @@ class Article(Base):
     # so the app must fall back to portrait-safe layout when it can't tell.
     video_is_short = Column(Boolean, nullable=True)
     video_duration_seconds = Column(Integer, nullable=True)
+    # Set whenever a Brightcove embed was found on the article page, even if
+    # video_url ended up NULL because the resolved manifest was an expiring
+    # fastly_token link (extractor.is_expiring_signed_video_url) — a link
+    # that's often already dead by the time a reader opens the story hours
+    # or days later. Kept so GET /articles/{id}/video-url can re-resolve a
+    # fresh manifest on demand, right before playback, instead of the story
+    # permanently falling back to its image.
+    brightcove_account_id = Column(String(32), nullable=True)
+    brightcove_player_id = Column(String(64), nullable=True)
+    brightcove_video_id = Column(String(32), nullable=True)
     categories = Column(JSON, nullable=True)
     
     simhash = Column(BigInteger, nullable=True, index=True)

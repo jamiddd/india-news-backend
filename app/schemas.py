@@ -33,6 +33,12 @@ class ArticleOut(BaseModel):
     video_url: Optional[str] = None
     video_is_short: Optional[bool] = None
     video_duration_seconds: Optional[int] = None
+    # True when video_url is null ONLY because its Brightcove manifest was an
+    # expiring fastly_token link dropped at scrape time (see
+    # is_expiring_signed_video_url) — the app calls GET
+    # .../video-url to re-resolve a fresh one before playback when this is
+    # true. Detail-only: playback only happens from the story detail screen.
+    has_pending_video: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,6 +69,16 @@ class ArticleListOut(BaseModel):
     video_duration_seconds: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ArticleVideoUrlOut(BaseModel):
+    """Response for GET /articles/{id}/video-url — a freshly-resolved
+    Brightcove manifest URL, or null if this article has no resolvable
+    video (never had one, or Brightcove itself refused this request). See
+    Article.brightcove_account_id/player_id/video_id and
+    is_expiring_signed_video_url for why this exists as a separate,
+    on-demand endpoint instead of a stored column."""
+    video_url: Optional[str] = None
 
 
 class StoryClusterOut(BaseModel):

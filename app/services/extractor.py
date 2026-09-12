@@ -136,6 +136,15 @@ class ExtractedArticle:
     # and the one a bulk re-scrape needs in order to stop hammering a site
     # that is already rate-limiting it.
     fetch_status: Optional[int] = None
+    # Set whenever a Brightcove embed was found, even if og_video_url ends up
+    # None because the resolved manifest was an expiring fastly_token link
+    # (see is_expiring_signed_video_url) — kept so the caller can persist
+    # these on the article and re-resolve a fresh manifest later, on demand,
+    # instead of only ever having a link that's likely dead by the time
+    # anyone opens the story. See main.py's GET .../video-url.
+    brightcove_account_id: Optional[str] = None
+    brightcove_player_id: Optional[str] = None
+    brightcove_video_id: Optional[str] = None
 
 
 def _extract_og_image(html: str) -> Optional[str]:
@@ -491,13 +500,18 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
             jw_media_id = _extract_jwplayer_media_id(response.text)
             if jw_media_id:
                 og_video_url = await _resolve_jwplayer_video(client, jw_media_id)
+        brightcove_account_id: Optional[str] = None
+        brightcove_player_id: Optional[str] = None
+        brightcove_video_id: Optional[str] = None
         if not og_video_url:
             brightcove_embed = _extract_brightcove_embed(response.text)
             if brightcove_embed:
-                account_id, player_id, video_id = brightcove_embed
-                policy_key = await _resolve_brightcove_policy_key(client, account_id, player_id)
+                brightcove_account_id, brightcove_player_id, brightcove_video_id = brightcove_embed
+                policy_key = await _resolve_brightcove_policy_key(client, brightcove_account_id, brightcove_player_id)
                 if policy_key:
-                    og_video_url = await _resolve_brightcove_video(client, account_id, video_id, policy_key)
+                    og_video_url = await _resolve_brightcove_video(
+                        client, brightcove_account_id, brightcove_video_id, policy_key
+                    )
         if not og_video_url:
             youtube_video_id = _extract_youtube_video_id(response.text)
             if youtube_video_id:
@@ -524,6 +538,9 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
             video_is_short,
             video_duration_seconds,
             fetch_status=response.status_code,
+            brightcove_account_id=brightcove_account_id,
+            brightcove_player_id=brightcove_player_id,
+            brightcove_video_id=brightcove_video_id,
         )
     except Exception as e:
         logger.debug(f"Full-content extraction failed for {url}: {e}")
