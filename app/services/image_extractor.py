@@ -1,7 +1,7 @@
 import re
 import logging
 from typing import Any, Optional, TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +43,15 @@ def _image_dedupe_key(image_url: str) -> str:
     for marker in _SIZE_VARIANT_MARKERS:
         name = name.replace(marker, "")
     return _NON_ALNUM_RE.sub("", name)
+
+
+def is_same_image_url(url_a: str, url_b: str) -> bool:
+    """True if url_a and url_b are the literal same URL modulo percent-encoding
+    differences — e.g. RSS gives a raw Unicode character (a smart quote) in
+    the path where the scraped page's og:image percent-encodes the same
+    character. Plain string equality misses this; is_same_photo_different_size
+    below is for genuinely different filenames/CDNs serving the same photo."""
+    return unquote(url_a) == unquote(url_b)
 
 
 def is_same_photo_different_size(url_a: str, url_b: str) -> bool:
