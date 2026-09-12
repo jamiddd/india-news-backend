@@ -83,6 +83,10 @@ services:
       # word ladder/quiz/editorial each night (see run_crossword_scheduler.py
       # despite the name), all of which now try APIVerve first.
       - APIVERVE_API_KEY=${APIVERVE_API_KEY:-}
+      # Missing here until 2026-09-12 — the horoscope prewarm silently no-op'd
+      # every night (get_or_create_horoscope only fetches live per-user-request).
+      - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
+      - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
 
   poll_scheduler:
     build:
