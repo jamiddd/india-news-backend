@@ -1,6 +1,7 @@
 import re
 import logging
 from typing import Any, Optional, TYPE_CHECKING
+from urllib.parse import urlparse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,42 @@ logger = logging.getLogger(__name__)
 BROKEN_IMAGE_CHECK_TIMEOUT_SECONDS = 5
 
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
+
+# Filename tokens CDNs use to mark a resized/cropped variant of the same
+# photo (e.g. Morung Express's RSS <enclosure> points at a "..._thumb_..."
+# filename while the scraped page's og:image points at the same photo's
+# full-size filename). Stripped before comparing so the two don't get kept
+# as if they were different photos.
+_SIZE_VARIANT_MARKERS = ("thumb", "thumbnail", "small", "medium", "mini", "preview", "scaled", "resized")
+_DIMENSION_RE = re.compile(r"\d{2,4}x\d{2,4}")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]")
+
+
+def _image_dedupe_key(image_url: str) -> str:
+    """Reduces an image URL to just its filename's alphanumeric characters,
+    with size/thumbnail markers and WxH dimension tags stripped, so that
+    e.g. '.../80521331_1789222770_thumb_21499369_1789222770_Workshop.jpg'
+    and '.../21499369_1789222770_Workshop.jpg' both collapse to a key where
+    one is a substring of the other (the thumb variant's filename embeds the
+    full-size one's, prefixed by its own id/timestamp — observed live on
+    Morung Express feeds)."""
+    basename = urlparse(image_url).path.lower().rsplit("/", 1)[-1]
+    name = basename.rsplit(".", 1)[0] or basename
+    name = _DIMENSION_RE.sub("", name)
+    for marker in _SIZE_VARIANT_MARKERS:
+        name = name.replace(marker, "")
+    return _NON_ALNUM_RE.sub("", name)
+
+
+def is_same_photo_different_size(url_a: str, url_b: str) -> bool:
+    """True if url_a and url_b look like the same photo at a different
+    resolution/crop rather than two distinct photos — see _image_dedupe_key.
+    Exact duplicate URLs are handled separately by simple string equality;
+    this only needs to catch same-photo-different-filename."""
+    key_a, key_b = _image_dedupe_key(url_a), _image_dedupe_key(url_b)
+    if not key_a or not key_b:
+        return False
+    return key_a == key_b or key_a in key_b or key_b in key_a
 
 # How many *distinct* articles from the same source may reuse the exact same
 # image URL before we conclude it isn't a real per-story photo but a
