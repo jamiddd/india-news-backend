@@ -1020,6 +1020,45 @@ def _default_apk_url() -> str:
     )
 
 
+@app.get("/donations/thanks", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def donation_thanks(request: Request):
+    """Razorpay's callback_url target after a captured donation.
+
+    An installed app never lets this render — it's a verified Android App
+    Link (see /.well-known/assetlinks.json below), so Chrome Custom Tabs
+    hands the redirect straight to the app instead of loading it as a page.
+    This HTML only shows for a browser without the app, or before App Link
+    verification has propagated to a given device.
+    """
+    return static_page("donation-thanks.html")
+
+
+# Android App Links: proves this domain and the app belong to the same
+# owner, so Chrome hands a matching URL to the app instead of rendering it.
+# The fingerprint is the app's *signing* certificate SHA-256 — if Play App
+# Signing is enabled for this app, that's Google's re-signing cert, not the
+# local upload keystore's, and this value must be swapped for the one shown
+# in Play Console under App integrity once available (see
+# donations-launch-checklist.md).
+ANDROID_APP_SHA256_FINGERPRINT = "81:25:2E:58:1D:98:67:17:9D:DD:98:89:E0:CB:BC:AB:35:77:06:D2:19:17:AA:EC:70:20:A0:9B:1E:95:4D:53"
+
+
+@app.get("/.well-known/assetlinks.json")
+@limiter.limit("60/minute")
+async def assetlinks(request: Request):
+    return JSONResponse([
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": "com.jamid.news",
+                "sha256_cert_fingerprints": [ANDROID_APP_SHA256_FINGERPRINT],
+            },
+        }
+    ])
+
+
 @app.get("/download", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def download_page(request: Request):

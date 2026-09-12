@@ -119,6 +119,15 @@ async def create_payment_link(amount_paise: int, user_id: Optional[str]) -> Opti
         # Partial payments would leave a link half-settled and a payment row
         # that doesn't match the amount asked for. A donation is one payment.
         "accept_partial": False,
+        # Redirects the browser here after payment. The Android app claims
+        # this URL as a verified App Link (see AndroidManifest.xml + the
+        # hosted assetlinks.json), so Chrome Custom Tabs hands the redirect
+        # straight back to the app instead of loading a web page — that's
+        # what lets the tab close itself into a native thank-you screen.
+        # Razorpay rejects non-http(s) schemes outright, so a custom URI
+        # scheme isn't an option here.
+        "callback_url": "https://openindiannews.com/donations/thanks",
+        "callback_method": "get",
     }
     if user_id:
         body["notes"] = {"user_id": user_id}
