@@ -629,6 +629,12 @@ class Article(Base):
     fetched_at = Column(DateTime(timezone=True), default=utc_now)
     
     image_url = Column(Text, nullable=True)
+    # Every distinct image found for this article (RSS-declared, then
+    # scraped og:image), deduped and in that priority order. image_url above
+    # is always image_urls[0] when present — kept as its own column so the
+    # app and API schema don't need to change to keep reading a single lead
+    # image. NULL for legacy rows predating this column.
+    image_urls = Column(JSON, nullable=True)
     video_url = Column(Text, nullable=True)
     # "image" or "video" — mirrors which of image_url/video_url is the lead
     # media to show; None for legacy rows predating this column. Derived at

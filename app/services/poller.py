@@ -337,13 +337,21 @@ async def ingest_source(
         author = candidate["author"]
         pub_date = candidate["pub_date"]
         content = extraction.content
-        # Prefer the RSS feed's own image (usually higher quality / more
-        # reliably the lead image) over the scraped page's og:image fallback.
-        image_url = candidate["rss_image_url"] or extraction.og_image_url
-        if await is_placeholder_image(session, source.id, image_url, url_hash):
-            image_url = None
-        elif await is_broken_image_url(client, image_url):
-            image_url = None
+        # Keep every distinct image we can find rather than picking just one:
+        # the RSS feed's own image (usually higher quality / more reliably
+        # the lead image) first, then the scraped page's og:image if it's a
+        # genuinely different URL. image_url (the lead, used everywhere the
+        # app/API already expects a single image) is always image_urls[0].
+        image_urls: list[str] = []
+        for candidate_image_url in (candidate["rss_image_url"], extraction.og_image_url):
+            if not candidate_image_url or candidate_image_url in image_urls:
+                continue
+            if await is_placeholder_image(session, source.id, candidate_image_url, url_hash):
+                continue
+            if await is_broken_image_url(client, candidate_image_url):
+                continue
+            image_urls.append(candidate_image_url)
+        image_url = image_urls[0] if image_urls else None
         # Prefer a real video (RSS video enclosure/media, then scraped
         # og:video) over the image — a video is a strictly richer lead media
         # when a story has both.
@@ -444,6 +452,7 @@ async def ingest_source(
                 content=content,
                 word_count=word_count_val,
                 image_url=image_url,
+                image_urls=image_urls or None,
                 video_url=video_url,
                 media_type=media_type,
                 video_is_short=video_is_short,
@@ -549,6 +558,7 @@ async def ingest_source(
                 content=content,
                 word_count=word_count_val,
                 image_url=image_url,
+                image_urls=image_urls or None,
                 video_url=video_url,
                 media_type=media_type,
                 video_is_short=video_is_short,

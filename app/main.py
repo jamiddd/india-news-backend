@@ -294,6 +294,7 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
             content=art.content,
             published_at=art.published_at,
             image_url=art.image_url,
+            image_urls=art.image_urls,
             video_url=art.video_url,
             video_is_short=art.video_is_short,
             video_duration_seconds=art.video_duration_seconds,

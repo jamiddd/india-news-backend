@@ -26,6 +26,10 @@ class ArticleOut(BaseModel):
     content: Optional[str] = None
     published_at: datetime
     image_url: Optional[str] = None
+    # Every distinct image found for the article (image_url is image_urls[0]
+    # when present) — detail-only, powers the gallery on the story/article
+    # detail screens. See models.Article.image_urls.
+    image_urls: Optional[List[str]] = None
     video_url: Optional[str] = None
     video_is_short: Optional[bool] = None
     video_duration_seconds: Optional[int] = None
