@@ -134,7 +134,14 @@ async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
                     },
                     json={
                         "model": MODEL,
-                        "max_tokens": 8000,
+                        # Raised from 8000 after a real 18-member chain hit
+                        # max_tokens on all 3 retry attempts identically —
+                        # spoken_script roughly doubles output size on top
+                        # of beats, so a large chain can systematically
+                        # outrun the old ceiling rather than just
+                        # occasionally flake (see the JSON-parse-failure
+                        # comment below).
+                        "max_tokens": 16000,
                         "system": SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": user_content}],
                     },
