@@ -103,6 +103,16 @@ async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Op
                     params={"key": settings.GEMINI_API_KEY},
                     json=payload,
                 )
+                if response.status_code == 429:
+                    # Preview TTS models carry tight per-minute quotas even
+                    # on paid tiers — a bare retry with no delay just
+                    # re-hits the same window and fails identically three
+                    # times in a row. Back off long enough to plausibly land
+                    # in the next quota window instead.
+                    wait_seconds = 20 * (attempt + 1)
+                    logger.warning("Gemini TTS rate limited (attempt %s), waiting %ss", attempt + 1, wait_seconds)
+                    await asyncio.sleep(wait_seconds)
+                    continue
                 response.raise_for_status()
                 data = response.json()
             candidates = data.get("candidates") or []
