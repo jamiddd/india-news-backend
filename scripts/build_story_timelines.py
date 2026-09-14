@@ -160,6 +160,55 @@ async def load_candidates(
     return by_id, assignment, known_incoherent_ids, picked_rows
 
 
+async def _find_existing_row(
+    session, chain_ids: FrozenSet[int], anchor_cluster_id: int,
+) -> Optional[StoryTimelineFeature]:
+    """Find the DB row that represents this chain, if any.
+
+    story_chains.py's assignment is not a strict partition (see the overlap
+    comment in run(), below) — two distinct_chains entries computed in the
+    same cycle can represent the same real-world story at two slightly
+    different growth points (e.g. one is a stale/narrower recomputation, the
+    other has already picked up a newer member), sharing most but not all
+    members. A naive `.in_(chain_ids)).first()` blindly re-points whichever
+    row it happens to find to today's "most recent member" anchor — which
+    crashes with a UniqueViolationError when a *different* row already
+    legitimately owns that target anchor value (observed 2026-09-14: two
+    "chain of 14" entries for the same Maharashtra FDA story, one still
+    anchored at an older member, colliding on flush).
+
+    Fetches every row whose current anchor is a member of this chain, then:
+      - a row already anchored at today's target anchor is exactly correct
+        and returned as-is (no repoint, no collision possible)
+      - otherwise, if exactly one row matches, it's the one to repoint
+      - otherwise (multiple distinct rows, none at the target), it's a
+        genuine multi-row convergence — pick the most recently generated as
+        canonical and repoint only that one, leaving the other(s) alone
+        rather than deleting possibly-still-linked data. Logged loudly since
+        this points at story_chains.py producing overlapping-but-distinct
+        chains for what's really one story, which is worth investigating
+        separately from this crash-avoidance fix.
+    """
+    result = await session.execute(
+        select(StoryTimelineFeature).where(StoryTimelineFeature.anchor_cluster_id.in_(list(chain_ids)))
+    )
+    matches = result.scalars().all()
+    if not matches:
+        return None
+    exact = next((row for row in matches if row.anchor_cluster_id == anchor_cluster_id), None)
+    if exact is not None:
+        return exact
+    if len(matches) > 1:
+        logger.warning(
+            "multiple existing rows (%s) match chain converging on anchor=%s with no exact match — "
+            "story_chains.py likely produced overlapping-but-distinct chains for the same story; "
+            "using the most recently generated as canonical, leaving the rest untouched",
+            [row.id for row in matches], anchor_cluster_id,
+        )
+        matches.sort(key=lambda row: row.narrative_generated_at or row.picked_at)
+    return matches[-1]
+
+
 async def generate_for_chain(
     session, chain_ids: FrozenSet[int], is_editorial_pick: bool, by_id: Dict[int, Cluster], *, dry_run: bool,
 ) -> tuple[Optional[int], Optional[bool]]:
@@ -175,10 +224,7 @@ async def generate_for_chain(
     anchor_cluster_id = members[-1].id  # most recent member — a fresh anchor each cycle as the chain grows
     sorted_ids = sorted(chain_ids)
 
-    existing_result = await session.execute(
-        select(StoryTimelineFeature).where(StoryTimelineFeature.anchor_cluster_id.in_(list(chain_ids)))
-    )
-    existing = existing_result.scalars().first()
+    existing = await _find_existing_row(session, chain_ids, anchor_cluster_id)
 
     needs_generation = (
         existing is None
