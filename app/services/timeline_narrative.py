@@ -64,8 +64,16 @@ narrative:
 
 Also write a SPOKEN version of the same narrative, for text-to-speech — a \
 "spoken_script" with an "intro" (spoken version of "context") and a "beats" \
-array parallel to the beats list above (same order, same count). This is \
-read aloud by a person talking you through the saga, not a screen reader:
+array parallel to the beats list above (same order, same count). This is a \
+radio/podcast host talking a listener through the saga, not a screen reader \
+and not a flat recap read in a monotone:
+- Host energy: an intro that hooks the listener in rather than just stating \
+  facts ("Alright, so this one's been building for weeks — let's get into \
+  it" is the kind of register to aim for, not that exact line every time). \
+  Rhetorical questions and asides are welcome ("So what actually happened \
+  next?", "Here's the part that got everyone's attention"). Vary pacing \
+  the way a host would for emphasis — short punchy sentences at a turning \
+  point, longer ones when laying out context.
 - Write for the ear, not the page. Contractions ("it's", "here's"). Varied \
   sentence length. Spoken transitions between beats ("so here's where it \
   gets interesting…", "now, back up a second…", "then, a few days later…") \
@@ -89,10 +97,10 @@ read aloud by a person talking you through the saga, not a screen reader:
 - Follow all the same content rules as the written version: no speculation, \
   no editorializing. If coherent is false, omit spoken_script entirely.
 - After the last beat, write a "closing" — one to two sentences that sum up \
-  where things stand right now, said the way a person would wrap up a recap \
-  ("so that's where it stands right now: ..."). This is a summary of what \
-  was just said, not a new development, not speculation about what happens \
-  next, and not an opinion.
+  where things stand right now, the way a radio host signs off a segment \
+  ("and that's where it stands right now" / "so that's the story, at least \
+  for the moment"). This is a summary of what was just said, not a new \
+  development, not speculation about what happens next, and not an opinion.
 
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
@@ -195,14 +203,15 @@ async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
 
 
 CLOSING_SYSTEM_PROMPT = """You are writing the closing line of a spoken \
-"story so far" recap, in the same voice as the rest of it — a person \
-talking a listener through the saga, not a screen reader.
+"story so far" recap, in the same voice as the rest of it — a radio/podcast \
+host wrapping up a segment, not a screen reader.
 
 You'll be given the intro and the beat-by-beat narration already written. \
 Write ONE to TWO sentences that sum up where things stand right now, the \
-way a person would wrap up a recap ("so that's where it stands right now: \
-..."). This is a summary of what was just said — not a new development, \
-not speculation about what happens next, and not an opinion.
+way a host signs off a segment ("and that's where it stands right now" / \
+"so that's the story, at least for the moment"). This is a summary of what \
+was just said — not a new development, not speculation about what happens \
+next, and not an opinion.
 
 Follow the same spoken-prose rules as the rest of the script: contractions, \
 no markdown, no bullet points, no parenthetical asides, numbers/acronyms \
@@ -264,8 +273,9 @@ async def call_claude_closing(intro: str, beats: List[str], *, attempts: int = 3
 
 
 SPOKEN_SCRIPT_ONLY_SYSTEM_PROMPT = """You are writing a SPOKEN version of an \
-already-written "story so far" recap, for text-to-speech — read aloud by a \
-person talking a listener through the saga, not a screen reader.
+already-written "story so far" recap, for text-to-speech — a radio/podcast \
+host talking a listener through the saga, not a screen reader and not a \
+flat recap read in a monotone.
 
 You'll be given the written context paragraph and the written beats \
 (already finalized — do not change their facts, order, or count). Produce:
@@ -273,10 +283,15 @@ You'll be given the written context paragraph and the written beats \
 - a "beats" array, same order and count as the beats given, each a spoken \
   version of that beat's narration
 - a "closing": one to two sentences summing up where things stand right \
-  now, the way a person would wrap up a recap. This is a summary of what \
-  was just said, not a new development, not speculation, not an opinion.
+  now, the way a host signs off a segment. This is a summary of what was \
+  just said, not a new development, not speculation, not an opinion.
 
 Writing rules for all of the above:
+- Host energy: an intro that hooks the listener in rather than just stating \
+  facts. Rhetorical questions and asides are welcome ("So what actually \
+  happened next?", "Here's the part that got everyone's attention"). Vary \
+  pacing the way a host would for emphasis — short punchy sentences at a \
+  turning point, longer ones when laying out context.
 - Write for the ear, not the page. Contractions ("it's", "here's"). Varied \
   sentence length. Spoken transitions between beats ("so here's where it \
   gets interesting…", "now, back up a second…", "then, a few days later…") \
