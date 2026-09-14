@@ -62,6 +62,16 @@ async def main():
     duration_a = len(pcm_a) / BYTES_PER_SECOND
     print(f"chunk A: {len(pcm_a)} bytes, computed duration {duration_a:.2f}s")
 
+    # Saved and encoded standalone (before concatenation) so a listener can
+    # tell whether a single isolated chunk is itself truncated, vs. only
+    # sounding cut off at the zero-gap boundary where it's glued to chunk B.
+    encoded_a = await _encode_pcm_to_m4a(pcm_a)
+    if encoded_a is not None:
+        a_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "test_timeline_audio_chunk_a.m4a"))
+        with open(a_path, "wb") as f:
+            f.write(encoded_a)
+        print(f"wrote standalone chunk A to {a_path} — listen to THIS first")
+
     print(f"--- synthesizing chunk B ({len(text_b)} chars) ---")
     pcm_b = await synthesize(text_b)
     if pcm_b is None:
