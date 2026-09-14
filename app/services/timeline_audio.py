@@ -87,6 +87,12 @@ async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Op
             "speechConfig": {
                 "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICE_NAME}}
             },
+            # Audio output is token-metered same as text, and the default
+            # cap is well short of what a multi-sentence beat needs — a
+            # short chunk was observed cutting off mid-sentence with no
+            # config here at all. Generous headroom; a beat/intro chunk is
+            # at most a few hundred words.
+            "maxOutputTokens": 16000,
         },
     }
     for attempt in range(attempts):
@@ -100,7 +106,19 @@ async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Op
                 response.raise_for_status()
                 data = response.json()
             candidates = data.get("candidates") or []
-            parts = (candidates[0].get("content", {}).get("parts") or []) if candidates else []
+            if not candidates:
+                raise ValueError(f"No candidates in Gemini TTS response: {data!r}"[:2000])
+            finish_reason = candidates[0].get("finishReason")
+            if finish_reason and finish_reason not in ("STOP", "FINISH_REASON_UNSPECIFIED"):
+                # MAX_TOKENS here means the audio itself was cut off mid-
+                # speech, not just a text-generation quirk — surface it
+                # loudly since it produces a file that looks structurally
+                # valid (ffprobe parses fine) but is missing audio content.
+                raise ValueError(
+                    f"Gemini TTS stopped early: finishReason={finish_reason}; "
+                    f"usage={data.get('usageMetadata')}"
+                )
+            parts = candidates[0].get("content", {}).get("parts") or []
             inline_data = next((p["inlineData"] for p in parts if "inlineData" in p), None)
             if inline_data is None:
                 raise ValueError(f"No inlineData in Gemini TTS response: {data!r}"[:2000])
