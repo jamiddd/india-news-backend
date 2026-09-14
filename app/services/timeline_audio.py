@@ -38,7 +38,12 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-TTS_MODEL = "gemini-2.5-flash-preview-tts"
+# 3.1 Flash costs 2x 2.5 Flash ($1.00/$20.00 vs $0.50/$10.00 per 1M input/
+# output tokens, per ai.google.dev/gemini-api/docs/pricing checked
+# 2026-09-14) — same price tier as 2.5 Pro, not a cheaper Flash step. Picked
+# deliberately anyway for better quality; revisit if monthly TTS spend
+# becomes a real line item.
+TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
 # Picked by ear from a full 30-voice Gemini TTS sample run (see
 # scripts/test_voice_samples.py) — these 5 were the finalists. One is
