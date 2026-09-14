@@ -2,12 +2,18 @@
 TTS call shape, PCM parameters, and the ffmpeg encode before any of it is
 wired into the nightly generation cycle (see the "Verification" section of
 the timeline-narration plan). Needs GEMINI_API_KEY in the environment;
-needs no DATABASE_URL, no Supabase config, and does not touch the DB or
-upload anything — it just writes a local .m4a file to listen to.
+needs no DATABASE_URL and does not touch the DB.
 
 Usage:
     GEMINI_API_KEY=... python3 scripts/test_timeline_audio.py
     GEMINI_API_KEY=... python3 scripts/test_timeline_audio.py "Custom sentence to synthesize."
+
+If SUPABASE_URL and SUPABASE_SERVICE_KEY are also set, additionally runs
+generate_audio() end-to-end against the real timeline-audio bucket (upload
+included) and fetches the result back over its public URL to confirm it's
+actually reachable — uploads under an obviously-fake anchor_cluster_id
+(999999999) so it's easy to find and delete from the bucket afterward.
+Without those two vars, only the local synthesize/encode steps run.
 
 Also verifies computed vs. actual chunk duration (via ffprobe) for two
 chunks concatenated together, since drift here is exactly what would make
@@ -20,9 +26,12 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import httpx  # noqa: E402
+
 from app.services.timeline_audio import (  # noqa: E402
     BYTES_PER_SECOND,
     _encode_pcm_to_m4a,
+    generate_audio,
     synthesize,
 )
 
@@ -107,6 +116,28 @@ async def main():
 
     print(f"\nPlay it: scp this file to your machine and open {os.path.basename(out_path)}, "
           "or if running locally just open it directly.")
+
+    if not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_KEY")):
+        print("\nSUPABASE_URL/SUPABASE_SERVICE_KEY not set — skipping the real upload test.")
+        return
+
+    print("\n--- end-to-end: generate_audio() against the real timeline-audio bucket ---")
+    fake_anchor_cluster_id = 999999999  # obviously-fake id, easy to spot/delete in the bucket later
+    spoken_script = {"intro": text_a, "beats": [text_b]}
+    result = await generate_audio(fake_anchor_cluster_id, spoken_script)
+    if result is None:
+        print("FAILED: generate_audio() returned None — check Supabase config/bucket name/service key.")
+        sys.exit(1)
+    print(f"generate_audio() result: {result}")
+
+    print(f"--- fetching {result['audio_url']} to confirm it's publicly reachable ---")
+    async with httpx.AsyncClient(timeout=15) as client:
+        response = await client.get(result["audio_url"])
+    print(f"GET {result['audio_url']} -> {response.status_code}, {len(response.content)} bytes")
+    if response.status_code == 200 and len(response.content) > 0:
+        print("OK: uploaded object is publicly fetchable.")
+    else:
+        print("WARNING: upload succeeded but the public URL didn't return audio — check bucket public flag/policies.")
 
 
 if __name__ == "__main__":
