@@ -28,6 +28,7 @@ import base64
 import hashlib
 import json
 import logging
+import tempfile
 from typing import Optional
 
 import httpx
@@ -110,30 +111,43 @@ async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Op
 
 
 async def _encode_pcm_to_m4a(pcm_bytes: bytes) -> Optional[bytes]:
-    """Pipe raw PCM through ffmpeg into a compressed AAC/m4a container.
+    """Pipe raw PCM into ffmpeg, encode to a compressed AAC/m4a container.
     Raw WAV would be simpler but multiplies storage/egress for no
-    perceptible quality gain on spoken narration."""
+    perceptible quality gain on spoken narration.
+
+    Writes to a temp file rather than stdout: an mp4 muxed straight to a
+    pipe needs frag_keyframe+empty_moov (no seeking back to patch the moov
+    atom), and that fragmented-mp4 output was confirmed to play back
+    incomplete/truncated in real players (QuickTime, Finder preview) even
+    though ffprobe parses its duration correctly — a fragmented mp4 is
+    valid but not universally well-supported for playback. Letting ffmpeg
+    seek back to write a normal moov atom (with +faststart so the moov sits
+    before the audio data, for progressive playback/streaming from the
+    Supabase public url) trades pure-streaming for actual compatibility,
+    which matters far more here since this is written once and played many
+    times by an Android media3 player."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-f", "s16le",
-            "-ar", str(PCM_SAMPLE_RATE),
-            "-ac", str(PCM_CHANNELS),
-            "-i", "pipe:0",
-            "-c:a", "aac",
-            "-b:a", "64k",
-            "-movflags", "frag_keyframe+empty_moov",  # lets ffmpeg write a valid m4a to a pipe without seeking back to patch the moov atom
-            "-f", "mp4",
-            "pipe:1",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate(input=pcm_bytes)
-        if proc.returncode != 0:
-            logger.warning("ffmpeg encode failed (rc=%s): %s", proc.returncode, stderr[-2000:])
-            return None
-        return stdout
+        with tempfile.NamedTemporaryFile(suffix=".m4a") as tmp:
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-y",
+                "-f", "s16le",
+                "-ar", str(PCM_SAMPLE_RATE),
+                "-ac", str(PCM_CHANNELS),
+                "-i", "pipe:0",
+                "-c:a", "aac",
+                "-b:a", "64k",
+                "-movflags", "+faststart",
+                tmp.name,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate(input=pcm_bytes)
+            if proc.returncode != 0:
+                logger.warning("ffmpeg encode failed (rc=%s): %s", proc.returncode, stderr[-2000:])
+                return None
+            return tmp.read()
     except Exception as exc:  # noqa: BLE001
         logger.warning("ffmpeg invocation failed: %s: %s", type(exc).__name__, exc)
         return None
