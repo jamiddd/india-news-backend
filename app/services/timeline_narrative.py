@@ -88,6 +88,11 @@ read aloud by a person talking you through the saga, not a screen reader:
   actually hinge on.
 - Follow all the same content rules as the written version: no speculation, \
   no editorializing. If coherent is false, omit spoken_script entirely.
+- After the last beat, write a "closing" — one to two sentences that sum up \
+  where things stand right now, said the way a person would wrap up a recap \
+  ("so that's where it stands right now: ..."). This is a summary of what \
+  was just said, not a new development, not speculation about what happens \
+  next, and not an opinion.
 
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
@@ -99,7 +104,8 @@ Respond with ONLY a JSON object, no markdown fences, matching exactly:
   ],
   "spoken_script": {
     "intro": "spoken version of the context paragraph",
-    "beats": ["spoken text for beat 0", "spoken text for beat 1"]
+    "beats": ["spoken text for beat 0", "spoken text for beat 1"],
+    "closing": "one to two sentence spoken wrap-up summing up where things stand"
   }
 }
 Omit "spoken_script" (or set it to null) when coherent is false."""

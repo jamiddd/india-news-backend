@@ -237,11 +237,16 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
 
     intro = spoken_script.get("intro") or ""
     beats = spoken_script.get("beats") or []
+    closing = spoken_script.get("closing") or ""
     if not intro or not beats:
         logger.warning("spoken_script for cluster %s missing intro/beats, skipping audio", anchor_cluster_id)
         return None
 
-    chunks = [intro, *beats]
+    # closing is optional (older cached spoken_scripts predate it) — when
+    # present it's just one more chunk appended after the beats, synthesized
+    # and concatenated the same way; it never gets its own beat offset since
+    # it isn't a beat the Android player highlights against.
+    chunks = [intro, *beats, *([closing] if closing else [])]
     pcm_chunks = await asyncio.gather(*(synthesize(chunk) for chunk in chunks))
     if any(pcm is None for pcm in pcm_chunks):
         logger.warning("audio synthesis incomplete for cluster %s, skipping", anchor_cluster_id)
@@ -250,10 +255,18 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     # Beat offsets are into the *beats* portion of the timeline, i.e.
     # relative to where narration starts — the intro's duration is beat 0's
     # start offset, matching what the Android player highlights against.
+    # Only iterate the beat chunks here (not closing) — offsets_seconds must
+    # stay exactly len(beats) long, or Android's beat-index lookup
+    # (beatIndexForPosition) misaligns against the actual beats list.
     offsets_seconds: list[float] = []
     running_bytes = len(pcm_chunks[0])  # intro
-    for pcm in pcm_chunks[1:]:
+    for pcm in pcm_chunks[1 : 1 + len(beats)]:
         offsets_seconds.append(round(running_bytes / BYTES_PER_SECOND, 2))
+        running_bytes += len(pcm)
+    # closing (if present) is the remaining chunk(s) after the beats —
+    # already counted into running_bytes by the loop above only up to the
+    # last beat, so add it in now for the final duration.
+    for pcm in pcm_chunks[1 + len(beats) :]:
         running_bytes += len(pcm)
 
     concatenated = b"".join(pcm_chunks)
