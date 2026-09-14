@@ -33,12 +33,8 @@ VOICES = [
 
 async def main():
     for voice_name in VOICES:
-        # synthesize() reads VOICE_NAME from the module at import time, so
-        # patch it per-call rather than importing it as a constant here.
-        import app.services.timeline_audio as ta
-        ta.VOICE_NAME = voice_name
         print(f"Synthesizing {voice_name}...")
-        pcm = await synthesize(SAMPLE_TEXT)
+        pcm = await synthesize(SAMPLE_TEXT, voice_name=voice_name)
         if pcm is None:
             print(f"  FAILED: {voice_name}")
             continue

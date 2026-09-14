@@ -28,6 +28,7 @@ import base64
 import hashlib
 import json
 import logging
+import random
 import tempfile
 from typing import Optional
 
@@ -37,10 +38,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Changing either of these changes every future narration's voice/model in
-# one place — never inline the string elsewhere.
 TTS_MODEL = "gemini-2.5-flash-preview-tts"
-VOICE_NAME = "Kore"
+
+# Picked by ear from a full 30-voice Gemini TTS sample run (see
+# scripts/test_voice_samples.py) — these 5 were the finalists. One is
+# chosen at random per story (see generate_audio) rather than per chunk, so
+# a single narration stays one consistent voice throughout while different
+# stories in the Timeline tab get some variety instead of everything
+# sounding identical.
+VOICE_NAMES = ["Iapetus", "Aoede", "Algenib", "Gacrux", "Sadachbia"]
 
 TTS_API_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{TTS_MODEL}:generateContent"
@@ -72,7 +78,9 @@ def script_hash(spoken_script: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Optional[bytes]:
+async def synthesize(
+    text: str, *, voice_name: str = VOICE_NAMES[0], attempts: int = 3, timeout: float = 60
+) -> Optional[bytes]:
     """POST one chunk of text to Gemini TTS, return raw PCM bytes or None
     once all attempts are exhausted. Mirrors llm_gen.call_claude_json's
     retry-then-None contract rather than raising, since a single failed
@@ -85,7 +93,7 @@ async def synthesize(text: str, *, attempts: int = 3, timeout: float = 60) -> Op
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {
-                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": VOICE_NAME}}
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice_name}}
             },
             # Audio output is token-metered same as text, and the default
             # cap is well short of what a multi-sentence beat needs — a
@@ -247,7 +255,10 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     # and concatenated the same way; it never gets its own beat offset since
     # it isn't a beat the Android player highlights against.
     chunks = [intro, *beats, *([closing] if closing else [])]
-    pcm_chunks = await asyncio.gather(*(synthesize(chunk) for chunk in chunks))
+    # One voice per story, not per chunk — picking randomly per chunk would
+    # make a single narration switch voices mid-story.
+    voice_name = random.choice(VOICE_NAMES)
+    pcm_chunks = await asyncio.gather(*(synthesize(chunk, voice_name=voice_name) for chunk in chunks))
     if any(pcm is None for pcm in pcm_chunks):
         logger.warning("audio synthesis incomplete for cluster %s, skipping", anchor_cluster_id)
         return None
