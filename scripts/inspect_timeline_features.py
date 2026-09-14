@@ -24,6 +24,11 @@ async def main() -> None:
                   f"coherent={r.coherent} top={r.last_seen_in_top}")
             print(f"  title: {r.title}")
             print(f"  context: {(r.context or '')[:200]}")
+            print(f"  audio_url: {r.audio_url}")
+            print(f"  audio_duration_seconds: {r.audio_duration_seconds}")
+            print(f"  audio_beat_offsets: {r.audio_beat_offsets}")
+            print(f"  spoken_script_hash: {r.spoken_script_hash}")
+            print(f"  audio_generated_at: {r.audio_generated_at}")
             print()
 
 
