@@ -14,12 +14,18 @@ narrative-generation cycle: a story with no audio renders exactly like a
 story generated before this feature existed. See generate_for_chain in
 scripts/build_story_timelines.py for how a None here is handled.
 
-Per-chunk synthesis (rather than one call for the whole narration) isn't
-just a workaround for Gemini TTS's small input window — a long saga would
-not fit in one call — it's also what makes beat-level highlighting possible:
-each chunk's duration becomes that beat's start offset in the concatenated
-file. There's no word-level timestamp API, so beat-level is the finest
-granularity available.
+Chunks (intro, one per beat, closing) are batched into as few TTS calls as
+fit under a per-call duration budget (see GROUP_MAX_SECONDS) rather than
+one call per chunk — Gemini's daily request quota (100 RPD observed on
+this account 2026-09-14) is the binding constraint in production, not
+tokens or cost, and an 8-10-chunk story at one-call-per-chunk could burn
+most of a day's quota by itself. There's no word-level timestamp API, so
+a chunk sharing a group with others gets its beat offset ESTIMATED by its
+share of the group's character count (see generate_audio) rather than
+measured exactly — only a chunk alone in its own group keeps an exact
+offset. This trades perfect sync for staying well under the daily quota;
+speech rate is steady enough sentence-to-sentence that it should still
+track closely for a highlighting feature.
 """
 from __future__ import annotations
 
@@ -67,6 +73,24 @@ BYTES_PER_SECOND = PCM_SAMPLE_RATE * PCM_SAMPLE_WIDTH * PCM_CHANNELS
 
 AUDIO_CONTENT_TYPE = "audio/mp4"
 AUDIO_FILE_EXTENSION = "m4a"
+
+# Gemini's maxOutputTokens=16000 for audio caps a single TTS call at
+# 16000/25 = 640s of speech. Grouping multiple chunks (intro/beats/closing)
+# into one call — instead of one call per chunk — is what keeps a typical
+# 8-10-chunk story's TTS cost down to 1-2 requests instead of 8-10,
+# which matters because Gemini's daily request quota (RPD) is the binding
+# constraint observed in production (100 RPD on this account as of
+# 2026-09-14 — see aistudio.google.com/rate-limit), not tokens or cost.
+# This budget is set well under the 640s hard cap (not right up against
+# it) so a single long beat doesn't push a group over on its own.
+GROUP_MAX_SECONDS = 480
+# ~150 wpm spoken English, ~5.1 chars/word incl. space -> ~12.75 chars/sec.
+# Used only to decide how many chunks fit in a group BEFORE synthesizing
+# (we don't know real audio duration until Gemini returns it) — a rough
+# per-group ceiling, not a per-beat offset estimate (see the char-
+# proportion note in generate_audio below, which is a separate estimate
+# computed from the ACTUAL group duration after synthesis).
+ESTIMATED_CHARS_PER_SECOND = 12.5
 
 
 def _configured() -> bool:
@@ -255,37 +279,70 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
         logger.warning("spoken_script for cluster %s missing intro/beats, skipping audio", anchor_cluster_id)
         return None
 
-    # closing is optional (older cached spoken_scripts predate it) — when
-    # present it's just one more chunk appended after the beats, synthesized
-    # and concatenated the same way; it never gets its own beat offset since
-    # it isn't a beat the Android player highlights against.
+    # closing is optional (older cached spoken_scripts predate it) — it's
+    # just one more chunk appended after the beats.
     chunks = [intro, *beats, *([closing] if closing else [])]
-    # One voice per story, not per chunk — picking randomly per chunk would
-    # make a single narration switch voices mid-story.
+
+    # Group consecutive chunks into as few TTS calls as safely fit under
+    # GROUP_MAX_SECONDS (estimated from character count, since we don't
+    # know real audio duration until Gemini returns it) — this is what
+    # turns an 8-10-chunk story into 1-2 requests instead of 8-10. A
+    # single chunk longer than the estimated budget still gets its own
+    # group rather than being split mid-sentence.
+    groups: list[list[int]] = []  # each entry: list of chunk indices
+    current_group: list[int] = []
+    current_est_seconds = 0.0
+    for i, chunk in enumerate(chunks):
+        est_seconds = len(chunk) / ESTIMATED_CHARS_PER_SECOND
+        if current_group and current_est_seconds + est_seconds > GROUP_MAX_SECONDS:
+            groups.append(current_group)
+            current_group = []
+            current_est_seconds = 0.0
+        current_group.append(i)
+        current_est_seconds += est_seconds
+    if current_group:
+        groups.append(current_group)
+
+    # One voice per story, not per chunk/group — picking randomly per call
+    # would make a single narration switch voices mid-story.
     voice_name = random.choice(VOICE_NAMES)
-    pcm_chunks = await asyncio.gather(*(synthesize(chunk, voice_name=voice_name) for chunk in chunks))
-    if any(pcm is None for pcm in pcm_chunks):
+    group_texts = ["\n\n".join(chunks[i] for i in group) for group in groups]
+    group_pcm = await asyncio.gather(*(synthesize(text, voice_name=voice_name) for text in group_texts))
+    if any(pcm is None for pcm in group_pcm):
         logger.warning("audio synthesis incomplete for cluster %s, skipping", anchor_cluster_id)
         return None
 
-    # Beat offsets are into the *beats* portion of the timeline, i.e.
-    # relative to where narration starts — the intro's duration is beat 0's
-    # start offset, matching what the Android player highlights against.
-    # Only iterate the beat chunks here (not closing) — offsets_seconds must
-    # stay exactly len(beats) long, or Android's beat-index lookup
-    # (beatIndexForPosition) misaligns against the actual beats list.
-    offsets_seconds: list[float] = []
-    running_bytes = len(pcm_chunks[0])  # intro
-    for pcm in pcm_chunks[1 : 1 + len(beats)]:
-        offsets_seconds.append(round(running_bytes / BYTES_PER_SECOND, 2))
-        running_bytes += len(pcm)
-    # closing (if present) is the remaining chunk(s) after the beats —
-    # already counted into running_bytes by the loop above only up to the
-    # last beat, so add it in now for the final duration.
-    for pcm in pcm_chunks[1 + len(beats) :]:
+    # Per-chunk offset within its group: estimated by that chunk's share
+    # of the group's TOTAL CHARACTER COUNT, scaled against the group's
+    # ACTUAL audio duration (not the pre-synthesis estimate above). This
+    # is an approximation — Gemini TTS has no word-level timestamp API —
+    # but speech rate is roughly steady sentence-to-sentence, so it should
+    # track closely enough for a highlighting feature (not karaoke-exact
+    # sync). Chunks sharing a group with others lose exact-boundary
+    # accuracy; a chunk alone in its own group is still exact (its offset
+    # is the group's real start, same as before batching).
+    chunk_offsets_seconds: list[float] = [0.0] * len(chunks)
+    running_bytes = 0
+    for group, pcm in zip(groups, group_pcm):
+        group_duration = len(pcm) / BYTES_PER_SECOND
+        group_start = running_bytes / BYTES_PER_SECOND
+        group_chars = sum(len(chunks[i]) for i in group)
+        chars_before = 0
+        for i in group:
+            chunk_offsets_seconds[i] = round(
+                group_start + (chars_before / group_chars) * group_duration if group_chars else group_start, 2
+            )
+            chars_before += len(chunks[i])
         running_bytes += len(pcm)
 
-    concatenated = b"".join(pcm_chunks)
+    # Beat offsets are into the *beats* portion of the timeline, i.e.
+    # relative to where narration starts — chunks[0] is the intro,
+    # chunks[1:1+len(beats)] are the beats. Only slice the beat chunks
+    # here — offsets_seconds must stay exactly len(beats) long, or
+    # Android's beat-index lookup (beatIndexForPosition) misaligns.
+    offsets_seconds = chunk_offsets_seconds[1 : 1 + len(beats)]
+
+    concatenated = b"".join(group_pcm)
     encoded = await _encode_pcm_to_m4a(concatenated)
     if encoded is None:
         return None
