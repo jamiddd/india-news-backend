@@ -263,6 +263,102 @@ async def call_claude_closing(intro: str, beats: List[str], *, attempts: int = 3
     )
 
 
+SPOKEN_SCRIPT_ONLY_SYSTEM_PROMPT = """You are writing a SPOKEN version of an \
+already-written "story so far" recap, for text-to-speech — read aloud by a \
+person talking a listener through the saga, not a screen reader.
+
+You'll be given the written context paragraph and the written beats \
+(already finalized — do not change their facts, order, or count). Produce:
+- an "intro": the spoken version of the context paragraph
+- a "beats" array, same order and count as the beats given, each a spoken \
+  version of that beat's narration
+- a "closing": one to two sentences summing up where things stand right \
+  now, the way a person would wrap up a recap. This is a summary of what \
+  was just said, not a new development, not speculation, not an opinion.
+
+Writing rules for all of the above:
+- Write for the ear, not the page. Contractions ("it's", "here's"). Varied \
+  sentence length. Spoken transitions between beats ("so here's where it \
+  gets interesting…", "now, back up a second…", "then, a few days later…") \
+  instead of restating each beat's date label as a header.
+- Expand numbers, dates, acronyms, and abbreviations into how a person would \
+  say them aloud (e.g. "the ISRO", "September third", "twenty percent").
+- No markdown, no bullet points, no parenthetical asides — spoken prose only.
+- Write for a listener with no background in the story's domain. Whenever a \
+  beat leans on a technical or domain-specific term to carry the actual \
+  stakes of what happened, gloss it in plain language in the same sentence \
+  or the one right after. Do not over-explain terms that carry no real \
+  weight in the story.
+- No speculation, no editorializing.
+
+Respond with ONLY a JSON object, no markdown fences, matching exactly:
+{
+  "intro": "spoken version of the context paragraph",
+  "beats": ["spoken text for beat 0", "spoken text for beat 1"],
+  "closing": "one to two sentence spoken wrap-up summing up where things stand"
+}"""
+
+
+async def call_claude_spoken_script_only(
+    context: str, beats: List[str], *, attempts: int = 3
+) -> dict:
+    """One-off backfill helper for rows that predate the spoken_script
+    feature entirely (chain hasn't changed since before spoken_script was
+    added, so build_story_timelines.py's "skip if unchanged" logic never
+    re-ran the full narrative prompt for them). Converts the existing
+    written context/beats into a spoken script without re-deciding
+    title/context/beats content, mirroring call_claude_closing's
+    "don't re-spend on what hasn't changed" reasoning one level up."""
+    if not settings.ANTHROPIC_API_KEY:
+        raise TimelineNarrativeError("ANTHROPIC_API_KEY not set in the environment.")
+
+    user_content = (
+        "Context:\n" + context + "\n\nBeats:\n" + "\n\n".join(f"{i + 1}. {b}" for i, b in enumerate(beats))
+    )
+
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.post(
+                    API_URL,
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "max_tokens": 16000,
+                        "output_config": {"effort": "medium"},
+                        "system": SPOKEN_SCRIPT_ONLY_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_content}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as e:
+            last_error = e
+            continue
+
+        text = "".join(
+            block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
+        )
+        cleaned = text.strip().strip("`").removeprefix("json").strip()
+        try:
+            import json as _json
+            return _json.loads(cleaned)
+        except Exception as e:
+            last_error = TimelineNarrativeError(
+                f"JSON parse failed ({e}); stop_reason={data.get('stop_reason')}; "
+                f"usage={data.get('usage')}; raw={text[:2000]}"
+            )
+
+    raise last_error if isinstance(last_error, TimelineNarrativeError) else TimelineNarrativeError(
+        f"call_claude_spoken_script_only failed after {attempts} attempts: {last_error}"
+    )
+
+
 def format_chain_for_prompt(members: List[Cluster], summaries: Dict[int, str]) -> str:
     lines = []
     for c in members:
