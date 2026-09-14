@@ -194,6 +194,75 @@ async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
     )
 
 
+CLOSING_SYSTEM_PROMPT = """You are writing the closing line of a spoken \
+"story so far" recap, in the same voice as the rest of it — a person \
+talking a listener through the saga, not a screen reader.
+
+You'll be given the intro and the beat-by-beat narration already written. \
+Write ONE to TWO sentences that sum up where things stand right now, the \
+way a person would wrap up a recap ("so that's where it stands right now: \
+..."). This is a summary of what was just said — not a new development, \
+not speculation about what happens next, and not an opinion.
+
+Follow the same spoken-prose rules as the rest of the script: contractions, \
+no markdown, no bullet points, no parenthetical asides, numbers/acronyms \
+expanded the way a person would say them aloud.
+
+Respond with ONLY the closing text itself — no quotes, no JSON, no preamble."""
+
+
+async def call_claude_closing(intro: str, beats: List[str], *, attempts: int = 3) -> str:
+    """One-off backfill helper: existing rows already have a full
+    spoken_script (intro + beats) from before the "closing" field existed.
+    Re-running the full narrative prompt just to add a closing line would
+    re-spend an LLM call on title/context/beats that haven't changed and
+    risk them drifting slightly on a reroll — this asks for only the
+    missing piece instead, using the SAME writing-style rules extracted
+    into CLOSING_SYSTEM_PROMPT above (kept in sync with the "closing"
+    guidance inside SYSTEM_PROMPT for new rows)."""
+    if not settings.ANTHROPIC_API_KEY:
+        raise TimelineNarrativeError("ANTHROPIC_API_KEY not set in the environment.")
+
+    user_content = (
+        "Intro:\n" + intro + "\n\nBeats:\n" + "\n\n".join(f"{i + 1}. {b}" for i, b in enumerate(beats))
+    )
+
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    API_URL,
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "max_tokens": 500,
+                        "system": CLOSING_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_content}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as e:
+            last_error = e
+            continue
+        text = "".join(
+            block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
+        )
+        cleaned = text.strip().strip('"').strip()
+        if cleaned:
+            return cleaned
+        last_error = TimelineNarrativeError(f"empty closing text; stop_reason={data.get('stop_reason')}")
+
+    raise last_error if isinstance(last_error, TimelineNarrativeError) else TimelineNarrativeError(
+        f"call_claude_closing failed after {attempts} attempts: {last_error}"
+    )
+
+
 def format_chain_for_prompt(members: List[Cluster], summaries: Dict[int, str]) -> str:
     lines = []
     for c in members:
