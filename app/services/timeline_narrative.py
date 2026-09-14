@@ -74,6 +74,18 @@ read aloud by a person talking you through the saga, not a screen reader:
   say them aloud (e.g. "the ISRO", "September third", "twenty percent").
 - No markdown, no bullet points, no parenthetical asides — this is spoken \
   prose only.
+- Write for a listener with no background in the story's domain — not just \
+  no prior knowledge of these specific events, but no assumed familiarity \
+  with the field's jargon either (this applies to any domain: finance, \
+  science, law, sports, politics — not only tech). Whenever a beat leans on \
+  a technical or domain-specific term to carry the actual stakes of what \
+  happened (why something matters or is risky/significant), gloss it in \
+  plain language in the same sentence or the one right after — don't just \
+  name the term and move on. A listener should understand WHY something \
+  matters, not just be told that it does. Do not over-explain terms that \
+  carry no real weight in the story (e.g. a passing acronym for an \
+  organization named once) — only gloss the ones the narrative's stakes \
+  actually hinge on.
 - Follow all the same content rules as the written version: no speculation, \
   no editorializing. If coherent is false, omit spoken_script entirely.
 
