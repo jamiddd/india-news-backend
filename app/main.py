@@ -2062,7 +2062,11 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     generation cycle's selection keeps its row and narrative (a direct
     link via GET /timelines/{id} still resolves) but stops appearing in
     this list, rather than being deleted or blanked."""
-    cache_key = "timelines:list"
+    # Bumped to :v2 when has_audio was added to the response shape — an old
+    # cached blob without that field would otherwise keep serving until
+    # CACHE_TTL_SECONDS expired, which is a silent staleness window rather
+    # than a deliberate choice.
+    cache_key = "timelines:list:v2"
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2100,6 +2104,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
             narrative_generated_at=row.narrative_generated_at,
             anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
             if row.anchor_cluster_id in anchors_by_id else None,
+            has_audio=row.audio_url is not None,
         )
         for row in rows
     ]
@@ -2119,7 +2124,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
     Same coherent/title/beats guard as the active list; ordered by when
     each one dropped, not by when it was last generated."""
-    cache_key = "timelines:archived"
+    cache_key = "timelines:archived:v2"  # bumped alongside timelines:list:v2, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2159,6 +2164,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
             anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
             if row.anchor_cluster_id in anchors_by_id else None,
             dropped_from_top_at=row.dropped_from_top_at,
+            has_audio=row.audio_url is not None,
         )
         for row in rows
     ]
@@ -2176,7 +2182,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
     round-trip. A direct link to a timeline that has fallen out of the
     list view (last_seen_in_top=false) still resolves here — only
     GET /timelines (the list) hides it."""
-    cache_key = f"timelines:{timeline_id}"
+    cache_key = f"timelines:{timeline_id}:v2"  # bumped alongside timelines:list:v2, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeatureDetailOut.model_validate_json(cached)
@@ -2219,6 +2225,9 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         narrative_generated_at=row.narrative_generated_at,
         beats=beats_out,
         dropped_from_top_at=row.dropped_from_top_at,
+        audio_url=row.audio_url,
+        audio_duration_seconds=row.audio_duration_seconds,
+        audio_beat_offsets=row.audio_beat_offsets,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out

@@ -29,6 +29,17 @@ never been generated, or its membership has changed since the last
 generation (a genuine new development happened). An unchanged chain keeps
 its last stored coherent verdict rather than re-asking the LLM.
 
+Spoken narration audio (app/services/timeline_audio.py) follows the same
+cost discipline one level down: the narrative's spoken_script is stored
+every time the narrative regenerates, but Gemini TTS is only actually
+called when its hash differs from the row's last-synthesized
+spoken_script_hash — so a narrative regeneration that happens to produce
+byte-identical spoken text (or a coherent:false chain, which never gets a
+spoken_script at all) costs zero TTS calls. A TTS/upload failure is
+logged and the existing audio_url is left untouched rather than blanked,
+same "don't blank a story someone might still be reading/listening to"
+reasoning as last_seen_in_top above.
+
 A chain that drops out of this cycle's selection entirely (not reached by
 the scan, or superseded) is NOT deleted or blanked — last_seen_in_top
 flips to false and the row (with its last-good narrative, if it had one)
@@ -92,6 +103,7 @@ from app.services.story_chains import (  # noqa: E402
     load_baseline_rates,
     load_clusters,
 )
+from app.services.timeline_audio import generate_audio, script_hash  # noqa: E402
 from app.services.timeline_narrative import TimelineNarrativeError, generate_narrative  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -148,6 +160,55 @@ async def load_candidates(
     return by_id, assignment, known_incoherent_ids, picked_rows
 
 
+async def _find_existing_row(
+    session, chain_ids: FrozenSet[int], anchor_cluster_id: int,
+) -> Optional[StoryTimelineFeature]:
+    """Find the DB row that represents this chain, if any.
+
+    story_chains.py's assignment is not a strict partition (see the overlap
+    comment in run(), below) — two distinct_chains entries computed in the
+    same cycle can represent the same real-world story at two slightly
+    different growth points (e.g. one is a stale/narrower recomputation, the
+    other has already picked up a newer member), sharing most but not all
+    members. A naive `.in_(chain_ids)).first()` blindly re-points whichever
+    row it happens to find to today's "most recent member" anchor — which
+    crashes with a UniqueViolationError when a *different* row already
+    legitimately owns that target anchor value (observed 2026-09-14: two
+    "chain of 14" entries for the same Maharashtra FDA story, one still
+    anchored at an older member, colliding on flush).
+
+    Fetches every row whose current anchor is a member of this chain, then:
+      - a row already anchored at today's target anchor is exactly correct
+        and returned as-is (no repoint, no collision possible)
+      - otherwise, if exactly one row matches, it's the one to repoint
+      - otherwise (multiple distinct rows, none at the target), it's a
+        genuine multi-row convergence — pick the most recently generated as
+        canonical and repoint only that one, leaving the other(s) alone
+        rather than deleting possibly-still-linked data. Logged loudly since
+        this points at story_chains.py producing overlapping-but-distinct
+        chains for what's really one story, which is worth investigating
+        separately from this crash-avoidance fix.
+    """
+    result = await session.execute(
+        select(StoryTimelineFeature).where(StoryTimelineFeature.anchor_cluster_id.in_(list(chain_ids)))
+    )
+    matches = result.scalars().all()
+    if not matches:
+        return None
+    exact = next((row for row in matches if row.anchor_cluster_id == anchor_cluster_id), None)
+    if exact is not None:
+        return exact
+    if len(matches) > 1:
+        logger.warning(
+            "multiple existing rows (%s) match chain converging on anchor=%s with no exact match — "
+            "story_chains.py likely produced overlapping-but-distinct chains for the same story; "
+            "using the most recently generated as canonical, leaving the rest untouched",
+            [row.id for row in matches], anchor_cluster_id,
+        )
+        matches.sort(key=lambda row: row.narrative_generated_at or row.picked_at)
+    return matches[-1]
+
+
 async def generate_for_chain(
     session, chain_ids: FrozenSet[int], is_editorial_pick: bool, by_id: Dict[int, Cluster], *, dry_run: bool,
 ) -> tuple[Optional[int], Optional[bool]]:
@@ -163,10 +224,7 @@ async def generate_for_chain(
     anchor_cluster_id = members[-1].id  # most recent member — a fresh anchor each cycle as the chain grows
     sorted_ids = sorted(chain_ids)
 
-    existing_result = await session.execute(
-        select(StoryTimelineFeature).where(StoryTimelineFeature.anchor_cluster_id.in_(list(chain_ids)))
-    )
-    existing = existing_result.scalars().first()
+    existing = await _find_existing_row(session, chain_ids, anchor_cluster_id)
 
     needs_generation = (
         existing is None
@@ -218,6 +276,37 @@ async def generate_for_chain(
     existing.anchor_label = None  # story_chains.py's get_story_timeline computes this separately; not needed here since the narrative's own title carries the same role
     existing.cluster_ids = sorted_ids
     existing.narrative_generated_at = datetime.now(timezone.utc)
+
+    # spoken_script is stored whenever the narrative regenerates, independent
+    # of whether audio synthesis itself succeeds — so the text is never
+    # stale even if TTS lags a cycle behind. coherent:false narratives never
+    # carry a spoken_script (see timeline_narrative.py's prompt), so this
+    # naturally skips audio for incoherent chains too.
+    spoken_script = narrative.get("spoken_script")
+    existing.spoken_script = spoken_script
+
+    if spoken_script and existing.coherent:
+        new_hash = script_hash(spoken_script)
+        if new_hash == existing.spoken_script_hash:
+            logger.info("spoken_script unchanged for chain anchor=%s, skipping TTS", anchor_cluster_id)
+        else:
+            try:
+                audio_result = await generate_audio(anchor_cluster_id, spoken_script)
+            except Exception as e:  # noqa: BLE001 - a TTS/upload failure must never break narrative generation
+                logger.warning("audio generation raised for chain anchor=%s: %s", anchor_cluster_id, e)
+                audio_result = None
+            if audio_result is None:
+                # Don't blank a story someone might still be listening to —
+                # same reasoning as leaving a dropped chain's narrative in
+                # place. The unchanged spoken_script_hash means next cycle
+                # will retry rather than silently giving up forever.
+                logger.warning("audio generation failed for chain anchor=%s, leaving existing audio untouched", anchor_cluster_id)
+            else:
+                existing.audio_url = audio_result["audio_url"]
+                existing.audio_duration_seconds = audio_result["audio_duration_seconds"]
+                existing.audio_beat_offsets = audio_result["audio_beat_offsets"]
+                existing.spoken_script_hash = audio_result["spoken_script_hash"]
+                existing.audio_generated_at = datetime.now(timezone.utc)
 
     return anchor_cluster_id, existing.coherent
 

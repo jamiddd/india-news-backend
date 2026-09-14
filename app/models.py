@@ -914,6 +914,21 @@ class StoryTimelineFeature(Base):
     picked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
+    # Spoken narration audio (see app/services/timeline_audio.py). Every
+    # column here is nullable and additive — Gemini TTS is a second vendor
+    # on top of an Anthropic-only backend, so a row with all of these null
+    # must render identically to a pre-audio row; the tab never depends on
+    # audio being present. spoken_script/spoken_script_hash exist separately
+    # from beats/narrative_generated_at because the spoken script can be
+    # regenerated (or fail to synthesize) independently of the written
+    # narrative — see the hash-skip logic in scripts/build_story_timelines.py.
+    spoken_script = Column(JSON, nullable=True)  # {"intro": str, "beats": [str, ...]} — parallel to `beats`, see timeline_narrative.py's SYSTEM_PROMPT
+    spoken_script_hash = Column(String(64), nullable=True)  # hash of spoken_script; unchanged hash => skip re-synthesizing audio
+    audio_url = Column(Text, nullable=True)  # public Supabase Storage URL; object name includes the script hash so a regeneration is a new URL and never serves stale cached audio
+    audio_duration_seconds = Column(Integer, nullable=True)
+    audio_beat_offsets = Column(JSON, nullable=True)  # [seconds, ...] per-beat start offsets into the concatenated audio, parallel to `beats`/`spoken_script.beats`
+    audio_generated_at = Column(DateTime(timezone=True), nullable=True)
+
 
 class BreakingStory(Base):
     """The "Breaking" slot — a pinned, badged card above the ranked feed for
