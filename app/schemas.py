@@ -204,6 +204,7 @@ class TimelineFeatureListItemOut(BaseModel):
     narrative_generated_at: Optional[datetime] = None
     anchor_cluster: Optional[StoryClusterListOut] = None
     dropped_from_top_at: Optional[datetime] = None  # None for active items; set for archived ("Past stories") items
+    has_audio: bool = False  # lets the list show a headphone badge without hydrating beats/audio_url
 
 
 class TimelineFeaturesOut(BaseModel):
@@ -218,6 +219,14 @@ class TimelineFeatureDetailOut(BaseModel):
     narrative_generated_at: Optional[datetime] = None
     beats: List[TimelineBeatOut]
     dropped_from_top_at: Optional[datetime] = None
+    # Spoken narration — served directly from the public Supabase bucket
+    # (see app/services/timeline_audio.py), never through this API, so
+    # these are just pointers. All three are None together when audio
+    # hasn't been generated (or failed) for this pick; the client renders
+    # exactly as it does today when audio_url is None.
+    audio_url: Optional[str] = None
+    audio_duration_seconds: Optional[int] = None
+    audio_beat_offsets: Optional[List[float]] = None  # seconds, parallel to `beats`
 
 
 class BreakingBeatOut(BaseModel):
