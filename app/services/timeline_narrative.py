@@ -142,6 +142,19 @@ async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
                         # occasionally flake (see the JSON-parse-failure
                         # comment below).
                         "max_tokens": 16000,
+                        # Sonnet 5 runs adaptive thinking by default, and
+                        # thinking tokens draw from the SAME max_tokens
+                        # budget before any output text is written — a
+                        # 19-member chain still truncated even at 16000
+                        # because thinking length varies unpredictably per
+                        # call and can eat most of the budget on a hard
+                        # coherence judgment. Bounding it to "medium" (this
+                        # task genuinely benefits from some reasoning — see
+                        # the module docstring on why Haiku isn't used here
+                        # — just not unbounded reasoning) leaves output
+                        # budget for the JSON large enough for max_tokens to
+                        # actually be about output size again.
+                        "output_config": {"effort": "medium"},
                         "system": SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": user_content}],
                     },
@@ -160,11 +173,14 @@ async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
             import json
             return json.loads(cleaned)
         except Exception as e:
-            # A long chain (many beats) can still outrun max_tokens even at
-            # 8000 — surface the raw text and the stop_reason so a truncation
-            # is legible as "ran out of tokens" rather than "malformed JSON".
+            # A long chain (many beats) can still outrun max_tokens — surface
+            # the raw text, stop_reason, and token usage (thinking vs.
+            # output split) so a truncation is legible as "ran out of
+            # tokens" (and specifically whether thinking or output ate the
+            # budget) rather than "malformed JSON".
             last_error = TimelineNarrativeError(
-                f"JSON parse failed ({e}); stop_reason={data.get('stop_reason')}; raw={text[:2000]}"
+                f"JSON parse failed ({e}); stop_reason={data.get('stop_reason')}; "
+                f"usage={data.get('usage')}; raw={text[:2000]}"
             )
 
     raise last_error if isinstance(last_error, TimelineNarrativeError) else TimelineNarrativeError(
