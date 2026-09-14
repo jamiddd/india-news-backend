@@ -2050,6 +2050,45 @@ async def get_cluster_timeline(
     return result_out
 
 
+async def _hero_clusters_for_timeline_rows(
+    db: AsyncSession, rows: List[StoryTimelineFeature]
+) -> Dict[int, StoryCluster]:
+    """Picks one representative cluster per row for the list card's hero
+    image/headline — the most-covered cluster in the whole chain (highest
+    distinct_source_count), not literally `anchor_cluster_id`.
+
+    anchor_cluster_id is "the most recent chain member, re-picked every
+    generation cycle" (see generate_for_chain) — a deliberate choice for
+    narrative regeneration/re-pointing, but a bad one for "which image
+    represents this story": a fast-growing chain's anchor drifts to
+    whatever cluster is newest at each cycle, which can be a small,
+    single-outlet update with an unrelated or missing image (observed
+    2026-09-14 on the "Toxic" box-office chain) rather than a well-covered,
+    well-illustrated moment of the story.
+
+    Returns row.id -> StoryCluster, keyed by the row's own id (not
+    anchor_cluster_id, which this deliberately ignores) so callers can't
+    accidentally fall back to the old behavior.
+    """
+    all_cluster_ids = {cid for row in rows for cid in (row.cluster_ids or [])}
+    if not all_cluster_ids:
+        return {}
+    clusters_result = await db.execute(
+        select(StoryCluster)
+        .where(StoryCluster.id.in_(all_cluster_ids))
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+    )
+    clusters_by_id = {c.id: c for c in clusters_result.scalars().all()}
+
+    hero_by_row_id: Dict[int, StoryCluster] = {}
+    for row in rows:
+        candidates = [clusters_by_id[cid] for cid in (row.cluster_ids or []) if cid in clusters_by_id]
+        if not candidates:
+            continue
+        hero_by_row_id[row.id] = max(candidates, key=lambda c: (c.distinct_source_count or 0, c.article_count or 0))
+    return hero_by_row_id
+
+
 @app.get(f"{settings.API_V1_STR}/timelines", response_model=TimelineFeaturesOut)
 @limiter.limit("60/minute")
 async def list_timeline_features(request: Request, db: AsyncSession = Depends(get_db)):
@@ -2066,7 +2105,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     # cached blob without that field would otherwise keep serving until
     # CACHE_TTL_SECONDS expired, which is a silent staleness window rather
     # than a deliberate choice.
-    cache_key = "timelines:list:v2"
+    cache_key = "timelines:list:v3"
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2084,15 +2123,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     # (e.g. an incoherent chain whose flag hasn't been flipped yet).
     rows = [r for r in result.scalars().all() if r.title and r.beats]
 
-    anchor_ids = [r.anchor_cluster_id for r in rows]
-    anchors_by_id: Dict[int, StoryCluster] = {}
-    if anchor_ids:
-        anchors_result = await db.execute(
-            select(StoryCluster)
-            .where(StoryCluster.id.in_(anchor_ids))
-            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        )
-        anchors_by_id = {c.id: c for c in anchors_result.scalars().all()}
+    hero_by_row_id = await _hero_clusters_for_timeline_rows(db, rows)
 
     items = [
         TimelineFeatureListItemOut(
@@ -2102,8 +2133,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
             story_count=len(row.cluster_ids or []),
             is_editorial_pick=row.is_editorial_pick,
             narrative_generated_at=row.narrative_generated_at,
-            anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
-            if row.anchor_cluster_id in anchors_by_id else None,
+            anchor_cluster=_cluster_to_list_out(hero_by_row_id[row.id]) if row.id in hero_by_row_id else None,
             has_audio=row.audio_url is not None,
         )
         for row in rows
@@ -2124,7 +2154,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
     Same coherent/title/beats guard as the active list; ordered by when
     each one dropped, not by when it was last generated."""
-    cache_key = "timelines:archived:v2"  # bumped alongside timelines:list:v2, see that endpoint's comment
+    cache_key = "timelines:archived:v3"  # bumped alongside timelines:list:v3, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2143,15 +2173,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     )
     rows = [r for r in result.scalars().all() if r.title and r.beats]
 
-    anchor_ids = [r.anchor_cluster_id for r in rows]
-    anchors_by_id: Dict[int, StoryCluster] = {}
-    if anchor_ids:
-        anchors_result = await db.execute(
-            select(StoryCluster)
-            .where(StoryCluster.id.in_(anchor_ids))
-            .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        )
-        anchors_by_id = {c.id: c for c in anchors_result.scalars().all()}
+    hero_by_row_id = await _hero_clusters_for_timeline_rows(db, rows)
 
     items = [
         TimelineFeatureListItemOut(
@@ -2161,8 +2183,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
             story_count=len(row.cluster_ids or []),
             is_editorial_pick=row.is_editorial_pick,
             narrative_generated_at=row.narrative_generated_at,
-            anchor_cluster=_cluster_to_list_out(anchors_by_id[row.anchor_cluster_id])
-            if row.anchor_cluster_id in anchors_by_id else None,
+            anchor_cluster=_cluster_to_list_out(hero_by_row_id[row.id]) if row.id in hero_by_row_id else None,
             dropped_from_top_at=row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
         )
@@ -2182,7 +2203,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
     round-trip. A direct link to a timeline that has fallen out of the
     list view (last_seen_in_top=false) still resolves here — only
     GET /timelines (the list) hides it."""
-    cache_key = f"timelines:{timeline_id}:v2"  # bumped alongside timelines:list:v2, see that endpoint's comment
+    cache_key = f"timelines:{timeline_id}:v3"  # bumped alongside timelines:list:v3, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeatureDetailOut.model_validate_json(cached)
