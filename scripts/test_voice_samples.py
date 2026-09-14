@@ -20,7 +20,15 @@ SAMPLE_TEXT = (
     "are still being worked out."
 )
 
-VOICES = ["Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Aoede"]
+# Remaining Gemini TTS prebuilt voices not already sampled — the first 7
+# (Kore, Puck, Charon, Zephyr, Fenrir, Leda, Aoede) were covered in an
+# earlier run; this is the rest of the full 30-voice catalog.
+VOICES = [
+    "Orus", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel",
+    "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia",
+    "Achernar", "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird",
+    "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat",
+]
 
 
 async def main():
