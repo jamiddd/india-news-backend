@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: Optional[str] = None
     EDITORIAL_BACKGROUND_BUCKET: str = "editorial-backgrounds"
 
+    # Spoken narration for the Timeline/Context tab (see app/services/
+    # timeline_audio.py) — Gemini is used only as the TTS engine, reusing the
+    # same Supabase Storage project/service key as editorial backgrounds
+    # above. Absent GEMINI_API_KEY = feature no-ops (no audio synthesized,
+    # tab renders exactly as it does without audio), same "absent config"
+    # convention as SUPABASE_URL/EDITORIAL_BACKGROUND_BUCKET.
+    GEMINI_API_KEY: Optional[str] = None
+    TIMELINE_AUDIO_BUCKET: str = "timeline-audio"
+
     # Daily sign-level horoscope provider. Kept server-side so the provider
     # can be changed or the feature disabled without releasing a new app.
     ASTROJSON_API_KEY: Optional[str] = None

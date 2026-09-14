@@ -144,3 +144,11 @@ services:
       # AND every /clusters/{id}/timeline or /related request.
       - REDIS_URL=${REDIS_URL}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Spoken narration TTS (app/services/timeline_audio.py) — reuses the
+      # `app` service's Supabase project/bucket credentials below for
+      # storage; this is only the Gemini key. Absent = no audio, narrative
+      # generation is unaffected.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TIMELINE_AUDIO_BUCKET=${TIMELINE_AUDIO_BUCKET:-timeline-audio}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}

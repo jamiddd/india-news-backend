@@ -3,10 +3,15 @@ FROM python:3.11-slim AS base
 WORKDIR /app
 
 # Install system dependencies
+# ffmpeg: encodes the concatenated PCM narration audio to a compressed
+# container for the Timeline tab's spoken narration (see
+# app/services/timeline_audio.py) — no Python package wraps this, it's
+# shelled out to directly.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
