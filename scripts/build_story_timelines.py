@@ -29,6 +29,17 @@ never been generated, or its membership has changed since the last
 generation (a genuine new development happened). An unchanged chain keeps
 its last stored coherent verdict rather than re-asking the LLM.
 
+Spoken narration audio (app/services/timeline_audio.py) follows the same
+cost discipline one level down: the narrative's spoken_script is stored
+every time the narrative regenerates, but Gemini TTS is only actually
+called when its hash differs from the row's last-synthesized
+spoken_script_hash — so a narrative regeneration that happens to produce
+byte-identical spoken text (or a coherent:false chain, which never gets a
+spoken_script at all) costs zero TTS calls. A TTS/upload failure is
+logged and the existing audio_url is left untouched rather than blanked,
+same "don't blank a story someone might still be reading/listening to"
+reasoning as last_seen_in_top above.
+
 A chain that drops out of this cycle's selection entirely (not reached by
 the scan, or superseded) is NOT deleted or blanked — last_seen_in_top
 flips to false and the row (with its last-good narrative, if it had one)
@@ -92,6 +103,7 @@ from app.services.story_chains import (  # noqa: E402
     load_baseline_rates,
     load_clusters,
 )
+from app.services.timeline_audio import generate_audio, script_hash  # noqa: E402
 from app.services.timeline_narrative import TimelineNarrativeError, generate_narrative  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -218,6 +230,37 @@ async def generate_for_chain(
     existing.anchor_label = None  # story_chains.py's get_story_timeline computes this separately; not needed here since the narrative's own title carries the same role
     existing.cluster_ids = sorted_ids
     existing.narrative_generated_at = datetime.now(timezone.utc)
+
+    # spoken_script is stored whenever the narrative regenerates, independent
+    # of whether audio synthesis itself succeeds — so the text is never
+    # stale even if TTS lags a cycle behind. coherent:false narratives never
+    # carry a spoken_script (see timeline_narrative.py's prompt), so this
+    # naturally skips audio for incoherent chains too.
+    spoken_script = narrative.get("spoken_script")
+    existing.spoken_script = spoken_script
+
+    if spoken_script and existing.coherent:
+        new_hash = script_hash(spoken_script)
+        if new_hash == existing.spoken_script_hash:
+            logger.info("spoken_script unchanged for chain anchor=%s, skipping TTS", anchor_cluster_id)
+        else:
+            try:
+                audio_result = await generate_audio(anchor_cluster_id, spoken_script)
+            except Exception as e:  # noqa: BLE001 - a TTS/upload failure must never break narrative generation
+                logger.warning("audio generation raised for chain anchor=%s: %s", anchor_cluster_id, e)
+                audio_result = None
+            if audio_result is None:
+                # Don't blank a story someone might still be listening to —
+                # same reasoning as leaving a dropped chain's narrative in
+                # place. The unchanged spoken_script_hash means next cycle
+                # will retry rather than silently giving up forever.
+                logger.warning("audio generation failed for chain anchor=%s, leaving existing audio untouched", anchor_cluster_id)
+            else:
+                existing.audio_url = audio_result["audio_url"]
+                existing.audio_duration_seconds = audio_result["audio_duration_seconds"]
+                existing.audio_beat_offsets = audio_result["audio_beat_offsets"]
+                existing.spoken_script_hash = audio_result["spoken_script_hash"]
+                existing.audio_generated_at = datetime.now(timezone.utc)
 
     return anchor_cluster_id, existing.coherent
 
