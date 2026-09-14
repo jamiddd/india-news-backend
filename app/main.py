@@ -51,13 +51,14 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, AdminTopic, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
     TimelineFeaturesOut, TimelineFeatureListItemOut, TimelineFeatureDetailOut, TimelineBeatOut,
     BreakingStoriesOut, BreakingStoryOut, BreakingStoryDetailOut, BreakingBeatOut,
+    AdminTopicsOut, AdminTopicOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -127,6 +128,7 @@ from app.admin_donations import router as admin_donations_router
 from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
 from app.admin_breaking import router as admin_breaking_router
+from app.admin_topics import router as admin_topics_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -406,6 +408,7 @@ app.include_router(admin_donations_router)
 app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
 app.include_router(admin_breaking_router)
+app.include_router(admin_topics_router)
 
 # Static assets for the landing page (device screenshots). Mounted rather
 # than inlined as data: URIs because the pages are served through the
@@ -2250,6 +2253,31 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         audio_duration_seconds=row.audio_duration_seconds,
         audio_beat_offsets=row.audio_beat_offsets,
     )
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/topics/active", response_model=AdminTopicsOut)
+@limiter.limit("60/minute")
+async def list_active_admin_topics(request: Request, db: AsyncSession = Depends(get_db)):
+    """Admin-pushed topics for today (India calendar) — see
+    app/models.py's AdminTopic and app/admin_topics.py. The app renders
+    each item as its own tab to the left of "For You", feeding `word`
+    into the same /search?q= query a user's own custom topic tab uses.
+    Auto-expires: a topic simply stops being returned once its topic_date
+    is no longer today, no admin cleanup needed."""
+    cache_key = "topics:active"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return AdminTopicsOut.model_validate_json(cached)
+
+    result = await db.execute(
+        select(AdminTopic)
+        .where(AdminTopic.topic_date == india_today())
+        .order_by(AdminTopic.display_order, AdminTopic.id)
+    )
+    items = [AdminTopicOut(id=row.id, word=row.word) for row in result.scalars().all()]
+    result_out = AdminTopicsOut(items=items)
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 

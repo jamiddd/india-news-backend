@@ -212,6 +212,7 @@ NAV = [
     ("/admin/users", "Users"),
     ("/admin/timelines", "Timelines"),
     ("/admin/breaking", "Breaking review"),
+    ("/admin/topics", "Topics"),
 ]
 
 

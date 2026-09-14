@@ -263,6 +263,28 @@ class DailyWordSearch(Base):
     generated_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class AdminTopic(Base):
+    """A manually admin-pushed hot topic — surfaces as its own tab to the
+    left of "For You" in the app (see NewsFeedScreen.kt), backed by the
+    same /search?q= mechanism as a user's own custom topic tabs. Exists so
+    an admin has a guaranteed-visibility lever for a story the algorithmic
+    feed hasn't caught up to yet, without needing a code deploy.
+
+    One row per topic per day — several topics can be active on the same
+    `topic_date`, each becomes its own tab, ordered by `display_order`.
+    Auto-expires by date: GET /topics/active only returns rows whose
+    topic_date == today (India calendar), so nothing needs to be manually
+    deactivated for a topic to stop showing tomorrow.
+    """
+    __tablename__ = "admin_topics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    topic_date = Column(Date, nullable=False, index=True)
+    word = Column(String(60), nullable=False)
+    display_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DailySpellingBee(Base):
     __tablename__ = "daily_spelling_bees"
     id = Column(Integer, primary_key=True, index=True)

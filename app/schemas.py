@@ -260,6 +260,19 @@ class BreakingStoriesOut(BaseModel):
     items: List[BreakingStoryOut]
 
 
+class AdminTopicOut(BaseModel):
+    """GET /topics/active list item — see app/models.py's AdminTopic. `word`
+    is fed straight into the same /search?q= query a user's own custom
+    topic tab uses; the app doesn't need anything richer than the word
+    itself plus a stable key to build the tab."""
+    id: int
+    word: str
+
+
+class AdminTopicsOut(BaseModel):
+    items: List[AdminTopicOut]
+
+
 class BreakingStoryDetailOut(BaseModel):
     id: int
     cluster_id: int
