@@ -62,6 +62,21 @@ narrative:
   narrative that leans on a person's presence to paper over otherwise \
   disconnected events.
 
+Also write a SPOKEN version of the same narrative, for text-to-speech — a \
+"spoken_script" with an "intro" (spoken version of "context") and a "beats" \
+array parallel to the beats list above (same order, same count). This is \
+read aloud by a person talking you through the saga, not a screen reader:
+- Write for the ear, not the page. Contractions ("it's", "here's"). Varied \
+  sentence length. Spoken transitions between beats ("so here's where it \
+  gets interesting…", "now, back up a second…", "then, a few days later…") \
+  instead of restating each beat's date label as a header.
+- Expand numbers, dates, acronyms, and abbreviations into how a person would \
+  say them aloud (e.g. "the ISRO", "September third", "twenty percent").
+- No markdown, no bullet points, no parenthetical asides — this is spoken \
+  prose only.
+- Follow all the same content rules as the written version: no speculation, \
+  no editorializing. If coherent is false, omit spoken_script entirely.
+
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
   "coherent": true | false,
@@ -69,8 +84,13 @@ Respond with ONLY a JSON object, no markdown fences, matching exactly:
   "context": "orienting paragraph",
   "beats": [
     {"date_label": "e.g. 'Early August' or 'Sept 3'", "label": "short beat title", "narration": "2-4 sentences", "cluster_ids": [123, 124]}
-  ]
-}"""
+  ],
+  "spoken_script": {
+    "intro": "spoken version of the context paragraph",
+    "beats": ["spoken text for beat 0", "spoken text for beat 1"]
+  }
+}
+Omit "spoken_script" (or set it to null) when coherent is false."""
 
 
 class TimelineNarrativeError(Exception):
@@ -79,26 +99,40 @@ class TimelineNarrativeError(Exception):
     Callers should treat this as "try again next cycle", not fatal."""
 
 
-async def call_claude(user_content: str) -> dict:
+async def call_claude(user_content: str, *, attempts: int = 3) -> dict:
+    """Adding spoken_script to the required JSON made a truncated/malformed
+    reply more likely (more output tokens, more structure to get right), so
+    this retries transient failures instead of raising on the first bad
+    response — callers still see TimelineNarrativeError only once all
+    attempts are exhausted, so the "try again next cycle" contract is
+    unchanged."""
     if not settings.ANTHROPIC_API_KEY:
         raise TimelineNarrativeError("ANTHROPIC_API_KEY not set in the environment.")
-    async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            API_URL,
-            headers={
-                "x-api-key": settings.ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": MODEL,
-                "max_tokens": 8000,
-                "system": SYSTEM_PROMPT,
-                "messages": [{"role": "user", "content": user_content}],
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
+
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.post(
+                    API_URL,
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "max_tokens": 8000,
+                        "system": SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_content}],
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPError as e:
+            last_error = e
+            continue
+
         text = "".join(
             block.get("text", "") for block in data.get("content", []) if block.get("type") == "text"
         )
@@ -110,9 +144,13 @@ async def call_claude(user_content: str) -> dict:
             # A long chain (many beats) can still outrun max_tokens even at
             # 8000 — surface the raw text and the stop_reason so a truncation
             # is legible as "ran out of tokens" rather than "malformed JSON".
-            raise TimelineNarrativeError(
+            last_error = TimelineNarrativeError(
                 f"JSON parse failed ({e}); stop_reason={data.get('stop_reason')}; raw={text[:2000]}"
-            ) from e
+            )
+
+    raise last_error if isinstance(last_error, TimelineNarrativeError) else TimelineNarrativeError(
+        f"call_claude failed after {attempts} attempts: {last_error}"
+    )
 
 
 def format_chain_for_prompt(members: List[Cluster], summaries: Dict[int, str]) -> str:
