@@ -23,7 +23,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -123,12 +122,12 @@ async def dashboard(request: Request, q: str = "", db: AsyncSession = Depends(ge
     picks_html = "".join(_pick_row(row, csrf) for row in picks) if picks else "<p class=meta>No timeline rows yet.</p>"
 
     return layout(TITLE, (
-        f"<h1>Timeline editorial picks</h1>{nav('/admin/timelines')}"
+        f"<h1>Timeline editorial picks</h1>"
         f"<p class=meta>Up to 5 slots show in the Timeline/Context tab; editorial picks fill first, "
         f"the generation script fills the rest by chain length &times; recency.</p>"
         f"<form method=get><input name=q placeholder='search by headline' "
         f"value='{html.escape(q, quote=True)}'><button>Search</button></form>"
-        f"{search_html}<h2>Current rows</h2>{picks_html}"))
+        f"{search_html}<h2>Current rows</h2>{picks_html}"), current="/admin/timelines")
 
 
 @router.post("/update")

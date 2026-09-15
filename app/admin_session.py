@@ -87,20 +87,24 @@ STYLE = """
     :root{
       --ink:#171717; --ink-2:#4a4a4a; --ink-3:#767676;
       --bg:#ffffff; --surface:#F3F3F8; --line:#e4e4ea;
-      --accent:#1976D2; --on-accent:#FFFFFF; --danger:#C62828; --done:#2E7D32;
+      --accent:#1976D2; --accent-tint:rgba(25,118,210,0.10); --on-accent:#FFFFFF;
+      --danger:#C62828; --done:#2E7D32;
       --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
       --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
       --radius:14px;
+      --header-h:60px; --sidebar-w:220px;
     }
     @media (prefers-color-scheme:dark){ :root:not([data-theme=light]){
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
       --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-      --accent:#64B5F6; --on-accent:#171717; --danger:#EF5350; --done:#66BB6A;
+      --accent:#64B5F6; --accent-tint:rgba(100,181,246,0.14); --on-accent:#171717;
+      --danger:#EF5350; --done:#66BB6A;
     }}
     :root[data-theme=dark]{
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
       --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
-      --accent:#64B5F6; --on-accent:#171717; --danger:#EF5350; --done:#66BB6A;
+      --accent:#64B5F6; --accent-tint:rgba(100,181,246,0.14); --on-accent:#171717;
+      --danger:#EF5350; --done:#66BB6A;
     }
     *{box-sizing:border-box}
     body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.55}
@@ -110,9 +114,20 @@ STYLE = """
     a{color:var(--accent);text-decoration:none}
     a:hover{text-decoration:underline}
     header.bar{
+      height:var(--header-h);flex:0 0 auto;position:sticky;top:0;z-index:20;
       background:var(--bg);border-bottom:1px solid var(--line);
-      padding:14px 24px;display:flex;align-items:center;gap:10px;
+      padding:0 20px;display:flex;align-items:center;gap:12px;
     }
+    header.bar .hamburger{
+      display:none;width:32px;height:32px;flex:0 0 auto;border-radius:8px;
+      border:1px solid var(--line);background:var(--surface);
+      align-items:center;justify-content:center;cursor:pointer;padding:0;
+    }
+    header.bar .hamburger span,header.bar .hamburger span::before,header.bar .hamburger span::after{
+      content:"";display:block;width:16px;height:2px;background:var(--ink-2);border-radius:2px;position:relative;
+    }
+    header.bar .hamburger span::before{position:absolute;top:-5px}
+    header.bar .hamburger span::after{position:absolute;top:5px}
     header.bar .brand{display:flex;align-items:center;gap:10px}
     header.bar .brand:hover{text-decoration:none}
     header.bar .mark{width:32px;height:32px;flex:0 0 auto;border-radius:50%;display:block}
@@ -131,14 +146,49 @@ STYLE = """
        data-theme, so it can't fall out of sync with the actual state.
        This is just the pre-JS/no-JS fallback. */
     header.bar .theme-toggle .sun{display:none}
-    .wrap{max-width:920px;margin:0 auto;padding:28px 20px 60px}
+
+    /* Shell: toolbar above, sidebar + scrollable content below. The sidebar
+       lives in normal flex flow (not position:fixed/absolute) so that on
+       narrow screens opening it can push the content sideways instead of
+       overlaying it — see the mobile block below. */
+    .shell{display:flex;flex-direction:column;min-height:100vh}
+    .shell-body{display:flex;flex:1;min-height:0}
+    nav.sidebar{
+      flex:0 0 var(--sidebar-w);width:var(--sidebar-w);overflow-y:auto;
+      background:var(--bg);border-right:1px solid var(--line);padding:14px 10px;
+    }
+    nav.sidebar .group-label{
+      font-size:.72em;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;
+      padding:10px 10px 6px;
+    }
+    nav.sidebar a{
+      display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;
+      color:var(--ink-2);font-size:.93em;margin-bottom:1px;
+    }
+    nav.sidebar a:hover{background:var(--surface);color:var(--ink);text-decoration:none}
+    nav.sidebar a.current{background:var(--accent-tint);color:var(--accent);font-weight:600}
+    .wrap{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden}
+    .wrap-inner{max-width:900px;margin:0 auto;padding:28px 24px 60px}
+    @media (max-width:899px){
+      header.bar .hamburger{display:flex}
+      .shell-body{position:relative;overflow-x:hidden}
+      nav.sidebar{
+        flex-basis:0;width:0;padding-left:0;padding-right:0;border-right-width:0;
+        overflow:hidden;white-space:nowrap;transition:flex-basis .22s ease,width .22s ease,padding .22s ease;
+      }
+      .shell-body.nav-open nav.sidebar{
+        flex-basis:calc(var(--sidebar-w) - 40px);width:calc(var(--sidebar-w) - 40px);
+        padding:14px 10px;border-right-width:1px;
+      }
+      .wrap{flex:0 0 100%}
+    }
     @media (max-width:640px){
       header.bar .mark{width:28px;height:28px}
-      .wrap{padding:0}
-      main{padding:16px;border-radius:0;border-left:none;border-right:none;border-bottom:none}
+      .wrap-inner{padding:16px}
+      main{padding:0}
       table{display:block;overflow-x:auto;white-space:nowrap;max-width:100%;-webkit-overflow-scrolling:touch}
     }
-    main{background:var(--bg);border:1px solid var(--line);border-radius:var(--radius);padding:24px}
+    main{padding:0}
     input,textarea{
       box-sizing:border-box;width:100%;padding:10px 12px;margin:5px 0 12px;
       border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);
@@ -162,19 +212,6 @@ STYLE = """
     table{border-collapse:collapse}
     th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:.94em}
     th{color:var(--ink-3);font-weight:600;font-size:.82em;text-transform:uppercase;letter-spacing:.04em}
-    nav.admin-nav{
-      display:flex;flex-wrap:nowrap;gap:2px;margin:2px 0 22px;font-size:.92em;
-      overflow-x:auto;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--line);
-      scrollbar-width:none;
-    }
-    nav.admin-nav::-webkit-scrollbar{display:none}
-    nav.admin-nav a,nav.admin-nav b{
-      flex:0 0 auto;white-space:nowrap;padding:8px 14px;border-bottom:2px solid transparent;
-      margin-bottom:-1px;
-    }
-    nav.admin-nav a{color:var(--ink-2)}
-    nav.admin-nav a:hover{color:var(--ink);text-decoration:none}
-    nav.admin-nav b{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
 """
 
 # The app's own OIN mark (see app/static/home.html), inlined so the admin
@@ -201,28 +238,36 @@ MARK_SVG = (
     "</g></svg>"
 )
 
-NAV = [
-    ("/admin", "Daily review"),
-    ("/admin/polls", "Polls"),
-    ("/admin/quiz", "Quiz"),
-    ("/admin/quiz-bank", "Quiz bank"),
-    ("/admin/feedback", "Feedback"),
-    ("/admin/reports", "Story reports"),
-    ("/admin/donations", "Donations"),
-    ("/admin/users", "Users"),
-    ("/admin/timelines", "Timelines"),
-    ("/admin/breaking", "Breaking review"),
-    ("/admin/topics", "Topics"),
+# Grouped for the sidebar: "Review" is the daily in-and-out (drafts that
+# expire if nobody acts today), "Manage" is everything else, looked at less
+# often. Matches pending_reviews()/admin_notify.py's notion of what's urgent.
+NAV_GROUPS = [
+    ("Review", [
+        ("/admin", "Daily review"),
+        ("/admin/polls", "Polls"),
+        ("/admin/quiz", "Quiz"),
+        ("/admin/quiz-bank", "Quiz bank"),
+        ("/admin/feedback", "Feedback"),
+        ("/admin/reports", "Story reports"),
+    ]),
+    ("Manage", [
+        ("/admin/donations", "Donations"),
+        ("/admin/users", "Users"),
+        ("/admin/timelines", "Timelines"),
+        ("/admin/breaking", "Breaking review"),
+        ("/admin/topics", "Topics"),
+    ]),
 ]
 
 
-def nav(current: str) -> str:
-    """The cross-page nav bar. `current` is the href of the page rendering
-    it, so that page shows as bold rather than a link to itself."""
-    links = "".join(
-        f"<b>{label}</b>" if href == current else f"<a href='{href}'>{label}</a>"
-        for href, label in NAV)
-    return f"<nav class=admin-nav>{links}</nav>"
+def _sidebar(current: str | None) -> str:
+    groups = "".join(
+        f"<div class=group-label>{group}</div>" + "".join(
+            f"<a class=current href='{href}'>{label}</a>" if href == current
+            else f"<a href='{href}'>{label}</a>"
+            for href, label in links)
+        for group, links in NAV_GROUPS)
+    return f"<nav class=sidebar>{groups}</nav>"
 
 
 # Runs before first paint so a stored preference (or the OS preference, on a
@@ -283,13 +328,38 @@ THEME_TOGGLE_BTN = (
     "</button>"
 )
 
+HAMBURGER_BTN = (
+    "<button id=nav-toggle class=hamburger type=button aria-label='Toggle navigation'>"
+    "<span></span></button>"
+)
 
-def layout(title: str, body: str) -> HTMLResponse:
+# Toggles a class on .shell-body rather than the sidebar itself: the sidebar's
+# width/flex-basis transition (see STYLE's @media (max-width:899px) block) is
+# what makes it push the content over instead of overlaying it, and that
+# transition is keyed off the ancestor class so one toggle affects both the
+# sidebar and, if it ever needs to react too, the content pane next to it.
+NAV_TOGGLE_SCRIPT = (
+    "<script>(function(){"
+    "var btn=document.getElementById('nav-toggle');"
+    "var shellBody=document.querySelector('.shell-body');"
+    "if(!btn||!shellBody)return;"
+    "btn.addEventListener('click',function(){shellBody.classList.toggle('nav-open');});"
+    "})()</script>"
+)
+
+
+def layout(title: str, body: str, current: str | None = None) -> HTMLResponse:
+    """Renders the admin shell. `current` is the href of the page rendering
+    it — pass it to get the sidebar with that page highlighted; omit it (as
+    the login page does) to render without a sidebar at all."""
     header = (
-        "<header class=bar><a class=brand href='/'>"
+        "<header class=bar>"
+        + (HAMBURGER_BTN if current else "")
+        + "<a class=brand href='/'>"
         f"{MARK_SVG}<span class=wordmark>Open Indian News<span class=stop>.</span></span>"
         f"</a><span class=tag>Admin</span>{THEME_TOGGLE_BTN}</header>"
     )
+    sidebar = _sidebar(current) if current else ""
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<meta name=color-scheme content='light dark'>"
@@ -300,7 +370,9 @@ def layout(title: str, body: str) -> HTMLResponse:
         f"<text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' "
         f"fill='%23fff' text-anchor='middle'>O</text></svg>\">"
         f"<title>{title}</title><style>{STYLE}</style>{THEME_INIT_SCRIPT}</head>"
-        f"<body>{header}<div class=wrap><main>{body}</main></div>{THEME_TOGGLE_SCRIPT}</body></html>")
+        f"<body><div class=shell>{header}<div class=shell-body>{sidebar}"
+        f"<div class=wrap><div class=wrap-inner><main>{body}</main></div></div>"
+        f"</div></div>{THEME_TOGGLE_SCRIPT}{NAV_TOGGLE_SCRIPT if current else ''}</body></html>")
 
 
 def login_form(title: str, action: str) -> HTMLResponse:

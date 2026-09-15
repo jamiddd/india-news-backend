@@ -22,7 +22,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -153,7 +152,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         refresh_cards.append(_refresh_card(review, story, cluster, new_articles, csrf))
 
     body = (
-        f"<h1>Breaking review</h1>{nav('/admin/breaking')}"
+        f"<h1>Breaking review</h1>"
         f"<p class=meta>Approving runs the LLM narrative pass; rejecting costs nothing. "
         f"See backend/docs/breaking-human-review-plan.md.</p>"
         f"<h2>New candidates ({len(candidate_cards)})</h2>"
@@ -161,7 +160,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         + f"<h2>Refreshes ({len(refresh_cards)})</h2>"
         + ("".join(refresh_cards) if refresh_cards else "<p class=meta>None waiting.</p>")
     )
-    return layout(TITLE, body)
+    return layout(TITLE, body, current="/admin/breaking")
 
 
 @router.post("/candidate/{cluster_id}/decide")

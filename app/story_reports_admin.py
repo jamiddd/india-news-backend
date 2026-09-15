@@ -21,7 +21,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -68,7 +67,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
 
     if not reports:
-        return layout(TITLE, f"<h1>Story Reports</h1>{nav('/admin/reports')}<p>No open reports.</p>")
+        return layout(TITLE, f"<h1>Story Reports</h1><p>No open reports.</p>", current="/admin/reports")
 
     rows = []
     for report in reports:
@@ -86,7 +85,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             f"<button name=action value=reviewed>Mark reviewed</button>"
             f"<button name=action value=dismissed>Dismiss</button></form></div>"
         )
-    return layout(TITLE, f"<h1>Story Reports</h1>{nav('/admin/reports')}{''.join(rows)}")
+    return layout(TITLE, f"<h1>Story Reports</h1>{''.join(rows)}", current="/admin/reports")
 
 
 @router.post("/update")

@@ -24,7 +24,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -141,8 +140,8 @@ async def dashboard(request: Request, status: str = "new", page: int = 1,
         pager += f"<a href='/admin/feedback?status={status}&page={page + 1}'>older →</a>"
 
     return layout(TITLE, (
-        f"<h1>Feedback</h1>{nav('/admin/feedback')}<p class=meta>{tabs}</p>"
-        f"{entries}<p>{pager}</p>"))
+        f"<h1>Feedback</h1><p class=meta>{tabs}</p>"
+        f"{entries}<p>{pager}</p>"), current="/admin/feedback")
 
 
 @router.post("/update")

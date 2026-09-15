@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import layout, nav, session_csrf
+from app.admin_session import layout, session_csrf
 from app.database import get_db
 from app.models import Donation, SavedStory, User
 
@@ -77,8 +77,8 @@ async def dashboard(request: Request, q: str = "", page: int = 1, db: AsyncSessi
         pager += f"<a href='/admin/users?q={html.escape(q)}&page={page + 1}'>older →</a>"
 
     return layout(TITLE, (
-        f"<h1>Users</h1>{nav('/admin/users')}"
+        f"<h1>Users</h1>"
         f"<p class=meta>{total} matching · <a href='/admin/users'>clear</a></p>"
         f"<form method=get><input name=q placeholder='email, name, or user id' "
         f"value='{html.escape(q, quote=True)}'><button>Search</button></form>"
-        f"{table}<p>{pager}</p>"))
+        f"{table}<p>{pager}</p>"), current="/admin/users")

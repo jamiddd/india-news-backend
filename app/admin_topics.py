@@ -22,7 +22,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -95,7 +94,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     )
 
     body = (
-        f"<h1>Topics</h1>{nav('/admin/topics')}"
+        f"<h1>Topics</h1>"
         f"<p class=meta>Each row becomes its own tab to the left of \"For You\" in the app, "
         f"for that date only (India calendar) — auto-expires the next day, nothing to clean up. "
         f"Today is {today.isoformat()}.</p>"
@@ -107,7 +106,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         f"<button>Add topic</button></form>"
         f"<h2>Scheduled ({len(rows)})</h2>{table}"
     )
-    return layout(TITLE, body)
+    return layout(TITLE, body, current="/admin/topics")
 
 
 @router.post("/add")

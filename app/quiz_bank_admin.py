@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import form_fields, layout, nav, session_csrf, verify
+from app.admin_session import form_fields, layout, session_csrf, verify
 from app.database import get_db
 from app.models import QuizBankQuestion, utc_now
 
@@ -98,12 +98,12 @@ async def dashboard(request: Request, page: int = 1, db: AsyncSession = Depends(
         pager += f"<a href='/admin/quiz-bank?page={page + 1}'>older →</a>"
 
     return layout(TITLE, (
-        f"<h1>Quiz Question Bank</h1>{nav('/admin/quiz-bank')}"
+        f"<h1>Quiz Question Bank</h1>"
         f"<p class=meta>{total} question(s) · {active_total} active — "
         "generate_quiz() draws 5 active questions from here when Claude's draft "
         "fails validation, before falling back to the hardcoded curated set.</p>"
         f"{_add_form(csrf)}"
-        f"{table}<p>{pager}</p>"))
+        f"{table}<p>{pager}</p>"), current="/admin/quiz-bank")
 
 
 @router.post("/add")
@@ -132,9 +132,9 @@ async def add(request: Request, db: AsyncSession = Depends(get_db)):
 
     if error:
         return layout(TITLE, (
-            f"<h1>Quiz Question Bank</h1>{nav('/admin/quiz-bank')}"
+            f"<h1>Quiz Question Bank</h1>"
             f"{_add_form(fields.get('csrf', ''), error)}"
-            f"<p><a href='/admin/quiz-bank'>Back to the bank</a></p>"))
+            f"<p><a href='/admin/quiz-bank'>Back to the bank</a></p>"), current="/admin/quiz-bank")
 
     db.add(QuizBankQuestion(
         question=question, options=options, correct_index=correct_index,

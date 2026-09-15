@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import layout, nav, session_csrf
+from app.admin_session import layout, session_csrf
 from app.database import get_db
 from app.models import Donation, User, utc_now
 
@@ -79,5 +79,5 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         + "</table>") if rows else "<p class=meta>No donations yet.</p>"
 
     return layout(TITLE, (
-        f"<h1>Donations</h1>{nav('/admin/donations')}{summary}"
-        f"<h2>Last {PAGE_SIZE}</h2>{table}"))
+        f"<h1>Donations</h1>{summary}"
+        f"<h2>Last {PAGE_SIZE}</h2>{table}"), current="/admin/donations")

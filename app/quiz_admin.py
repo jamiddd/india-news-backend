@@ -26,7 +26,6 @@ from app.admin_session import (
     form_fields,
     layout,
     login_form,
-    nav,
     session_csrf,
     set_session_cookie,
     verify,
@@ -43,10 +42,10 @@ OPTION_COUNT = 4
 
 
 def _error_page(csrf: str, message: str) -> HTMLResponse:
-    return layout(TITLE, 
+    return layout(TITLE,
         f"<h1>Daily Quiz</h1><p class=danger>Draft generation failed: {html.escape(message)}</p>"
         f"<form method=post action='/admin/quiz/generate'><input type=hidden name=csrf value='{csrf}'>"
-        f"<button>Try again</button></form>")
+        f"<button>Try again</button></form>", current="/admin/quiz")
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -94,9 +93,9 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     quiz = await db.scalar(select(DailyQuiz).where(DailyQuiz.puzzle_date == today))
     if not quiz:
         return layout(TITLE,
-            f"<h1>Daily Quiz</h1>{nav('/admin/quiz')}<p>No quiz exists for {today}.</p>"
+            f"<h1>Daily Quiz</h1><p>No quiz exists for {today}.</p>"
             f"<form method=post action='/admin/quiz/generate'><input type=hidden name=csrf value='{csrf}'>"
-            f"<button>Generate draft</button></form>")
+            f"<button>Generate draft</button></form>", current="/admin/quiz")
 
     fields = "".join(_question_fieldset(i, q) for i, q in enumerate(quiz.questions[:QUESTION_COUNT]))
     editable = quiz.status == "draft"
@@ -111,11 +110,11 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         "<p class=meta>Readers are currently being served the curated fallback set, "
         "not this draft.</p>")
     return layout(TITLE,
-        f"<h1>Daily Quiz — {quiz.puzzle_date}</h1>{nav('/admin/quiz')}"
+        f"<h1>Daily Quiz — {quiz.puzzle_date}</h1>"
         f"<p class=meta>Status: {quiz.status} · Source: {quiz.source}</p>{served}"
         f"<form method=post action='/admin/quiz/update'>"
         f"<input type=hidden name=csrf value='{csrf}'>"
-        f"<input type=hidden name=quiz_id value='{quiz.id}'>{fields}{controls}</form>")
+        f"<input type=hidden name=quiz_id value='{quiz.id}'>{fields}{controls}</form>", current="/admin/quiz")
 
 
 async def _redraft(db: AsyncSession, day) -> None:
@@ -215,9 +214,9 @@ async def update(request: Request, db: AsyncSession = Depends(get_db)):
     try:
         questions = _read_edited_questions(raw)
     except ValueError as exc:
-        return layout(TITLE, 
+        return layout(TITLE,
             f"<h1>Daily Quiz</h1><p class=danger>{html.escape(str(exc))}</p>"
-            f"<a href='/admin/quiz'>Back to the draft</a>")
+            f"<a href='/admin/quiz'>Back to the draft</a>", current="/admin/quiz")
     quiz.questions = questions
     quiz.status = "approved"
     quiz.approved_at = utc_now()
