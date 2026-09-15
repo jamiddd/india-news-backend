@@ -151,7 +151,8 @@ STYLE = """
        lives in normal flex flow (not position:fixed/absolute) so that on
        narrow screens opening it can push the content sideways instead of
        overlaying it — see the mobile block below. */
-    .shell{display:flex;flex-direction:column;min-height:100vh}
+    html,body{height:100%;overflow:hidden}
+    .shell{display:flex;flex-direction:column;height:100vh}
     .shell-body{display:flex;flex:1;min-height:0}
     nav.sidebar{
       flex:0 0 var(--sidebar-w);width:var(--sidebar-w);overflow-y:auto;
