@@ -23,6 +23,15 @@ services:
       - FEED_GATE_ENABLED=${FEED_GATE_ENABLED:-true}
       - FEED_MIN_DISTINCT_SOURCES=${FEED_MIN_DISTINCT_SOURCES:-2}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Gemini TTS for Timeline/Context narration audio (see
+      # app/services/timeline_audio.py). Was only listed under
+      # timeline_scheduler below — that's the service the nightly cron
+      # cycle runs in, but the manual backfill scripts (e.g.
+      # scripts/backfill_all_timeline_audio.py) are run via `exec app`,
+      # and generate_audio() silently no-ops (no log line) when this is
+      # unset, which is what made a whole backfill run look like it failed
+      # with zero diagnostic output. Listed here too so both paths work.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       # Quote of the Day backgrounds live in a public Supabase Storage
       # bucket in the same project as the database. The service key only
       # lists the bucket; clients read the public object urls directly.

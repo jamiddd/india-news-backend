@@ -270,6 +270,20 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     all this cycle. The next cycle will simply retry from scratch.
     """
     if not _configured():
+        # Silent in normal operation would be indistinguishable from every
+        # other non-fatal skip here, but this one specifically means "the
+        # container's env is missing a key" — a misconfiguration, not a
+        # transient TTS/network failure — and 2026-09-15 lost a whole
+        # backfill run's worth of diagnosis to it looking identical to
+        # "audio generation failed" with zero explanation. Worth the one
+        # log line even though every other failure path in this function
+        # stays quiet by design.
+        logger.warning(
+            "generate_audio skipped for cluster %s: not configured (GEMINI_API_KEY=%s, "
+            "SUPABASE_URL=%s, SUPABASE_SERVICE_KEY=%s)",
+            anchor_cluster_id,
+            bool(settings.GEMINI_API_KEY), bool(settings.SUPABASE_URL), bool(settings.SUPABASE_SERVICE_KEY),
+        )
         return None
 
     intro = spoken_script.get("intro") or ""
