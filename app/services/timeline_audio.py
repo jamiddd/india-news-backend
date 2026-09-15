@@ -108,13 +108,20 @@ def script_hash(spoken_script: dict) -> str:
 
 
 async def synthesize(
-    text: str, *, voice_name: str = VOICE_NAMES[0], attempts: int = 3, timeout: float = 60
+    text: str, *, voice_name: str = VOICE_NAMES[0], attempts: int = 3, timeout: float = 240
 ) -> Optional[bytes]:
     """POST one chunk of text to Gemini TTS, return raw PCM bytes or None
     once all attempts are exhausted. Mirrors llm_gen.call_claude_json's
     retry-then-None contract rather than raising, since a single failed
     chunk should not be distinguishable from "TTS unavailable" to the
-    caller — both mean "skip audio for this cycle"."""
+    caller — both mean "skip audio for this cycle".
+
+    timeout default was 60s originally, which turned out too short once
+    groups are batched up toward GROUP_MAX_SECONDS=480s of speech — a
+    2026-09-15 backfill run hit ReadTimeout on every row at 60s (confirmed
+    the group itself was fine; a local one-off test of a ~90s-of-speech
+    chunk needed ~180s of wall-clock generation time). 240s leaves
+    headroom without being open-ended."""
     if not settings.GEMINI_API_KEY:
         return None
     payload = {
