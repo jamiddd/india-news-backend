@@ -1,13 +1,18 @@
-"""One-off backfill covering every coherent timeline row, regardless of
-which gap it has:
+"""Backfill covering coherent timeline rows, regardless of which gap a row
+has:
 
   - no spoken_script at all (chain hasn't changed since before that
     feature shipped, so build_story_timelines.py's "skip if unchanged"
     logic never regenerated it) -> generate the full spoken_script from
     the row's existing written context/beats via
     timeline_narrative.call_claude_spoken_script_only
-  - has a spoken_script but it predates the "closing" field -> generate
-    just the closing line via timeline_narrative.call_claude_closing
+  - has a spoken_script but it predates "style_scene"/"style_context" (the
+    per-story TTS delivery register added 2026-09-15 — see
+    timeline_narrative.py's SYSTEM_PROMPT) -> also regenerate the full
+    spoken_script via call_claude_spoken_script_only, since style can't be
+    retrofitted onto already-written spoken text piecemeal
+  - has a spoken_script with style fields but it predates "closing" ->
+    generate just the closing line via timeline_narrative.call_claude_closing
   - already complete -> skipped
 
 Either way, ends by calling generate_audio to (re)synthesize the audio,
@@ -15,13 +20,17 @@ which also means every row picks up the current TTS_MODEL/VOICE_NAMES in
 app/services/timeline_audio.py (e.g. the 2026-09-14 gemini-3.1-flash-tts-preview
 switch) even if its spoken_script itself didn't need to change.
 
-Supersedes backfill_timeline_closing.py and backfill_timeline_spoken_script.py
-as the one script to run for "make every existing timeline's audio current"
-rather than needing to know which of the two situations a given row is in.
+Default scope is rows with NO audio_url yet — the priority right now is
+filling gaps left by yesterday's Gemini rate-limit hits, not re-spending
+calls on rows that already have working audio. Pass --all for the
+occasional full-catalog pass (picks up style_scene/style_context on rows
+that already have audio) — safe to run since this app only has ~15 coherent
+timeline rows total, well under Gemini's ~100 RPD observed quota.
 
 Usage:
-    python3 scripts/backfill_all_timeline_audio.py            # do it
-    python3 scripts/backfill_all_timeline_audio.py --dry-run  # report only
+    python3 scripts/backfill_all_timeline_audio.py             # rows missing audio only
+    python3 scripts/backfill_all_timeline_audio.py --all       # every coherent row
+    python3 scripts/backfill_all_timeline_audio.py --dry-run   # report only (respects --all)
 """
 import argparse
 import asyncio
@@ -48,10 +57,17 @@ logger = logging.getLogger(__name__)
 
 
 async def _ensure_spoken_script(row: StoryTimelineFeature) -> dict | None:
-    """Returns a complete spoken_script (with closing) for this row, or
-    None if it can't be produced (missing context/beats, or generation
-    failed). Never mutates `row` — the caller decides when to assign."""
-    if not row.spoken_script:
+    """Returns a complete spoken_script (with closing, and style_scene/
+    style_context) for this row, or None if it can't be produced (missing
+    context/beats, or generation failed). Never mutates `row` — the caller
+    decides when to assign.
+
+    Missing spoken_script entirely and missing style fields are handled the
+    same way (a full call_claude_spoken_script_only regeneration) — style
+    can't be bolted onto already-written spoken text after the fact, it has
+    to be decided together with how that text is written."""
+    needs_full_regen = not row.spoken_script or "style_scene" not in row.spoken_script
+    if needs_full_regen:
         if not row.context or not row.beats:
             logger.warning("row id=%s: coherent but missing context/beats, skipping", row.id)
             return None
@@ -80,19 +96,33 @@ async def _ensure_spoken_script(row: StoryTimelineFeature) -> dict | None:
     return dict(row.spoken_script)  # already complete — still re-synthesized below
 
 
-async def run(dry_run: bool) -> None:
+async def run(dry_run: bool, include_all: bool) -> None:
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(StoryTimelineFeature).where(StoryTimelineFeature.coherent.is_(True))
-        )
+        query = select(StoryTimelineFeature).where(StoryTimelineFeature.coherent.is_(True))
+        if not include_all:
+            # Default scope: rows with no audio at all — filling gaps from
+            # a rate-limited run, not re-spending calls on rows that already
+            # have working audio. Pass --all for the occasional full pass.
+            query = query.where(StoryTimelineFeature.audio_url.is_(None))
+        result = await session.execute(query)
         rows = result.scalars().all()
-        logger.info("%d coherent rows total", len(rows))
+        logger.info(
+            "%d %s rows selected", len(rows), "coherent" if include_all else "coherent, missing-audio"
+        )
 
         for row in rows:
             has_script = bool(row.spoken_script)
+            has_style = has_script and "style_scene" in row.spoken_script
             has_closing = has_script and bool(row.spoken_script.get("closing"))
-            status = "complete" if has_closing else ("missing closing" if has_script else "missing spoken_script")
-            logger.info("row id=%s anchor=%s: %s", row.id, row.anchor_cluster_id, status)
+            status = (
+                "complete" if (has_style and has_closing)
+                else "missing style" if has_script
+                else "missing spoken_script"
+            )
+            logger.info(
+                "row id=%s anchor=%s: %s (audio=%s)",
+                row.id, row.anchor_cluster_id, status, "yes" if row.audio_url else "no",
+            )
 
             if dry_run:
                 continue
@@ -127,5 +157,9 @@ async def run(dry_run: bool) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--all", action="store_true",
+        help="include rows that already have audio (default: only rows missing audio)",
+    )
     args = parser.parse_args()
-    asyncio.run(run(args.dry_run))
+    asyncio.run(run(args.dry_run, args.all))
