@@ -283,6 +283,17 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     # just one more chunk appended after the beats.
     chunks = [intro, *beats, *([closing] if closing else [])]
 
+    # style_scene/style_context (see timeline_narrative.py's SYSTEM_PROMPT)
+    # are Claude's per-story delivery direction — same trick as AI Studio's
+    # "Try in Playground" Scene/Sample Context fields, chosen per story
+    # rather than one fixed register for everything (a cricket selection
+    # call and an AI-safety controversy shouldn't be read the same way).
+    # Older cached spoken_scripts predate this — absent means "no style
+    # direction", not an error, so this stays optional exactly like closing.
+    style_scene = spoken_script.get("style_scene") or ""
+    style_context = spoken_script.get("style_context") or ""
+    style_preamble = f"Scene: {style_scene}\nSample Context: {style_context}\n\n" if style_scene and style_context else ""
+
     # Group consecutive chunks into as few TTS calls as safely fit under
     # GROUP_MAX_SECONDS (estimated from character count, since we don't
     # know real audio duration until Gemini returns it) — this is what
@@ -306,7 +317,12 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     # One voice per story, not per chunk/group — picking randomly per call
     # would make a single narration switch voices mid-story.
     voice_name = random.choice(VOICE_NAMES)
-    group_texts = ["\n\n".join(chunks[i] for i in group) for group in groups]
+    # style_preamble is prepended to EVERY group's call, not just the first
+    # — each group is an independent, stateless TTS request, so delivery
+    # direction has to travel with each one to stay consistent across a
+    # multi-group story. The model is instructed not to voice it, so it
+    # doesn't affect returned audio duration/offsets below.
+    group_texts = [style_preamble + "\n\n".join(chunks[i] for i in group) for group in groups]
     group_pcm = await asyncio.gather(*(synthesize(text, voice_name=voice_name) for text in group_texts))
     if any(pcm is None for pcm in group_pcm):
         logger.warning("audio synthesis incomplete for cluster %s, skipping", anchor_cluster_id)

@@ -102,6 +102,31 @@ and not a flat recap read in a monotone:
   for the moment"). This is a summary of what was just said, not a new \
   development, not speculation about what happens next, and not an opinion.
 
+Also decide a DELIVERY STYLE for the text-to-speech voice actor reading \
+this script aloud — the register has to match what the story actually is, \
+not be one fixed voice for every story. A story that's genuinely a mystery \
+or controversy worth unpacking (e.g. a safety scandal, a cover-up, an \
+unresolved standoff) earns a curious, pulled-in, slightly conspiratorial \
+register. A routine update (a sports selection call, a policy rollout, a \
+quarterly earnings report) earns a brisk, knowledgeable, invested-but- \
+straightforward register instead — engaged like someone who cares about \
+the subject, not artificially dramatized into a mystery it isn't. Write \
+this as two short fields:
+- "style_scene": one sentence setting the voice actor's scene/persona for \
+  THIS story specifically (who they are, who they're talking to).
+- "style_context": one to two sentences of delivery direction — tone, \
+  pacing, how invested/curious/measured to sound — ending with an explicit \
+  instruction to read the words exactly as written and treat bracketed \
+  cues as delivery direction only, never spoken aloud. No slang, no Gen-Z \
+  internet speak, no profanity, regardless of register.
+Then place inline bracketed delivery cues — like [curious], [measured], \
+[building intrigue], [brisk], [invested], [knowing], [matter-of-fact], \
+[reflective] — at the start of sentences or clauses throughout "intro", \
+each "beats" entry, and "closing", picking cues that fit the style you \
+chose and the moment in the story (a turning point reads differently than \
+a routine detail). Use judgment on which cues fit; this list is a starting \
+point, not an exhaustive menu.
+
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
   "coherent": true | false,
@@ -111,9 +136,11 @@ Respond with ONLY a JSON object, no markdown fences, matching exactly:
     {"date_label": "e.g. 'Early August' or 'Sept 3'", "label": "short beat title", "narration": "2-4 sentences", "cluster_ids": [123, 124]}
   ],
   "spoken_script": {
-    "intro": "spoken version of the context paragraph",
-    "beats": ["spoken text for beat 0", "spoken text for beat 1"],
-    "closing": "one to two sentence spoken wrap-up summing up where things stand"
+    "style_scene": "one sentence: the voice actor's scene/persona for this story",
+    "style_context": "one to two sentences: tone/pacing direction, ending with the read-exactly-as-written instruction",
+    "intro": "spoken version of the context paragraph, with inline [cue] tags",
+    "beats": ["spoken text for beat 0, with inline [cue] tags", "spoken text for beat 1, with inline [cue] tags"],
+    "closing": "one to two sentence spoken wrap-up summing up where things stand, with inline [cue] tags"
   }
 }
 Omit "spoken_script" (or set it to null) when coherent is false."""
@@ -279,12 +306,28 @@ flat recap read in a monotone.
 
 You'll be given the written context paragraph and the written beats \
 (already finalized — do not change their facts, order, or count). Produce:
-- an "intro": the spoken version of the context paragraph
+- a "style_scene": one sentence setting the voice actor's scene/persona for \
+  THIS story specifically. Match the register to what the story actually \
+  is — a genuine mystery/controversy earns a curious, pulled-in, slightly \
+  conspiratorial register; a routine update (a selection call, a policy \
+  rollout, an earnings report) earns a brisk, knowledgeable, invested-but- \
+  straightforward register instead. Not one fixed voice for every story.
+- a "style_context": one to two sentences of delivery direction — tone, \
+  pacing, how invested/curious/measured to sound — ending with an explicit \
+  instruction to read the words exactly as written and treat bracketed \
+  cues as delivery direction only, never spoken aloud. No slang, no Gen-Z \
+  internet speak, no profanity, regardless of register.
+- an "intro": the spoken version of the context paragraph, with inline \
+  bracketed delivery cues (like [curious], [measured], [building intrigue], \
+  [brisk], [invested], [knowing], [matter-of-fact], [reflective] — pick \
+  what fits the style and moment, this list is a starting point) placed at \
+  the start of sentences or clauses
 - a "beats" array, same order and count as the beats given, each a spoken \
-  version of that beat's narration
+  version of that beat's narration with the same inline cue treatment
 - a "closing": one to two sentences summing up where things stand right \
-  now, the way a host signs off a segment. This is a summary of what was \
-  just said, not a new development, not speculation, not an opinion.
+  now, the way a host signs off a segment, with the same inline cue \
+  treatment. This is a summary of what was just said, not a new \
+  development, not speculation, not an opinion.
 
 Writing rules for all of the above:
 - Host energy: an intro that hooks the listener in rather than just stating \
@@ -308,9 +351,11 @@ Writing rules for all of the above:
 
 Respond with ONLY a JSON object, no markdown fences, matching exactly:
 {
-  "intro": "spoken version of the context paragraph",
-  "beats": ["spoken text for beat 0", "spoken text for beat 1"],
-  "closing": "one to two sentence spoken wrap-up summing up where things stand"
+  "style_scene": "one sentence: the voice actor's scene/persona for this story",
+  "style_context": "one to two sentences: tone/pacing direction, ending with the read-exactly-as-written instruction",
+  "intro": "spoken version of the context paragraph, with inline [cue] tags",
+  "beats": ["spoken text for beat 0, with inline [cue] tags", "spoken text for beat 1, with inline [cue] tags"],
+  "closing": "one to two sentence spoken wrap-up summing up where things stand, with inline [cue] tags"
 }"""
 
 
