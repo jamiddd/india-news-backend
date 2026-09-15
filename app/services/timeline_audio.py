@@ -51,13 +51,15 @@ logger = logging.getLogger(__name__)
 # becomes a real line item.
 TTS_MODEL = "gemini-3.1-flash-tts-preview"
 
-# Picked by ear from a full 30-voice Gemini TTS sample run (see
-# scripts/test_voice_samples.py) — these 5 were the finalists. One is
-# chosen at random per story (see generate_audio) rather than per chunk, so
-# a single narration stays one consistent voice throughout while different
-# stories in the Timeline tab get some variety instead of everything
-# sounding identical.
-VOICE_NAMES = ["Iapetus", "Aoede", "Algenib", "Gacrux", "Sadachbia"]
+# Narrowed 2026-09-15 from the original 5-voice finalist pool (Iapetus,
+# Aoede, Algenib, Gacrux, Sadachbia — picked by ear from a full 30-voice
+# Gemini TTS sample run, see scripts/test_voice_samples.py) down to these 2,
+# after the first 3 real narrations all landed on similar-sounding voices
+# from that pool. One is chosen at random per story (see generate_audio)
+# rather than per chunk, so a single narration stays one consistent voice
+# throughout while different stories in the Timeline tab still get some
+# variety instead of everything sounding identical.
+VOICE_NAMES = ["Algenib", "Gacrux"]
 
 TTS_API_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/{TTS_MODEL}:generateContent"
