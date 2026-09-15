@@ -118,7 +118,13 @@ this as two short fields:
   pacing, how invested/curious/measured to sound — ending with an explicit \
   instruction to read the words exactly as written and treat bracketed \
   cues as delivery direction only, never spoken aloud. No slang, no Gen-Z \
-  internet speak, no profanity, regardless of register.
+  internet speak, no profanity, regardless of register. ALWAYS include an \
+  explicit instruction to keep a steady, unhurried pace all the way \
+  through, even across a long passage — never speed up to get through \
+  more text. This applies no matter how long intro+beats+closing end up \
+  being combined, and no matter the register: a "brisk" register (see \
+  above) means efficient, no-nonsense delivery, NOT sped-up or rushed \
+  speech — those are different things and must not be conflated.
 Then place inline bracketed delivery cues — like [curious], [measured], \
 [building intrigue], [brisk], [invested], [knowing], [matter-of-fact], \
 [reflective] — at the start of sentences or clauses throughout "intro", \
@@ -316,7 +322,13 @@ You'll be given the written context paragraph and the written beats \
   pacing, how invested/curious/measured to sound — ending with an explicit \
   instruction to read the words exactly as written and treat bracketed \
   cues as delivery direction only, never spoken aloud. No slang, no Gen-Z \
-  internet speak, no profanity, regardless of register.
+  internet speak, no profanity, regardless of register. ALWAYS include an \
+  explicit instruction to keep a steady, unhurried pace all the way \
+  through, even across a long passage — never speed up to get through \
+  more text. This applies no matter how long intro+beats+closing end up \
+  being combined, and no matter the register: a "brisk" register (see \
+  above) means efficient, no-nonsense delivery, NOT sped-up or rushed \
+  speech — those are different things and must not be conflated.
 - an "intro": the spoken version of the context paragraph, with inline \
   bracketed delivery cues (like [curious], [measured], [building intrigue], \
   [brisk], [invested], [knowing], [matter-of-fact], [reflective] — pick \

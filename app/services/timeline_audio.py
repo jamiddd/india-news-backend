@@ -338,6 +338,11 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     # One voice per story, not per chunk/group — picking randomly per call
     # would make a single narration switch voices mid-story.
     voice_name = random.choice(VOICE_NAMES)
+    # Nothing else logs which voice a story got — a 2026-09-15 backfill of
+    # 3 rows all landing on male-sounding voices was undiagnosable after
+    # the fact without this, since object names embed the script hash, not
+    # the voice.
+    logger.info("cluster %s: picked voice %s", anchor_cluster_id, voice_name)
     # style_preamble is prepended to EVERY group's call, not just the first
     # — each group is an independent, stateless TTS request, so delivery
     # direction has to travel with each one to stay consistent across a
