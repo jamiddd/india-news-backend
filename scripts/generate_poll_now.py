@@ -1,5 +1,5 @@
 """One-off manual trigger to verify the AI poll-drafting path end to end,
-independent of the 04:30 IST scheduler. Calls the exact same generate_draft()
+independent of the 00:10 IST scheduler. Calls the exact same generate_draft()
 the scheduler uses, so a printed real question/options tied to a source
 headline confirms Claude actually drafted it (vs. the fallback bank, which
 this path never touches). Persists a normal `draft` row, reviewable/

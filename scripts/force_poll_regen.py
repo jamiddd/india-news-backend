@@ -3,7 +3,7 @@ One-off: replace an already-published daily poll with a freshly AI-drafted one.
 
 generate_poll_now.py cannot do this. generate_draft() refuses any poll whose
 status is not "draft" (HTTP 409), which is exactly the situation this script
-exists for: the 04:30 IST draft failed, activate_poll auto-published a
+exists for: the 00:10 IST draft failed, activate_poll auto-published a
 generic entry from the fallback bank at 09:00, and the day is now stuck with
 a fallback poll that nothing can overwrite.
 

@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     POLL_SESSION_SECRET: Optional[str] = None
     POLL_VOTER_HASH_SECRET: Optional[str] = None
 
-    # When a fresh AI poll draft is generated (04:30 IST), an FCM push is
+    # When a fresh AI poll draft is generated (00:10 IST), an FCM push is
     # sent to every device registered to this account, deep-linking straight
     # to the admin review page so the 09:00 publish window isn't missed.
     # Absent email = feature no-ops (no admin account to notify).

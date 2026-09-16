@@ -78,11 +78,11 @@ def test_poll_scheduler_runs_each_action_once_per_day():
         sleeping jumps straight to next_run."""
         now, log = start, []
         for _ in range(passes):
-            draft_at = datetime.combine(now.date(), time(4, 30))
+            draft_at = datetime.combine(now.date(), time(0, 10))
             publish_at = datetime.combine(now.date(), time(9))
             if now >= publish_at:
                 log.append(("publish", now.date()))
-                next_run = datetime.combine(now.date() + timedelta(days=1), time(4, 30))
+                next_run = datetime.combine(now.date() + timedelta(days=1), time(0, 10))
             elif now >= draft_at:
                 log.append(("prepare", now.date()))
                 next_run = publish_at

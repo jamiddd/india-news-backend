@@ -2,14 +2,17 @@
 one for the Breaking slot's human-review queue.
 
 The poll and the quiz are two drafts, but one person, one sitting, one moment
-in the morning. Two notifications would mean the second is either ignored as a
-duplicate or actioned separately hours later — so this sends a single message
-summarising both and deep-links to /admin, which lists them.
+right after midnight. Two notifications would mean the second is either
+ignored as a duplicate or actioned separately later — so this sends a single
+message summarising both and deep-links to /admin, which lists them.
 
-Timing works out without coordinating the two schedulers: the quiz draft for
-day D is written by run_crossword_scheduler at 23:55 IST on D-1, and the poll
-draft at 04:30 IST on D. By the time this fires (right after the poll draft),
-both already exist.
+Timing works out without coordinating the two schedulers: the quiz/games
+draft for day D is written by run_crossword_scheduler at 00:00 IST on D, and
+the poll draft at 00:10 IST — 10 minutes later, deliberately, so the quiz is
+always done first. By the time this fires (right after the poll draft),
+both already exist. (Was 23:55 IST the night before / 04:30 IST until
+2026-09-16, a ~4.5 hour gap doing the same job — merged onto the same
+near-midnight window at the user's request.)
 
 The Breaking-slot push (notify_admin_breaking_review) is a different shape —
 event-driven off the poller cycle rather than once a day — but reuses the

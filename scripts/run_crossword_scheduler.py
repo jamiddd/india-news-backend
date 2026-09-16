@@ -1,11 +1,16 @@
-"""Ensure today's crossword exists and pre-generate tomorrow at 23:55 IST.
+"""Ensure today's crossword exists, generated at 00:00 IST — merged onto the
+same near-midnight window as the poll draft (see run_poll_scheduler.py) so
+a single admin review push at 00:10 can report on both. Was 23:55 IST the
+night before until 2026-09-16; moved 10 minutes earlier than the poll draft
+specifically so the poll's notify always has a finished quiz to report on.
 
-Horoscopes run on their own clock and are deliberately NOT part of the 23:55
-run: AstroJson rolls over on UTC, so tomorrow's IST date does not exist for it
-until 05:30 IST. Verified against the live API on 2026-09-05 — today returned
-12/12 signs and tomorrow 0/12 — so asking at 23:55 is twelve paid calls that
-cannot succeed. They are fetched at 06:00 IST instead, and the 00:00-05:30
-window is served from the previous day (see app/services/horoscope.py).
+Horoscopes run on their own clock and are deliberately NOT part of this
+00:00 run: AstroJson rolls over on UTC, so tomorrow's IST date does not exist
+for it until 05:30 IST. Verified against the live API on 2026-09-05 — today
+returned 12/12 signs and tomorrow 0/12 — so asking at 00:00 is twelve paid
+calls that cannot succeed. They are fetched at 06:00 IST instead, and the
+00:00-05:30 window is served from the previous day (see
+app/services/horoscope.py).
 """
 import asyncio
 from datetime import datetime, time, timedelta
@@ -66,11 +71,14 @@ async def horoscope_loop():
 async def puzzle_loop():
     while True:
         now = datetime.now(IST)
-        run_at = datetime.combine(now.date(), time(23, 55), tzinfo=IST)
+        run_at = datetime.combine(now.date(), time(0, 0), tzinfo=IST)
         if now >= run_at:
             run_at += timedelta(days=1)
         await asyncio.sleep(max(1, (run_at - now).total_seconds()))
-        await ensure((run_at + timedelta(minutes=5)).date())
+        # run_at IS the target day's midnight now (unlike the old 23:55
+        # trigger, which woke before midnight and needed +5min to roll the
+        # date forward) — no date fudge needed.
+        await ensure(run_at.date())
 
 
 async def main():

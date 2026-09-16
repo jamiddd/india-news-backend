@@ -1,4 +1,10 @@
-"""Prepare the AI poll draft at 04:30 and publish at 09:00 Asia/Kolkata.
+"""Prepare the AI poll draft at 00:10 and publish at 09:00 Asia/Kolkata.
+
+00:10 is deliberately 10 minutes after run_crossword_scheduler.py's 00:00
+quiz/games generation (merged onto the same near-midnight window
+2026-09-16, was 04:30) — that gap is what guarantees the single admin
+review push below always has a finished quiz to report on, not just a
+finished poll.
 
 Usage:
     python3 scripts/run_poll_scheduler.py               # normal daemon loop
@@ -30,7 +36,7 @@ async def prepare(day):
             print(f"Poll draft ready for {day}", flush=True)
             if not already_existed:
                 # One push for both reviews. The quiz draft for today was
-                # written at 23:55 last night, so it is already here to
+                # written at 00:00, 10 minutes ago, so it is already here to
                 # report on. See app/services/admin_notify.py.
                 sent = await notify_admin_reviews_ready(session, day)
                 print(f"Admin review push {'sent' if sent else 'not sent'} for {day}", flush=True)
@@ -79,11 +85,11 @@ async def main():
     # sets of Claude retries instead of one.
     while True:
         now = datetime.now(IST)
-        draft_at = datetime.combine(now.date(), time(4, 30), tzinfo=IST)
+        draft_at = datetime.combine(now.date(), time(0, 10), tzinfo=IST)
         publish_at = datetime.combine(now.date(), time(9), tzinfo=IST)
         if now >= publish_at:
             await publish(now.date())
-            next_run = datetime.combine(now.date() + timedelta(days=1), time(4, 30), tzinfo=IST)
+            next_run = datetime.combine(now.date() + timedelta(days=1), time(0, 10), tzinfo=IST)
         elif now >= draft_at:
             await prepare(now.date())
             next_run = publish_at

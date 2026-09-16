@@ -1,6 +1,6 @@
 """
 One-off: force today's (or a given date's) crossword to regenerate right now
-via get_or_create_puzzle, instead of waiting for the 23:55 IST scheduler run.
+via get_or_create_puzzle, instead of waiting for the 00:00 IST scheduler run.
 Useful after a prompt/validation fix to confirm it actually resolves to "ai"
 without waiting for the next scheduled run. Mutates the DB (upserts the
 crossword row for that date) — not read-only like the other scripts/ here.
