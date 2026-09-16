@@ -173,6 +173,29 @@ class Settings(BaseSettings):
     # the quiz, so one notification covers both tasks. See app/admin_home.py.
     ADMIN_REVIEW_URL: str = "https://admin.openindiannews.com/"
 
+    # Developer alerts, independent of ADMIN_USER_EMAIL's device-token push.
+    # Added 2026-09-16 after a breaking review fired and nobody found out —
+    # the developer's debug installs are frequently signed out (no FCM device
+    # token gets uploaded then), so _push_to_admin had zero devices to send
+    # to and silently returned False. Two extra channels, both independent of
+    # sign-in state:
+    #
+    # ADMIN_ALERT_TOPIC: FCM topic name. subscribeToTopic() on the client is
+    # bound to the FCM instance, not a signed-in user, so a debug install
+    # receives this with no login at all. See admin_notify._push_to_admin.
+    ADMIN_ALERT_TOPIC: str = "admin-alerts"
+
+    # Plain Gmail SMTP (app password), deliberately not the Brevo account
+    # planned for real user-facing email (donation thanks/welcome/policy) —
+    # this is a dev-only out-of-band channel that must not depend on the
+    # phone, the app, or FCM being healthy. Absent config = feature no-ops,
+    # same convention as GEMINI_API_KEY etc. See app/services/admin_email.py.
+    ADMIN_ALERT_EMAIL_TO: Optional[str] = None
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
     # X-Client-Version header on every request (see main.py's

@@ -20,22 +20,32 @@ on the same device. See backend/docs/breaking-human-review-plan.md.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import DeviceToken, User
+from app.services.admin_email import send_admin_email
 
 logger = logging.getLogger(__name__)
 
+# Per-process, per-(source, exception type) cooldown for notify_admin_failure —
+# resets on restart, which is fine for a dev alert and avoids a migration.
+# Keeps a pipeline that fails every poll cycle from sending dozens of emails
+# a day and training the inbox to ignore them.
+_FAILURE_COOLDOWN = timedelta(minutes=60)
+_last_failure_alert: dict[str, datetime] = {}
+
 
 async def _push_to_admin(session: AsyncSession, title: str, body: str, url: str) -> bool:
-    """Shared delivery: look up the admin's devices and send one FCM data
-    message to each, tolerating individual dead-token/permission failures
-    the same way scripts/send_notifications.py does. Returns whether at
-    least one device was reached."""
+    """Shared delivery: send to the admin's registered devices AND the
+    admin-alerts FCM topic, tolerating individual dead-token/permission
+    failures the same way scripts/send_notifications.py does. The topic
+    send is what reaches a debug install with nobody signed in — device
+    tokens only exist once someone has logged in on that install. Returns
+    whether at least one delivery (device or topic) succeeded."""
     try:
         from firebase_admin import messaging
         from app.services.firebase_auth import _get_firebase_app
@@ -43,21 +53,34 @@ async def _push_to_admin(session: AsyncSession, title: str, body: str, url: str)
     except Exception:
         return False
 
-    admin = await session.scalar(select(User).where(User.email == settings.ADMIN_USER_EMAIL))
-    if not admin:
-        return False
-    tokens = (await session.execute(select(DeviceToken).where(DeviceToken.user_id == admin.id))).scalars().all()
+    data = {"title": title, "body": body, "url": url, "channel_id": "admin_alerts"}
     sent = False
-    for device in tokens:
+
+    admin = await session.scalar(select(User).where(User.email == settings.ADMIN_USER_EMAIL)) if settings.ADMIN_USER_EMAIL else None
+    if admin:
+        tokens = (await session.execute(select(DeviceToken).where(DeviceToken.user_id == admin.id))).scalars().all()
+        for device in tokens:
+            try:
+                messaging.send(messaging.Message(
+                    data=data,
+                    android=messaging.AndroidConfig(priority="high"),
+                    token=device.fcm_token,
+                ), app=app)
+                sent = True
+            except Exception:
+                continue
+
+    if settings.ADMIN_ALERT_TOPIC:
         try:
             messaging.send(messaging.Message(
-                data={"title": title, "body": body, "url": url, "channel_id": "admin_alerts"},
+                data=data,
                 android=messaging.AndroidConfig(priority="high"),
-                token=device.fcm_token,
+                topic=settings.ADMIN_ALERT_TOPIC,
             ), app=app)
             sent = True
         except Exception:
-            continue
+            pass
+
     return sent
 
 
@@ -101,7 +124,7 @@ async def notify_admin_reviews_ready(session: AsyncSession, day: date) -> bool:
     # admin page module at import time.
     from app.admin_home import pending_reviews
 
-    if not settings.ADMIN_USER_EMAIL:
+    if not (settings.ADMIN_USER_EMAIL or settings.ADMIN_ALERT_TOPIC):
         return False
     tasks = await pending_reviews(session, day)
     composed = compose(tasks)
@@ -125,7 +148,7 @@ async def notify_admin_breaking_review(session: AsyncSession, new_count: int, re
     Best-effort, same posture as notify_admin_reviews_ready: a notification
     failure must never touch the poller's own transaction.
     """
-    if not settings.ADMIN_USER_EMAIL:
+    if not (settings.ADMIN_USER_EMAIL or settings.ADMIN_ALERT_TOPIC or settings.ADMIN_ALERT_EMAIL_TO):
         return False
 
     parts = []
@@ -138,4 +161,29 @@ async def notify_admin_breaking_review(session: AsyncSession, new_count: int, re
 
     title = f"Breaking review: {' + '.join(parts)}"
     body = "Waiting for a developing-vs-echo call before the LLM narrative pass runs."
-    return await _push_to_admin(session, title, body, f"{settings.ADMIN_REVIEW_URL}/breaking")
+    url = f"{settings.ADMIN_REVIEW_URL}/breaking"
+
+    pushed = await _push_to_admin(session, title, body, url)
+    emailed = await send_admin_email(title, f"{body}\n\n{url}")
+    return pushed or emailed
+
+
+async def notify_admin_failure(source: str, error: Exception) -> bool:
+    """Email-only crash alert for a currently-silent `except` block. Kept
+    email-only (not FCM) since a pipeline failure shouldn't depend on FCM
+    itself being healthy. Rate-limited per (source, exception type) so a
+    pipeline failing every poll cycle doesn't send dozens of emails a day
+    and get filtered to spam — see _FAILURE_COOLDOWN above.
+
+    Best-effort: never raises, never touches the caller's own transaction.
+    """
+    key = f"{source}:{type(error).__name__}"
+    now = datetime.utcnow()
+    last = _last_failure_alert.get(key)
+    if last is not None and now - last < _FAILURE_COOLDOWN:
+        return False
+    _last_failure_alert[key] = now
+
+    subject = f"[oin] {source} failed"
+    body = f"{type(error).__name__}: {error}"
+    return await send_admin_email(subject, body)
