@@ -222,9 +222,10 @@ STYLE = """
     }
     button:hover{border-color:var(--accent)}
     .admin-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:22px 0 20px}
-    .admin-tabs a{padding:9px 14px;margin-bottom:-1px;border:1px solid transparent;border-radius:8px 8px 0 0;color:var(--ink-2)}
-    .admin-tabs a:hover{background:var(--bg);text-decoration:none}
-    .admin-tabs a.current{border-color:var(--line);border-bottom-color:var(--bg);background:var(--bg);color:var(--accent);font-weight:600}
+    .admin-tab-form{display:inline;margin:0}
+    .admin-tabs button.admin-tab{cursor:pointer;padding:9px 14px;margin:0 0 -1px;border:1px solid transparent;border-radius:8px 8px 0 0;background:transparent;color:var(--ink-2)}
+    .admin-tabs button.admin-tab:hover{background:var(--bg);border-color:var(--line)}
+    .admin-tabs button.admin-tab.current{border-color:var(--line);border-bottom-color:var(--bg);background:var(--bg);color:var(--accent);font-weight:600}
     .meta{color:var(--ink-3);font-size:.92em}
     .danger{color:var(--danger)}
     .done{color:var(--done)}

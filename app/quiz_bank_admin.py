@@ -71,18 +71,33 @@ def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) ->
 
 
 def _tabs(active: str) -> str:
-    """Render the two question-bank views as navigation tabs."""
+    """Render the two question-bank views as navigation tabs.
+
+    Use GET forms rather than text links because the admin subdomain proxy
+    rewrites the public path before forwarding it to the internal /admin
+    route. The submit buttons make the interaction unambiguous in browsers.
+    """
     tabs = (
-        ("create", "Add question", "/admin/quiz-bank?tab=create"),
-        ("list", "All questions", "/admin/quiz-bank?tab=list"),
+        # These are public paths on admin.openindiannews.com. Keeping them
+        # public here avoids relying on layout()'s internal /admin URL rewrite
+        # for query-string navigation.
+        ("create", "Add question", "/quiz-bank?tab=create"),
+        ("list", "All questions", "/quiz-bank?tab=list"),
     )
-    return (
-        "<nav class=admin-tabs aria-label='Quiz question bank views'>"
-        + "".join(
-            f"<a class={'current' if key == active else ''} "
-            f"href='{href}' {'aria-current=page' if key == active else ''}>{label}</a>"
-            for key, label, href in tabs
+    links = []
+    for key, label, href in tabs:
+        current_class = " current" if key == active else ""
+        current_attr = ' aria-current="page"' if key == active else ""
+        links.append(
+            f"<form method='get' action='/quiz-bank' class='admin-tab-form'>"
+            f"<input type='hidden' name='tab' value='{key}'>"
+            f"<button type='submit' class='admin-tab{current_class}'"
+            f"{current_attr}>{label}</button>"
+            "</form>"
         )
+    return (
+        "<nav class='admin-tabs' aria-label='Quiz question bank views'>"
+        + "".join(links)
         + "</nav>"
     )
 
@@ -139,9 +154,9 @@ async def dashboard(
     pager = ""
     if tab == "list":
         if page > 1:
-            pager += f"<a href='/admin/quiz-bank?tab=list&page={page - 1}'>← newer</a> "
+            pager += f"<a href='/quiz-bank?tab=list&page={page - 1}'>← newer</a> "
         if total > page * PAGE_SIZE:
-            pager += f"<a href='/admin/quiz-bank?tab=list&page={page + 1}'>older →</a>"
+            pager += f"<a href='/quiz-bank?tab=list&page={page + 1}'>older →</a>"
 
     content = _add_form(csrf) if tab == "create" else table + f"<p>{pager}</p>"
 
@@ -187,7 +202,7 @@ async def generate(request: Request, db: AsyncSession = Depends(get_db)):
         f"<h1>Quiz Question Bank</h1>"
         f"{_tabs('create')}"
         f"{_add_form(csrf, error, draft)}"
-        f"<p><a href='/admin/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
+        f"<p><a href='/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
 
 
 @router.post("/add")
@@ -219,7 +234,7 @@ async def add(request: Request, db: AsyncSession = Depends(get_db)):
             f"<h1>Quiz Question Bank</h1>"
             f"{_tabs('create')}"
             f"{_add_form(fields.get('csrf', ''), error)}"
-            f"<p><a href='/admin/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
+            f"<p><a href='/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
 
     db.add(QuizBankQuestion(
         question=question, options=options, correct_index=correct_index,
