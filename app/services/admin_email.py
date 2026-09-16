@@ -15,11 +15,34 @@ from __future__ import annotations
 import asyncio
 import logging
 import smtplib
+import socket
 from email.message import EmailMessage
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+class _IPv4SMTP(smtplib.SMTP):
+    """smtplib.SMTP, but forced onto an IPv4 socket.
+
+    getaddrinfo() for smtp.gmail.com returns both an AAAA and an A record,
+    and the stdlib tries them in OS-preferred order — on a droplet with no
+    IPv6 route configured (the DigitalOcean default), that means the first
+    connect attempt fails immediately with OSError: [Errno 101] Network is
+    unreachable, before IPv4 is ever tried. self._host stays the DNS name
+    (only the socket's address family is pinned), so starttls()'s
+    certificate hostname check against smtp.gmail.com is unaffected.
+    """
+
+    def _get_socket(self, host, port, timeout):
+        addrinfo = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+        family, socktype, proto, _canonname, sockaddr = addrinfo[0]
+        sock = socket.socket(family, socktype, proto)
+        if timeout is not None and timeout != socket._GLOBAL_DEFAULT_TIMEOUT:
+            sock.settimeout(timeout)
+        sock.connect(sockaddr)
+        return sock
 
 
 def _send_sync(subject: str, body: str) -> bool:
@@ -30,7 +53,7 @@ def _send_sync(subject: str, body: str) -> bool:
     msg.set_content(body)
 
     # Short timeout so a hung SMTP handshake can never wedge the poll cycle.
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
+    with _IPv4SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
         smtp.starttls()
         smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         smtp.send_message(msg)
