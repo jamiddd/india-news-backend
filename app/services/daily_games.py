@@ -306,32 +306,43 @@ async def generate_wordle(puzzle_date: date) -> tuple[str, str]:
 # Daily Quiz
 # ---------------------------------------------------------------------------
 
+def validate_quiz_question(item: dict) -> dict:
+    """Shape/safety check for one quiz question — 4 distinct options and a
+    valid correct_index, filtered for sensitive topics. Shared by the daily
+    quiz's 5-question batch validator below and quiz_bank_admin.py's
+    one-off "generate via Claude" flow, so both paths enforce the same
+    rules instead of the bank drifting from what generate_quiz() accepts."""
+    question = str(item.get("question") or "").strip()
+    options = [str(option).strip() for option in item.get("options") or []]
+    correct = item.get("correct_index")
+    explanation = str(item.get("explanation") or "").strip()
+    if not question:
+        raise ValueError("Missing question")
+    if len(options) != 4 or len({o.casefold() for o in options}) != 4:
+        raise ValueError("Need exactly 4 distinct options")
+    if not isinstance(correct, int) or not (0 <= correct < 4):
+        raise ValueError("correct_index out of range")
+    if UNSAFE.search(question):
+        raise ValueError("Unsafe question content")
+    return {"question": question, "options": options, "correct_index": correct, "explanation": explanation}
+
+
 def _validate_quiz(payload: dict) -> list[dict]:
-    """General-purpose quiz-shape validator — exactly 5 distinct questions,
-    each with 4 distinct options and a valid correct_index, filtered for
-    sensitive topics. Not on the APIVerve path (see _parse_trivia_question,
-    which validates one question at a time from a different payload shape)
-    but kept as the shape check for QUIZ_SETS and any future batch source."""
+    """General-purpose quiz-shape validator — exactly 5 distinct questions.
+    Not on the APIVerve path (see _parse_trivia_question, which validates
+    one question at a time from a different payload shape) but kept as the
+    shape check for QUIZ_SETS and any future batch source."""
     questions = payload.get("questions") or []
     if len(questions) != 5:
         raise ValueError("Need exactly 5 questions")
     seen_questions: set[str] = set()
     result = []
     for index, item in enumerate(questions):
-        question = str(item.get("question") or "").strip()
-        options = [str(option).strip() for option in item.get("options") or []]
-        correct = item.get("correct_index")
-        explanation = str(item.get("explanation") or "").strip()
-        if not question or question.casefold() in seen_questions:
+        validated = validate_quiz_question(item)
+        if validated["question"].casefold() in seen_questions:
             raise ValueError("Missing or duplicate question")
-        seen_questions.add(question.casefold())
-        if len(options) != 4 or len({o.casefold() for o in options}) != 4:
-            raise ValueError("Need exactly 4 distinct options")
-        if not isinstance(correct, int) or not (0 <= correct < 4):
-            raise ValueError("correct_index out of range")
-        if UNSAFE.search(question):
-            raise ValueError("Unsafe question content")
-        result.append({"id": index + 1, "question": question, "options": options, "correct_index": correct, "explanation": explanation})
+        seen_questions.add(validated["question"].casefold())
+        result.append({"id": index + 1, **validated})
     return result
 
 
@@ -349,6 +360,22 @@ QUIZ_SYSTEM = (
     "before it publishes and must not go stale.\n"
     "- Avoid death, disaster, crime and communal subjects entirely.\n"
     "- One sentence of explanation per question, saying why the answer is right."
+)
+
+# For quiz_bank_admin.py's one-off "generate via Claude" button — same rules
+# as QUIZ_SYSTEM but for a single question, since the bank is hand-curated
+# one at a time rather than drafted as a themed batch.
+BANK_QUIZ_SYSTEM = (
+    "You write a single general-knowledge quiz question for an Indian news app. "
+    "Return JSON only: {\"question\": str, \"options\": [4 strings], "
+    "\"correct_index\": int 0-3, \"explanation\": str}.\n"
+    "Rules:\n"
+    "- Exactly 4 options, all plausible, exactly one correct.\n"
+    "- Write for a general Indian readership.\n"
+    "- Timeless general knowledge, not this week's news — it goes into a "
+    "reviewed question bank and must not go stale.\n"
+    "- Avoid death, disaster, crime and communal subjects entirely.\n"
+    "- One sentence of explanation, saying why the answer is right."
 )
 
 # Rotated by day so each quiz has a narrow lane instead of open-ended "general

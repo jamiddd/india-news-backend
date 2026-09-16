@@ -10,6 +10,7 @@ admin page.
 from __future__ import annotations
 
 import html
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -19,6 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.admin_session import form_fields, layout, session_csrf, verify
 from app.database import get_db
 from app.models import QuizBankQuestion, utc_now
+from app.services.daily_games import BANK_QUIZ_SYSTEM, validate_quiz_question
+from app.services.llm_gen import call_claude_json
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/quiz-bank")
 TITLE = "Quiz Question Bank"
@@ -26,25 +31,41 @@ PAGE_SIZE = 25
 OPTION_COUNT = 4
 
 
-def _add_form(csrf: str, error: str | None = None) -> str:
+def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) -> str:
+    """`draft` pre-fills the form from a Claude-generated question — still
+    goes through this same form/submit so it's reviewed (and editable)
+    before it's saved, never written to the bank directly."""
+    draft = draft or {}
     error_html = f"<p class=danger>{html.escape(error)}</p>" if error else ""
+    draft_options = draft.get("options") or [""] * OPTION_COUNT
+    correct_index = draft.get("correct_index")
     options = "".join(
-        f"<label>Option {i + 1}<input name=option_{i} required></label>"
+        f"<label>Option {i + 1}<input name=option_{i} required "
+        f"value='{html.escape(draft_options[i] if i < len(draft_options) else '')}'></label>"
         for i in range(OPTION_COUNT)
     )
     correct_choices = "".join(
-        f"<option value={i}>Option {i + 1}</option>" for i in range(OPTION_COUNT)
+        f"<option value={i}{' selected' if correct_index == i else ''}>Option {i + 1}</option>"
+        for i in range(OPTION_COUNT)
     )
     return (
         "<details open><summary><b>Add a question</b></summary>"
         f"{error_html}"
+        "<form method=post action='/admin/quiz-bank/generate' style='margin-bottom:1em'>"
+        f"<input type=hidden name=csrf value='{csrf}'>"
+        "<label>Category for Claude to generate (optional)"
+        f"<input name=gen_category placeholder='e.g. history, geography' "
+        f"value='{html.escape(draft.get('category') or '')}'></label>"
+        "<button>Generate via Claude</button>"
+        "</form>"
         f"<form method=post action='/admin/quiz-bank/add'>"
         f"<input type=hidden name=csrf value='{csrf}'>"
-        "<label>Question<textarea name=question required></textarea></label>"
+        f"<label>Question<textarea name=question required>{html.escape(draft.get('question', ''))}</textarea></label>"
         f"{options}"
         f"<label>Correct answer<select name=correct_index>{correct_choices}</select></label>"
-        "<label>Explanation<input name=explanation></label>"
-        "<label>Category (optional)<input name=category placeholder='e.g. history, geography'></label>"
+        f"<label>Explanation<input name=explanation value='{html.escape(draft.get('explanation') or '')}'></label>"
+        f"<label>Category (optional)<input name=category placeholder='e.g. history, geography' "
+        f"value='{html.escape(draft.get('category') or '')}'></label>"
         "<button>Add to bank</button>"
         "</form></details>")
 
@@ -104,6 +125,41 @@ async def dashboard(request: Request, page: int = 1, db: AsyncSession = Depends(
         "fails validation, before falling back to the hardcoded curated set.</p>"
         f"{_add_form(csrf)}"
         f"{table}<p>{pager}</p>"), current="/admin/quiz-bank")
+
+
+@router.post("/generate")
+async def generate(request: Request, db: AsyncSession = Depends(get_db)):
+    """Draft one question with Claude and hand it back into the same
+    add-question form for review — never saved directly. Follows
+    [[llm-generation-human-review-gate]]: generate greedily, let the
+    human reviewer be the only gate before it's active in the bank."""
+    fields = await form_fields(request)
+    verify(request, fields)
+    csrf = fields.get("csrf", "")
+
+    category = (fields.get("gen_category") or "").strip()
+    user_content = (
+        f"Write a question about: {category}." if category
+        else "Write a question on any general-knowledge topic."
+    )
+
+    error = None
+    draft: dict = {}
+    payload = await call_claude_json(BANK_QUIZ_SYSTEM, user_content, max_tokens=500)
+    if payload is None:
+        error = "Claude request failed — try again."
+    else:
+        try:
+            draft = validate_quiz_question(payload)
+            draft["category"] = category or None
+        except Exception as exc:
+            logger.warning("Bank quiz generation failed validation: %s", exc)
+            error = f"Claude's draft failed validation ({exc}) — try again."
+
+    return layout(TITLE, (
+        f"<h1>Quiz Question Bank</h1>"
+        f"{_add_form(csrf, error, draft)}"
+        f"<p><a href='/admin/quiz-bank'>Back to the bank</a></p>"), current="/admin/quiz-bank")
 
 
 @router.post("/add")
