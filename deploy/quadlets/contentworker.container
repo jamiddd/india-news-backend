@@ -1,0 +1,30 @@
+# Quadlet unit for `contentworker` (renamed from crossword_scheduler
+# 2026-09-16 — runs crossword, sudoku, word search, spelling bee, word
+# ladder, quiz, editorial backgrounds, and horoscope prewarm nightly, see
+# scripts/run_crossword_scheduler.py, unchanged despite the old name).
+#
+# INSTALL: copy to /etc/containers/systemd/contentworker.container, then
+# `systemctl daemon-reload && systemctl start contentworker.service`.
+# Runs on BOTH droplets (not a singleton, unlike narrator.container).
+#
+# TODO before first use: replace <ENV_PATH> with the real absolute path on
+# the target droplet. See app.container's note on EnvironmentFile= passing
+# the whole .env rather than a per-service allow-list.
+
+[Unit]
+Description=News daily content prewarm (crossword/sudoku/word games/quiz/editorial/horoscope)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/india-news-backend-app:latest
+ContainerName=news_contentworker_prod
+Exec=python3 scripts/run_crossword_scheduler.py
+EnvironmentFile=<ENV_PATH>/india-news-backend/.env
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

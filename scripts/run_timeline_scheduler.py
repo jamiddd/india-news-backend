@@ -52,7 +52,40 @@ async def run_once() -> None:
         print(f"timeline generation cycle failed: {exc}", flush=True)
 
 
+PRIMARY_SCHEDULER_HOST = "newsapp"
+
+
+def _assert_primary_host() -> None:
+    """Refuse to start unless explicitly opted in as the primary host. This
+    scheduler must be single-instance (see docker-compose.prod.yml's comment
+    on this service) — two copies race to write the same
+    story_timeline_features rows and double the Claude API spend. That
+    happened for real, 2026-09-12 to 2026-09-16, when a copy was
+    accidentally left running on newsapp-2. A comment alone didn't prevent
+    it; this check is the structural backstop.
+
+    Not a container-hostname check — container hostnames default to a
+    random container ID, not the droplet name, so os.uname() can't tell
+    newsapp from newsapp-2 from inside the container. Instead this requires
+    an explicit PRIMARY_SCHEDULER_HOST=newsapp in the droplet's .env
+    (injected as a container env var) as a deliberate opt-in flag. Only
+    newsapp's .env should ever set this."""
+    value = os.environ.get("PRIMARY_SCHEDULER_HOST")
+    if value != PRIMARY_SCHEDULER_HOST:
+        print(
+            f"FATAL: PRIMARY_SCHEDULER_HOST is {value!r}, expected "
+            f"{PRIMARY_SCHEDULER_HOST!r}. Refusing to start — this scheduler "
+            "is single-instance and must only run on the designated primary "
+            "host. Set PRIMARY_SCHEDULER_HOST=newsapp in that host's .env if "
+            "this is genuinely meant to be the primary scheduler host.",
+            flush=True,
+        )
+        sys.exit(1)
+
+
 async def main() -> None:
+    _assert_primary_host()
+
     if "--run-now" in sys.argv:
         await run_once()
         return

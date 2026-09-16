@@ -69,11 +69,15 @@ services:
       # (which binds 0.0.0.0) — that would expose plain HTTP publicly.
       - "127.0.0.1:8080:8000"
 
-  crossword_scheduler:
+  # Renamed from crossword_scheduler 2026-09-16 — despite the script name
+  # (run_crossword_scheduler.py, unchanged below), this also pre-generates
+  # sudoku/word search/spelling bee/word ladder/quiz/editorial backgrounds/
+  # horoscope every night. "crossword" undersold what this container does.
+  contentworker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: news_crossword_scheduler_prod
+    container_name: news_contentworker_prod
     restart: always
     command: ["python3", "scripts/run_crossword_scheduler.py"]
     environment:
@@ -97,11 +101,13 @@ services:
       - ASTROJSON_API_KEY=${ASTROJSON_API_KEY:-}
       - HOROSCOPE_ENABLED=${HOROSCOPE_ENABLED:-true}
 
-  poll_scheduler:
+  # Renamed from poll_scheduler 2026-09-16 (naming pass, de-underscored —
+  # script name below is unchanged).
+  pollworker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: news_poll_scheduler_prod
+    container_name: news_pollworker_prod
     restart: always
     command: ["python3", "scripts/run_poll_scheduler.py"]
     environment:
@@ -123,21 +129,35 @@ services:
     volumes:
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
 
-  # Singleton, like crossword_scheduler/poll_scheduler above — start this
-  # with `docker compose up -d timeline_scheduler` (or a plain `up -d`) on
-  # newsapp ONLY, never on newsapp-2 (`up -d app` there, as with the other
-  # two schedulers). Two independent daemons would race to write the same
+  # Renamed from timeline_scheduler 2026-09-16 (does narrative generation
+  # AND audio synthesis for the Timeline tab, not just scheduling).
+  #
+  # SINGLETON, like contentworker/pollworker above — start this with
+  # `docker compose up -d narrator` (or a plain `up -d`) on newsapp ONLY,
+  # never on newsapp-2 (`up -d app` there, as with the other two
+  # schedulers). Two independent daemons would race to write the same
   # story_timeline_features rows and double the LLM spend; the DB
   # connection budget (one 15-client Supabase pooler shared by both
   # droplets) is also sized assuming these schedulers are single-instance.
-  timeline_scheduler:
+  #
+  # This is now also enforced structurally, not just by this comment — see
+  # run_timeline_scheduler.py's _assert_primary_host(), gated on
+  # PRIMARY_SCHEDULER_HOST below. A rogue duplicate ran on newsapp-2 for 4
+  # days (2026-09-12 to 2026-09-16) before this guard existed.
+  narrator:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: news_timeline_scheduler_prod
+    container_name: news_narrator_prod
     restart: always
     command: ["python3", "scripts/run_timeline_scheduler.py"]
     environment:
+      # Must be exactly "newsapp", and ONLY set in newsapp's .env — see
+      # run_timeline_scheduler.py's _assert_primary_host(). Deliberately
+      # not defaulted (no :-fallback) so an .env that forgets this fails
+      # loudly (container exits) instead of silently starting a second
+      # scheduler on the wrong droplet.
+      - PRIMARY_SCHEDULER_HOST=${PRIMARY_SCHEDULER_HOST}
       - DATABASE_URL=${DATABASE_URL}
       # Connection budget — see app/database.py for the arithmetic.
       # Every container here builds its own engine, and both droplets

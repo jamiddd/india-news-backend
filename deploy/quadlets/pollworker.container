@@ -1,0 +1,28 @@
+# Quadlet unit for `pollworker` (renamed from poll_scheduler 2026-09-16,
+# de-underscored — see scripts/run_poll_scheduler.py, unchanged).
+#
+# INSTALL: copy to /etc/containers/systemd/pollworker.container, then
+# `systemctl daemon-reload && systemctl start pollworker.service`.
+# Runs on BOTH droplets (not a singleton, unlike narrator.container).
+#
+# TODO before first use: replace <ENV_PATH> and <FIREBASE_HOST_PATH> with
+# the real absolute paths on the target droplet.
+
+[Unit]
+Description=News poll draft/publish scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/india-news-backend-app:latest
+ContainerName=news_pollworker_prod
+Exec=python3 scripts/run_poll_scheduler.py
+EnvironmentFile=<ENV_PATH>/india-news-backend/.env
+Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

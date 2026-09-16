@@ -8,7 +8,7 @@ the other scripts/ here.
 Partial results are normal: AstroJson rolls over on UTC, so a date that is
 "today" in IST but still in the future for the provider will report 0/12.
 
-Usage (inside the app or crossword_scheduler container):
+Usage (inside the app or contentworker container):
     python3 scripts/force_horoscope_prewarm.py [YYYY-MM-DD]
 """
 import asyncio

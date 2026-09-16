@@ -17,7 +17,7 @@ curated until the date rolls over. This script exists to unstick that on
 demand. Mutates the DB when it does regenerate — not read-only like the
 other scripts/ here.
 
-Usage (inside the app or crossword_scheduler container):
+Usage (inside the app or contentworker container):
     python3 scripts/force_daily_games_regen.py [bee|ladder|quiz|all] [YYYY-MM-DD] [--force]
     python3 scripts/force_daily_games_regen.py                # all games, today, only if curated
     python3 scripts/force_daily_games_regen.py quiz           # just quiz, today, only if curated

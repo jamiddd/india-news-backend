@@ -58,7 +58,7 @@ engine = create_async_engine(
     # let ONE engine demand 15 connections. Every process that imports this
     # module builds its own engine, and prod runs, per droplet:
     #
-    #     2 uvicorn workers + crossword_scheduler + poll_scheduler = 4 engines
+    #     2 uvicorn workers + contentworker + pollworker = 4 engines
     #
     # across TWO droplets (newsapp, newsapp-2) sharing a single Supabase
     # session-mode pooler capped at 15 clients total. So the defaults asked

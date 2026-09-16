@@ -5,7 +5,7 @@ Useful after a prompt/validation fix to confirm it actually resolves to "ai"
 without waiting for the next scheduled run. Mutates the DB (upserts the
 crossword row for that date) — not read-only like the other scripts/ here.
 
-Usage (inside the app or crossword_scheduler container):
+Usage (inside the app or contentworker container):
     python3 scripts/force_crossword_regen.py [YYYY-MM-DD]
 """
 import asyncio

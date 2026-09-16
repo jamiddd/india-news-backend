@@ -1,0 +1,36 @@
+# Quadlet unit for `narrator` (renamed from timeline_scheduler 2026-09-16
+# — does narrative generation AND audio synthesis for the Timeline tab, see
+# scripts/run_timeline_scheduler.py, unchanged).
+#
+# *** SINGLETON — install this file on newsapp ONLY. Never copy it to
+# newsapp-2's /etc/containers/systemd/. A rogue duplicate ran there for 4
+# days (2026-09-12 to 2026-09-16) before the _assert_primary_host() guard
+# below existed — do not repeat that by installing this unit on both
+# droplets "to be safe". ***
+#
+# INSTALL (newsapp only): copy to
+# /etc/containers/systemd/narrator.container, then `systemctl daemon-reload
+# && systemctl start narrator.service`.
+#
+# TODO before first use: replace <ENV_PATH> with the real absolute path.
+# newsapp's .env MUST set PRIMARY_SCHEDULER_HOST=newsapp — the process
+# exits immediately at startup otherwise (see
+# scripts/run_timeline_scheduler.py's _assert_primary_host()).
+
+[Unit]
+Description=News Timeline/Context narrative + narration audio scheduler (SINGLETON — newsapp only)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/india-news-backend-app:latest
+ContainerName=news_narrator_prod
+Exec=python3 scripts/run_timeline_scheduler.py
+EnvironmentFile=<ENV_PATH>/india-news-backend/.env
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target
