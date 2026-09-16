@@ -86,33 +86,32 @@ services were conflated).
 shipping a code change. Every code change goes through the single canonical
 command in §5.
 
-## 5. One canonical redeploy command per service, no `-f` file flag
+## 5. Redeploy a service — plain commands, no wrapper script
 
-Fixes "the command is hard to remember." Two pieces:
+An earlier draft of this plan had a `deploy.sh` wrapper script for this.
+Removed 2026-09-16 — with Docker fully gone and the clear one-word service
+names in place (§1), the underlying commands are short and memorable enough
+on their own that a wrapper added a layer of indirection without saving much:
 
-**a. `COMPOSE_FILE` set once per droplet** so `-f docker-compose.prod.yml` is
-never typed manually (it's only needed because `docker-compose.yml`, the dev
-file, also exists in the repo and would otherwise be the default):
 ```bash
-echo 'export COMPOSE_FILE=docker-compose.prod.yml' >> ~/.bashrc
+ssh newsapp   # or newsapp-2
+cd ~/india-news-backend
+git pull
+podman build -t localhost/india-news-backend-app:latest .
+sudo systemctl restart <service>.service   # app, contentworker, pollworker, or narrator
 ```
-Local dev machines are untouched — this is a production-droplet-only setting.
 
-**b. Wrapper script**, `~/india-news-backend/deploy.sh`, on each droplet:
+Always confirm the restart actually happened — this exact check is what
+caught the 2026-09-16 incident (a process silently running stale code):
 ```bash
-./deploy.sh <service-name>
+sudo systemctl show <service>.service --property=ActiveEnterTimestamp
 ```
-Does, in order, every time, same shape:
-1. `git pull`
-2. `podman build -t india-news-backend-<service> .`
-3. `systemctl restart <service>.service`
-4. Prints the new `StartedAt` so a restart is confirmed, not assumed — the
-   exact manual check that was needed to catch the 2026-09-16 incident.
 
-**`.env`-only changes** (no code change) don't need a rebuild:
+**`.env`-only changes** (no code change) don't need a rebuild — the quadlet's
+`EnvironmentFile=` re-reads on every restart:
 ```bash
 nano .env
-systemctl restart <service>.service   # env re-read automatically via EnvironmentFile=
+sudo systemctl restart <service>.service
 ```
 
 ## 6. Migration staging — not a same-day swap on both droplets
@@ -120,7 +119,7 @@ systemctl restart <service>.service   # env re-read automatically via Environmen
 1. **Pilot on `newsapp-2` first** — currently lighter (no singleton risk to
    break there).
 2. Convert one low-stakes service first (`pollworker`) — validate quadlet +
-   `.env` reread + `deploy.sh` end to end.
+   `.env` reread end to end.
 3. Convert remaining `newsapp-2` services (`app`, `contentworker`).
 4. Only once `newsapp-2` has run clean for a few days, migrate `newsapp`
    (higher stakes — the only droplet allowed to run `narrator`).
@@ -137,11 +136,13 @@ service>`.
 
 ## 8. Day-to-day workflow after migration
 
-**Deploy:**
+**Deploy** (see §5 for the confirm-the-restart step):
 ```bash
 ssh newsapp
 cd ~/india-news-backend
-./deploy.sh app   # or contentworker, pollworker, narrator
+git pull
+podman build -t localhost/india-news-backend-app:latest .
+sudo systemctl restart app.service   # or contentworker, pollworker, narrator
 ```
 
 **Env-only change:**
@@ -184,7 +185,10 @@ binary changes from `docker` to `podman`.
 - [x] Rename services in `docker-compose.prod.yml` (repo change, reversible) — 2026-09-16
 - [x] Add `PRIMARY_SCHEDULER_HOST` check to `run_timeline_scheduler.py` — 2026-09-16
 - [x] Write quadlet `.container` files (`backend/deploy/quadlets/`) — 2026-09-16, drafts, host paths are placeholders (`<ENV_PATH>`, `<FIREBASE_HOST_PATH>`), fill in per droplet before use
-- [x] Write `deploy.sh` (`backend/deploy/deploy.sh`) — 2026-09-16
+- [x] ~~Write `deploy.sh`~~ — written 2026-09-16, then removed same day at
+      the user's request: with Docker gone and one-word service names in
+      place, the plain 3-line deploy command (§5) was clear enough on its
+      own; the wrapper added indirection without saving much.
 - [ ] **Before next deploy of `docker-compose.prod.yml` to `newsapp`: add
       `PRIMARY_SCHEDULER_HOST=newsapp` to newsapp's `.env`.** The renamed
       `narrator` service now hard-exits at startup without it (by design —
