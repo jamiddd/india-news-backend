@@ -107,7 +107,7 @@ def verify(request: Request, fields: dict[str, str]) -> None:
 STYLE = """
     :root{
       --ink:#171717; --ink-2:#4a4a4a; --ink-3:#767676;
-      --bg:#ffffff; --surface:#F3F3F8; --line:#e4e4ea;
+      --bg:#ffffff; --surface:#F3F3F8; --content-bg:#ffffff; --line:#e4e4ea;
       --accent:#1976D2; --accent-tint:rgba(25,118,210,0.10); --on-accent:#FFFFFF;
       --danger:#C62828; --done:#2E7D32;
       --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
@@ -117,13 +117,13 @@ STYLE = """
     }
     @media (prefers-color-scheme:dark){ :root:not([data-theme=light]){
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
-      --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
+      --bg:#121212; --surface:#121212; --content-bg:#1E1E24; --line:#2c2c34;
       --accent:#64B5F6; --accent-tint:rgba(100,181,246,0.14); --on-accent:#171717;
       --danger:#EF5350; --done:#66BB6A;
     }}
     :root[data-theme=dark]{
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
-      --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
+      --bg:#121212; --surface:#121212; --content-bg:#1E1E24; --line:#2c2c34;
       --accent:#64B5F6; --accent-tint:rgba(100,181,246,0.14); --on-accent:#171717;
       --danger:#EF5350; --done:#66BB6A;
     }
@@ -206,11 +206,14 @@ STYLE = """
     }
     @media (max-width:640px){
       header.bar .mark{width:28px;height:28px}
-      .wrap-inner{padding:16px}
-      main{padding:0}
       table{display:block;overflow-x:auto;white-space:nowrap;max-width:100%;-webkit-overflow-scrolling:touch}
     }
-    main{padding:0}
+    main{min-height:calc(100% - 1px);padding:28px;background:var(--content-bg);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(23,23,23,.06)}
+    @media (max-width:640px){
+      .wrap-inner{padding:0 0 40px}
+      main{padding:20px 16px;border-radius:0}
+    }
+    h1,h2{font-family:var(--sans)}
     input,textarea{
       box-sizing:border-box;width:100%;padding:10px 12px;margin:5px 0 12px;
       border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);
