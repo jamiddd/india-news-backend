@@ -745,6 +745,8 @@ async def _enrich_new_crossings(count: int) -> None:
         # The timer is the safety net: these clusters still have ai_enriched
         # False, so the next tick picks them up.
         logger.error(f"[Enrich Trigger] Event-driven enrichment failed: {e}")
+        from app.services.admin_notify import notify_admin_failure
+        await notify_admin_failure("event_driven_enrichment", e)
 
 
 async def poll_all_sources(session: AsyncSession) -> int:

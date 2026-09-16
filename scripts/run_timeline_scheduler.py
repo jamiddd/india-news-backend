@@ -50,6 +50,8 @@ async def run_once() -> None:
         # session.commit(), so a mid-run exception just means this cycle's
         # remaining candidates never got attempted).
         print(f"timeline generation cycle failed: {exc}", flush=True)
+        from app.services.admin_notify import notify_admin_failure
+        await notify_admin_failure("timeline_scheduler", exc)
 
 
 PRIMARY_SCHEDULER_HOST = "newsapp"

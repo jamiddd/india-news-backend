@@ -56,6 +56,17 @@ services:
       # Optional — error tracking is a no-op until this is actually set in
       # the droplet's .env. See app/main.py.
       - SENTRY_DSN=${SENTRY_DSN:-}
+      # Developer alerts (FCM admin-alerts topic + Gmail SMTP), independent
+      # of ADMIN_USER_EMAIL's device-token push — see admin_notify.py. This
+      # is the `app` container, where process_breaking_cycle actually runs
+      # (piggybacked on the poll cycle), so it needs these too, not just
+      # pollworker below.
+      - ADMIN_ALERT_TOPIC=${ADMIN_ALERT_TOPIC:-admin-alerts}
+      - ADMIN_ALERT_EMAIL_TO=${ADMIN_ALERT_EMAIL_TO:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
     volumes:
       # Firebase Admin SDK service-account key — scp'd onto the host once,
       # never committed/baked into the image. FIREBASE_CREDENTIALS_HOST_PATH
@@ -126,6 +137,13 @@ services:
       # Needed to send the admin draft-ready FCM push — see
       # notify_admin_draft_ready() in app/services/polls.py.
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+      # Developer alerts — see admin_notify.py / the `app` service above.
+      - ADMIN_ALERT_TOPIC=${ADMIN_ALERT_TOPIC:-admin-alerts}
+      - ADMIN_ALERT_EMAIL_TO=${ADMIN_ALERT_EMAIL_TO:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
     volumes:
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
 
@@ -181,3 +199,11 @@ services:
       - TIMELINE_AUDIO_BUCKET=${TIMELINE_AUDIO_BUCKET:-timeline-audio}
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
+      # Developer alerts — run_timeline_scheduler.py's failure path calls
+      # notify_admin_failure(), which is email-only. See admin_notify.py /
+      # the `app` service above.
+      - ADMIN_ALERT_EMAIL_TO=${ADMIN_ALERT_EMAIL_TO:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}

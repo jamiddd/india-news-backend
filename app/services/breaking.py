@@ -249,7 +249,7 @@ async def process_breaking_cycle() -> None:
     """
     from app.database import AsyncSessionLocal
     from app.models import BreakingRefreshReview, BreakingStory
-    from app.services.admin_notify import notify_admin_breaking_review
+    from app.services.admin_notify import notify_admin_breaking_review, notify_admin_failure
 
     try:
         async with AsyncSessionLocal() as session:
@@ -294,3 +294,4 @@ async def process_breaking_cycle() -> None:
                 )
     except Exception as e:
         logger.error(f"[Breaking] cycle failed: {e}")
+        await notify_admin_failure("breaking_cycle", e)
