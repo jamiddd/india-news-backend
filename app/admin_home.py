@@ -92,6 +92,7 @@ async def login(request: Request):
 
 
 @router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def home(request: Request, db: AsyncSession = Depends(get_db)):
     if not session_csrf(request):
         return RedirectResponse("/admin/login", status_code=303)

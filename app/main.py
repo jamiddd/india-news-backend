@@ -427,8 +427,12 @@ async def canonicalize_admin_urls(request: Request, call_next):
     response = await call_next(request)
     if host == "admin.openindiannews.com" and 300 <= response.status_code < 400:
         location = response.headers.get("location", "")
-        if location == "/admin" or location.startswith("/admin/"):
-            parts = urlsplit(location)
+        parts = urlsplit(location)
+        if (
+            location == "/admin" or location.startswith("/admin/")
+            or (parts.hostname or "").lower() == "admin.openindiannews.com"
+            and (parts.path == "/admin" or parts.path.startswith("/admin/"))
+        ):
             response.headers["location"] = urlunsplit((
                 "https", "admin.openindiannews.com", admin_public_path(parts.path),
                 parts.query, parts.fragment,
