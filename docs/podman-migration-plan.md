@@ -191,8 +191,17 @@ binary changes from `docker` to `podman`.
       see §3) — deploying the renamed compose file without this env var set
       first would take the Timeline narration scheduler down entirely. Not
       needed on `newsapp-2` (must stay unset there).
-- [ ] Install Podman on `newsapp-2`
-- [ ] Pilot: migrate `pollworker` on `newsapp-2`, verify for a few days
-- [ ] Migrate `app`, `contentworker` on `newsapp-2`
-- [ ] Migrate all 4 services on `newsapp` (only droplet that gets `narrator`)
-- [ ] Remove Docker Compose services once stable (3+ days per service)
+- [x] Install Podman on `newsapp-2` — 2026-09-16
+- [x] Pilot: migrate `pollworker` on `newsapp-2` — 2026-09-16, verified with real poll output before continuing
+- [x] Migrate `app`, `contentworker` on `newsapp-2` — 2026-09-16, verified HTTP 200 + real content-prewarm logs
+- [x] Migrate all 4 services on `newsapp` (`narrator` included) — 2026-09-16, `PRIMARY_SCHEDULER_HOST` guard verified working
+- [x] Remove Docker Compose services and uninstall Docker entirely — 2026-09-16, ahead of the original 3-day stability window since there's no real user traffic yet (user's call). Also removed ~14GB of orphaned Docker/containerd data via full package purge, since normal `docker system prune` didn't reclaim it. **Caught mid-cleanup**: purging `containerd.io` took `runc` with it (Podman's OCI runtime for already-running containers) — fixed immediately by reinstalling standalone `runc`, verified via `exec`, restart, and HTTP checks before continuing.
+- [x] Both droplets rebooted for a pending kernel update (`6.8.0-124` → `6.8.0-139`) — 2026-09-16. Confirmed all quadlet services auto-start correctly via `[Install] WantedBy=` with no Docker/`restart: always` involved at all — the real end-to-end validation of the whole migration. `narrator`'s singleton guard confirmed to survive a genuine reboot, not just a manual restart.
+
+## 11. Status: migration complete
+
+All 4 services run on Podman + systemd quadlets on both droplets. Docker is
+fully uninstalled on both. `docker-compose.prod.yml` and
+`docker-compose.yml` (dev) remain in the repo as historical reference / for
+anyone running the stack locally without Podman — not deleted, since local
+dev workflows weren't part of this migration's scope.
