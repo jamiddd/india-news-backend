@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import secrets
+from urllib.parse import urlsplit, urlunsplit
 from functools import lru_cache
 from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
@@ -50,7 +51,7 @@ else:
 
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
-from app.admin_session import session_csrf
+from app.admin_session import admin_public_path, admin_url, session_csrf
 from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, AdminTopic, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
@@ -409,6 +410,30 @@ app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
 app.include_router(admin_breaking_router)
 app.include_router(admin_topics_router)
+
+
+@app.middleware("http")
+async def canonicalize_admin_urls(request: Request, call_next):
+    """Keep legacy /admin links working while making the subdomain canonical."""
+    host = (request.url.hostname or "").lower()
+    is_legacy_admin = (
+        host in {"openindiannews.com", "www.openindiannews.com"}
+        and (request.url.path == "/admin" or request.url.path.startswith("/admin/"))
+    )
+    if is_legacy_admin:
+        query = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"{admin_url(request.url.path)}{query}", status_code=308)
+
+    response = await call_next(request)
+    if host == "admin.openindiannews.com" and 300 <= response.status_code < 400:
+        location = response.headers.get("location", "")
+        if location == "/admin" or location.startswith("/admin/"):
+            parts = urlsplit(location)
+            response.headers["location"] = urlunsplit((
+                "https", "admin.openindiannews.com", admin_public_path(parts.path),
+                parts.query, parts.fragment,
+            ))
+    return response
 
 # Static assets for the landing page (device screenshots). Mounted rather
 # than inlined as data: URIs because the pages are served through the

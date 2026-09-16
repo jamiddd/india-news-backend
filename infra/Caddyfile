@@ -40,6 +40,11 @@ www.openindiannews.com {
     redir https://openindiannews.com{uri} 308
 }
 
+admin.openindiannews.com {
+    rewrite * /admin{uri}
+    reverse_proxy 127.0.0.1:8080
+}
+
 openindiannews.com {
     reverse_proxy 127.0.0.1:8080
 }

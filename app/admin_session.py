@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import re
 import secrets
 import time
 from urllib.parse import parse_qs
@@ -27,6 +28,26 @@ from app.config import settings
 
 COOKIE_NAME = "oin_admin"
 SESSION_HOURS = 8
+ADMIN_PUBLIC_ORIGIN = "https://admin.openindiannews.com"
+
+
+def admin_public_path(path: str) -> str:
+    """Convert an internal /admin route to its public subdomain path."""
+    if path != "/admin" and not path.startswith("/admin/"):
+        return path
+    public = path[len("/admin"):]
+    return public or "/"
+
+
+def admin_url(path: str) -> str:
+    """Return the canonical public URL for an internal admin route."""
+    return f"{ADMIN_PUBLIC_ORIGIN}{admin_public_path(path)}"
+
+
+def _publicize_admin_html(body: str) -> str:
+    """Rewrite generated internal admin links/forms to public paths."""
+    body = re.sub(r"([\"'])/admin(?=\1)", r"\1/", body)
+    return re.sub(r"([\"'])/admin(?=[/?!])", r"\1", body)
 
 
 def secret() -> bytes:
@@ -264,8 +285,8 @@ NAV_GROUPS = [
 def _sidebar(current: str | None) -> str:
     groups = "".join(
         f"<div class=group-label>{group}</div>" + "".join(
-            f"<a class=current href='{href}'>{label}</a>" if href == current
-            else f"<a href='{href}'>{label}</a>"
+            f"<a class=current href='{admin_public_path(href)}'>{label}</a>" if href == current
+            else f"<a href='{admin_public_path(href)}'>{label}</a>"
             for href, label in links)
         for group, links in NAV_GROUPS)
     return f"<nav class=sidebar>{groups}</nav>"
@@ -361,6 +382,7 @@ def layout(title: str, body: str, current: str | None = None) -> HTMLResponse:
         f"</a><span class=tag>Admin</span>{THEME_TOGGLE_BTN}</header>"
     )
     sidebar = _sidebar(current) if current else ""
+    body = _publicize_admin_html(body)
     return HTMLResponse(
         f"<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<meta name=color-scheme content='light dark'>"
