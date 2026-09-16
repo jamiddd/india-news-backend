@@ -185,16 +185,18 @@ class Settings(BaseSettings):
     # receives this with no login at all. See admin_notify._push_to_admin.
     ADMIN_ALERT_TOPIC: str = "admin-alerts"
 
-    # Plain Gmail SMTP (app password), deliberately not the Brevo account
-    # planned for real user-facing email (donation thanks/welcome/policy) —
-    # this is a dev-only out-of-band channel that must not depend on the
-    # phone, the app, or FCM being healthy. Absent config = feature no-ops,
-    # same convention as GEMINI_API_KEY etc. See app/services/admin_email.py.
+    # Brevo's transactional email HTTP API (not SMTP) — DigitalOcean blocks
+    # outbound ports 25/465/587 account-wide on every droplet (confirmed
+    # 2026-09-16: an early SMTP version of this timed out on both droplets),
+    # so the only way to send mail from here at all is an HTTP-based
+    # provider. Free tier (300/day) is the same account this settles on for
+    # real user-facing email later (donation thanks/welcome/policy) — see
+    # backend/docs (Brevo decision, 2026-09-16). Absent config = feature
+    # no-ops, same convention as GEMINI_API_KEY etc. See
+    # app/services/admin_email.py.
     ADMIN_ALERT_EMAIL_TO: Optional[str] = None
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
+    BREVO_API_KEY: Optional[str] = None
+    BREVO_SENDER_EMAIL: Optional[str] = None
 
     # API version negotiation — the client sends its own versionCode (see
     # BuildConfig/app/build.gradle.kts's defaultConfig.versionCode) as the
