@@ -49,7 +49,7 @@ def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) ->
         for i in range(OPTION_COUNT)
     )
     return (
-        "<details open><summary><b>Add a question</b></summary>"
+        "<section class=task><h2>Add a question</h2>"
         f"{error_html}"
         "<form method=post action='/admin/quiz-bank/generate' style='margin-bottom:1em'>"
         f"<input type=hidden name=csrf value='{csrf}'>"
@@ -67,11 +67,33 @@ def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) ->
         f"<label>Category (optional)<input name=category placeholder='e.g. history, geography' "
         f"value='{html.escape(draft.get('category') or '')}'></label>"
         "<button>Add to bank</button>"
-        "</form></details>")
+        "</form></section>")
+
+
+def _tabs(active: str) -> str:
+    """Render the two question-bank views as navigation tabs."""
+    tabs = (
+        ("create", "Add question", "/admin/quiz-bank?tab=create"),
+        ("list", "All questions", "/admin/quiz-bank?tab=list"),
+    )
+    return (
+        "<nav class=admin-tabs aria-label='Quiz question bank views'>"
+        + "".join(
+            f"<a class={'current' if key == active else ''} "
+            f"href='{href}' {'aria-current=page' if key == active else ''}>{label}</a>"
+            for key, label, href in tabs
+        )
+        + "</nav>"
+    )
 
 
 @router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, page: int = 1, db: AsyncSession = Depends(get_db)):
+async def dashboard(
+    request: Request,
+    page: int = 1,
+    tab: str = Query("create", pattern="^(create|list)$"),
+    db: AsyncSession = Depends(get_db),
+):
     csrf = session_csrf(request)
     if not csrf:
         return RedirectResponse("/admin/quiz/login", status_code=303)
@@ -81,10 +103,12 @@ async def dashboard(request: Request, page: int = 1, db: AsyncSession = Depends(
     active_total = (await db.execute(
         select(func.count()).where(QuizBankQuestion.is_active.is_(True))
     )).scalar_one()
-    rows = (await db.execute(
-        select(QuizBankQuestion).order_by(QuizBankQuestion.created_at.desc())
-        .offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE)
-    )).scalars().all()
+    rows = []
+    if tab == "list":
+        rows = (await db.execute(
+            select(QuizBankQuestion).order_by(QuizBankQuestion.created_at.desc())
+            .offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE)
+        )).scalars().all()
 
     def _row(q: QuizBankQuestion) -> str:
         options = "<br>".join(
@@ -113,18 +137,21 @@ async def dashboard(request: Request, page: int = 1, db: AsyncSession = Depends(
         + "".join(_row(q) for q in rows) + "</table>") if rows else "<p class=meta>No questions in the bank yet.</p>"
 
     pager = ""
-    if page > 1:
-        pager += f"<a href='/admin/quiz-bank?page={page - 1}'>← newer</a> "
-    if total > page * PAGE_SIZE:
-        pager += f"<a href='/admin/quiz-bank?page={page + 1}'>older →</a>"
+    if tab == "list":
+        if page > 1:
+            pager += f"<a href='/admin/quiz-bank?tab=list&page={page - 1}'>← newer</a> "
+        if total > page * PAGE_SIZE:
+            pager += f"<a href='/admin/quiz-bank?tab=list&page={page + 1}'>older →</a>"
+
+    content = _add_form(csrf) if tab == "create" else table + f"<p>{pager}</p>"
 
     return layout(TITLE, (
         f"<h1>Quiz Question Bank</h1>"
         f"<p class=meta>{total} question(s) · {active_total} active — "
         "generate_quiz() draws 5 active questions from here when Claude's draft "
         "fails validation, before falling back to the hardcoded curated set.</p>"
-        f"{_add_form(csrf)}"
-        f"{table}<p>{pager}</p>"), current="/admin/quiz-bank")
+        f"{_tabs(tab)}"
+        f"{content}"), current="/admin/quiz-bank")
 
 
 @router.post("/generate")
@@ -158,8 +185,9 @@ async def generate(request: Request, db: AsyncSession = Depends(get_db)):
 
     return layout(TITLE, (
         f"<h1>Quiz Question Bank</h1>"
+        f"{_tabs('create')}"
         f"{_add_form(csrf, error, draft)}"
-        f"<p><a href='/admin/quiz-bank'>Back to the bank</a></p>"), current="/admin/quiz-bank")
+        f"<p><a href='/admin/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
 
 
 @router.post("/add")
@@ -189,8 +217,9 @@ async def add(request: Request, db: AsyncSession = Depends(get_db)):
     if error:
         return layout(TITLE, (
             f"<h1>Quiz Question Bank</h1>"
+            f"{_tabs('create')}"
             f"{_add_form(fields.get('csrf', ''), error)}"
-            f"<p><a href='/admin/quiz-bank'>Back to the bank</a></p>"), current="/admin/quiz-bank")
+            f"<p><a href='/admin/quiz-bank?tab=list'>See all questions</a></p>"), current="/admin/quiz-bank")
 
     db.add(QuizBankQuestion(
         question=question, options=options, correct_index=correct_index,
@@ -209,7 +238,7 @@ async def toggle(question_id: int, request: Request, db: AsyncSession = Depends(
         raise HTTPException(status_code=404, detail="Question not found")
     question.is_active = not question.is_active
     await db.commit()
-    return RedirectResponse("/admin/quiz-bank", status_code=303)
+    return RedirectResponse("/admin/quiz-bank?tab=list", status_code=303)
 
 
 @router.post("/{question_id}/delete")
@@ -221,7 +250,7 @@ async def delete(question_id: int, request: Request, db: AsyncSession = Depends(
         raise HTTPException(status_code=404, detail="Question not found")
     await db.delete(question)
     await db.commit()
-    return RedirectResponse("/admin/quiz-bank", status_code=303)
+    return RedirectResponse("/admin/quiz-bank?tab=list", status_code=303)
 
 
 @router.get("/api/list")
