@@ -1,9 +1,12 @@
 # Play Billing server-side verification — handoff
 
-**Status as of 2026-09-17: code done and pushed on both repos. Deployment to
-the droplets is NOT done yet.** Purchases currently still work end-to-end
-because the client fails open when the backend is unreachable/unconfigured —
-no regression, just not yet actually verified.
+**Status as of 2026-09-17: DONE — code pushed on both repos, deployed and
+verified on both droplets.** `POST /api/v1/billing/verify-purchase` returns
+`{"valid":false}` for a garbage token on both `newsapp` and `newsapp-2`,
+confirming the service account is correctly wired up and actually calling
+Google's Play Developer API, not just returning a config error. Remaining
+work is just uploading the new Android build (see step 6) — not blocking,
+since the client already works with or without this (fail-open).
 
 ## What this is
 
@@ -32,68 +35,39 @@ and cross-device restore still works via Play's own account system
   actual quadlet unit used in production — updated with a second `Volume=`
   line for the Play Billing key.
 
-## What's left — all manual, outside code
+## Deployment — DONE on both droplets (2026-09-17)
 
-### 1. Google Cloud service account — DONE (as of this session)
-Created in the `indian-news-open` GCP project (same project backing
-Firebase), name `play-billing-verifier` (or whatever you named it), JSON key
-downloaded to your machine. **This file is a secret — never commit it.**
+Real secrets path used: `/root/india-news-backend/secrets/play-billing-service-account.json`
+on both `newsapp` and `newsapp-2` (same directory Firebase's key lives in).
+The installed quadlet at `/etc/containers/systemd/app.container` on each
+droplet already has the real `Volume=` line filled in (no more placeholder).
 
-Also confirm the **Google Play Android Developer API** is enabled on that
-project (Cloud Console search bar → enable if not already).
+**Two gotchas hit during this deploy, in case this ever needs redoing:**
 
-### 2. Play Console permission grant — DONE (as of this session)
-Play Console → Users and permissions → invited the service account's email
-(`<id>@indian-news-open.iam.gserviceaccount.com`), granted **"View
-financial data"** for this app.
+1. **`GOOGLE_PLAY_SERVICE_ACCOUNT_HOST_PATH` vs `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH`**
+   — `.env` only had the `_HOST_PATH` variant (used to fill in the quadlet's
+   `Volume=` line by hand), but `app/config.py` reads
+   `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH` (the container-internal path) as a
+   *separate* line — same pattern as `FIREBASE_CREDENTIALS_PATH` existing
+   independently of `FIREBASE_CREDENTIALS_HOST_PATH`. Missing that second
+   line is why the endpoint returned `{"detail":"Purchase verification is
+   not configured"}` even after the volume mount and secret file were
+   correct. Fixed by appending
+   `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH=/run/secrets/play-billing-service-account.json`
+   to `.env` on both droplets, then `systemctl restart app.service`
+   (`.env`-only change, no rebuild needed).
+2. **`newsapp-2` needed a full rebuild**, not just a restart — its running
+   container still predated the new code (`{"detail":"Not Found"}` on the
+   route), because only `newsapp` had been manually `git pull` + rebuilt
+   earlier in this session. `git pull && podman build -t
+   localhost/india-news-backend-app:latest . && systemctl restart
+   app.service` fixed it.
 
-Production runs on Podman + systemd quadlets on both droplets (Docker is
-fully removed) — see `backend-services-podman` memory and
-`docs/podman-migration-plan.md`. The quadlet unit is
-`deploy/quadlets/app.container`, already updated (this session) with a
-second `Volume=` line for the Play Billing key, alongside the existing
-Firebase one:
-
+Verified on both:
 ```
-Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
-Volume=<PLAY_BILLING_HOST_PATH>:/run/secrets/play-billing-service-account.json:ro
+curl -s -X POST http://127.0.0.1:8080/api/v1/billing/verify-purchase -H "Content-Type: application/json" -d '{"product_id":"premium_monthly","purchase_token":"garbage","product_type":"subs"}'
+# {"valid":false}  <- correct: a garbage token is genuinely rejected by Google, not by a config error
 ```
-
-`<PLAY_BILLING_HOST_PATH>` is a placeholder in the committed file (same
-convention as `<FIREBASE_HOST_PATH>`) — the real absolute path only exists
-in the installed copy at `/etc/containers/systemd/app.container` on each
-droplet, never committed.
-
-### 3. Get the JSON key onto both droplets — NOT DONE YET
-```
-scp /path/to/downloaded-key.json newsapp:/root/news-backend/secrets/play-billing-service-account.json
-scp /path/to/downloaded-key.json newsapp-2:/root/news-backend/secrets/play-billing-service-account.json
-```
-(Match whatever directory `firebase-service-account.json` already lives in
-on each droplet — put this next to it.)
-
-### 4. Update both droplets' installed quadlet + .env — NOT DONE YET
-On **each** droplet (`newsapp`, then `newsapp-2`):
-
-```
-ssh newsapp   # or newsapp-2
-sudo nano /etc/containers/systemd/app.container
-```
-Replace `<PLAY_BILLING_HOST_PATH>` with the real absolute path to the file
-you just scp'd (e.g. `/root/news-backend/secrets/play-billing-service-account.json`).
-
-Then add one line to the backend's `.env` (same file with
-`FIREBASE_CREDENTIALS_PATH`) — this is required because the quadlet's
-`EnvironmentFile=.env` passes the file through as-is, unlike the old
-compose file's per-service hardcoded env block:
-```
-nano ~/india-news-backend/.env
-```
-```
-GOOGLE_PLAY_SERVICE_ACCOUNT_PATH=/run/secrets/play-billing-service-account.json
-```
-(`ANDROID_PACKAGE_NAME` defaults to `com.jamid.news` in code — no need to
-set it unless that ever changes.)
 
 ### 5. Reload + restart on both droplets — NOT DONE YET
 ```
@@ -104,19 +78,22 @@ sudo systemctl show app.service --property=ActiveEnterTimestamp   # confirm it a
 Only `app.service` needs this — `contentworker`/`pollworker`/`narrator`
 don't touch billing. Do this on **both** droplets.
 
-### 6. Upload the new Android build — separate, already built
+## What's left
+
+### Upload the new Android build — not started
 `app/build/outputs/bundle/release/app-release.aab`, versionCode 11, already
 built locally with the client-side verification code. Upload to Play
-Console when ready. Not blocking steps 1-5 — the client works with or
-without the backend piece deployed (fail-open).
+Console when ready. Not urgent — the client already works fine without this
+specific build (fail-open), this just makes the client-side check actually
+active for real users instead of always failing open.
 
-## How to verify it's actually working once deployed
-
-1. Hit `POST https://<your-domain>/api/v1/billing/verify-purchase` with a
-   garbage `purchase_token` — should get back `{"valid": false}`, not a 503
-   (503 means the service account/env var isn't wired up right).
-2. On the Pixel (license tester account), do a real test purchase — should
-   still succeed, and now genuinely goes through the backend check.
-3. Check backend logs for `"Rejected purchase verification: ..."` lines —
-   absence of these on a real successful purchase, presence only on
-   deliberately-bad tokens, confirms it's discriminating correctly.
+### Real-purchase confirmation — not done yet
+The garbage-token test above proves the wiring is correct, but a genuine
+end-to-end check (real test purchase on the Pixel, license tester account,
+current build) hasn't been run since this deploy. Do that next:
+1. On the Pixel, do a real test purchase (monthly or lifetime) — should
+   succeed and show the Play "test purchase" banner as before.
+2. Check backend logs (`journalctl -u app.service -f` on whichever droplet
+   the app container round-robins to) for either silence (success, no
+   rejection logged) or a `"Rejected purchase verification: ..."` line if
+   something's off — that line only fires on `valid=false`.
