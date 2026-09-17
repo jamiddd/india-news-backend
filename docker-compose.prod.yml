@@ -53,6 +53,12 @@ services:
       - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET:-}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+      # Play Billing purchase verification (POST /api/v1/billing/verify-purchase,
+      # see app/services/play_billing.py). Only the `app` service needs this —
+      # it's the only place that endpoint runs. Absent = the endpoint returns
+      # 503 rather than trusting an unverified purchase.
+      - GOOGLE_PLAY_SERVICE_ACCOUNT_PATH=/run/secrets/play-billing-service-account.json
+      - ANDROID_PACKAGE_NAME=${ANDROID_PACKAGE_NAME:-com.jamid.news}
       # Optional — error tracking is a no-op until this is actually set in
       # the droplet's .env. See app/main.py.
       - SENTRY_DSN=${SENTRY_DSN:-}
@@ -71,6 +77,11 @@ services:
       # never committed/baked into the image. FIREBASE_CREDENTIALS_HOST_PATH
       # is set in the droplet's .env, same mechanism as POSTGRES_PASSWORD etc.
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
+      # Play Billing service-account key — same scp'd-once, never-committed
+      # convention as Firebase's above. A distinct service account (not the
+      # Firebase one), scoped only to "View financial data" for this app in
+      # Play Console — see app/services/play_billing.py's module doc.
+      - ${GOOGLE_PLAY_SERVICE_ACCOUNT_HOST_PATH}:/run/secrets/play-billing-service-account.json:ro
     ports:
       # Bound to localhost only — the system-level Caddy (see
       # india-news-app-handoff.md §8b) reverse-proxies HTTPS traffic to
