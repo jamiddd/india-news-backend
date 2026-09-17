@@ -22,10 +22,15 @@ and cross-device restore still works via Play's own account system
   `_isPremium`. Fails open (grants premium) only if the backend itself is
   unreachable; fails closed on an explicit "not valid" or unrecognized
   product id.
-- **Backend repo**, commits `23c692b` (endpoint) and `0fdd032` (compose
-  wiring): `POST /api/v1/billing/verify-purchase` in `app/main.py`, logic in
-  `app/services/play_billing.py`, schema in `app/schemas.py`, config in
-  `app/config.py`.
+- **Backend repo**, commit `23c692b`: `POST /api/v1/billing/verify-purchase`
+  in `app/main.py`, logic in `app/services/play_billing.py`, schema in
+  `app/schemas.py`, config in `app/config.py`.
+- **Backend repo**, commit `0fdd032`: wired the secret into
+  `docker-compose.prod.yml` too, for parity — but that file is legacy
+  backup material, **not** the real production deployment path (see below).
+- **Backend repo**, this session: `deploy/quadlets/app.container` — the
+  actual quadlet unit used in production — updated with a second `Volume=`
+  line for the Play Billing key.
 
 ## What's left — all manual, outside code
 
@@ -42,40 +47,62 @@ Play Console → Users and permissions → invited the service account's email
 (`<id>@indian-news-open.iam.gserviceaccount.com`), granted **"View
 financial data"** for this app.
 
+Production runs on Podman + systemd quadlets on both droplets (Docker is
+fully removed) — see `backend-services-podman` memory and
+`docs/podman-migration-plan.md`. The quadlet unit is
+`deploy/quadlets/app.container`, already updated (this session) with a
+second `Volume=` line for the Play Billing key, alongside the existing
+Firebase one:
+
+```
+Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
+Volume=<PLAY_BILLING_HOST_PATH>:/run/secrets/play-billing-service-account.json:ro
+```
+
+`<PLAY_BILLING_HOST_PATH>` is a placeholder in the committed file (same
+convention as `<FIREBASE_HOST_PATH>`) — the real absolute path only exists
+in the installed copy at `/etc/containers/systemd/app.container` on each
+droplet, never committed.
+
 ### 3. Get the JSON key onto both droplets — NOT DONE YET
-Per your infra setup, the app runs on **newsapp** and **newsapp-2** behind a
-DO load balancer, and you deploy manually via SSH (not via a script). Raw
-commands (run these yourself):
+```
+scp /path/to/downloaded-key.json newsapp:/root/news-backend/secrets/play-billing-service-account.json
+scp /path/to/downloaded-key.json newsapp-2:/root/news-backend/secrets/play-billing-service-account.json
+```
+(Match whatever directory `firebase-service-account.json` already lives in
+on each droplet — put this next to it.)
+
+### 4. Update both droplets' installed quadlet + .env — NOT DONE YET
+On **each** droplet (`newsapp`, then `newsapp-2`):
 
 ```
-# From your local machine, copy the key to each droplet:
-scp /path/to/downloaded-key.json root@newsapp:/root/news-backend/secrets/play-billing-service-account.json
-scp /path/to/downloaded-key.json root@newsapp-2:/root/news-backend/secrets/play-billing-service-account.json
+ssh newsapp   # or newsapp-2
+sudo nano /etc/containers/systemd/app.container
 ```
+Replace `<PLAY_BILLING_HOST_PATH>` with the real absolute path to the file
+you just scp'd (e.g. `/root/news-backend/secrets/play-billing-service-account.json`).
 
-(Adjust `/root/news-backend/secrets/` if your actual secrets directory on
-the droplets is named differently — check where `firebase-service-account.json`
-already lives on each droplet and put this next to it.)
-
-### 4. Set the env var on both droplets — NOT DONE YET
-On each droplet, edit the backend's `.env` file (same one that has
-`FIREBASE_CREDENTIALS_HOST_PATH`) and add:
-
+Then add one line to the backend's `.env` (same file with
+`FIREBASE_CREDENTIALS_PATH`) — this is required because the quadlet's
+`EnvironmentFile=.env` passes the file through as-is, unlike the old
+compose file's per-service hardcoded env block:
 ```
-GOOGLE_PLAY_SERVICE_ACCOUNT_HOST_PATH=/root/news-backend/secrets/play-billing-service-account.json
+nano ~/india-news-backend/.env
 ```
-
-(`ANDROID_PACKAGE_NAME` defaults to `com.jamid.news` already — no need to
+```
+GOOGLE_PLAY_SERVICE_ACCOUNT_PATH=/run/secrets/play-billing-service-account.json
+```
+(`ANDROID_PACKAGE_NAME` defaults to `com.jamid.news` in code — no need to
 set it unless that ever changes.)
 
-### 5. Deploy backend to both droplets — NOT DONE YET
-Pull the new backend code and restart the `app` container (Podman, per your
-current setup — see `backend-services-podman` memory for exact commands;
-Docker was fully removed 2026-09-16). Only the `app` service needs the new
-volume/env — `contentworker`/`pollworker`/`narrator` don't touch billing.
-
-Do this on **both** newsapp and newsapp-2 — per your infra memory, deploys
-must always hit both droplets.
+### 5. Reload + restart on both droplets — NOT DONE YET
+```
+sudo systemctl daemon-reload
+sudo systemctl restart app.service
+sudo systemctl show app.service --property=ActiveEnterTimestamp   # confirm it actually restarted
+```
+Only `app.service` needs this — `contentworker`/`pollworker`/`narrator`
+don't touch billing. Do this on **both** droplets.
 
 ### 6. Upload the new Android build — separate, already built
 `app/build/outputs/bundle/release/app-release.aab`, versionCode 11, already

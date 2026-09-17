@@ -3,11 +3,17 @@
 # INSTALL: copy to /etc/containers/systemd/app.container on the target
 # droplet, then `systemctl daemon-reload && systemctl start app.service`.
 #
-# TODO before first use on a real droplet: replace <ENV_PATH> and
-# <FIREBASE_HOST_PATH> below with the real absolute paths on that host
-# (same values currently in docker-compose.prod.yml's .env /
-# FIREBASE_CREDENTIALS_HOST_PATH — these are host-specific/secret, so they
-# are NOT filled in here and NOT committed with real values).
+# TODO before first use on a real droplet: replace <ENV_PATH>,
+# <FIREBASE_HOST_PATH>, and <PLAY_BILLING_HOST_PATH> below with the real
+# absolute paths on that host (host-specific/secret, so they are NOT filled
+# in here and NOT committed with real values).
+#
+# Play Billing verification (POST /api/v1/billing/verify-purchase, see
+# app/services/play_billing.py) needs GOOGLE_PLAY_SERVICE_ACCOUNT_PATH set
+# to the container-internal path below — EnvironmentFile= just dumps .env
+# as-is (no compose-style hardcoded per-service env block), so that line
+# must be added directly to the droplet's real .env, same as
+# FIREBASE_CREDENTIALS_PATH already is.
 #
 # NOTE: EnvironmentFile= passes the ENTIRE .env into this container, unlike
 # docker-compose.prod.yml's current per-service allow-list (e.g. app doesn't
@@ -25,6 +31,7 @@ Image=localhost/india-news-backend-app:latest
 ContainerName=news_app_prod
 EnvironmentFile=<ENV_PATH>/india-news-backend/.env
 Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
+Volume=<PLAY_BILLING_HOST_PATH>:/run/secrets/play-billing-service-account.json:ro
 # Bound to localhost only — same reasoning as the current compose file:
 # system-level Caddy reverse-proxies HTTPS to 127.0.0.1:8080. Never publish
 # on 0.0.0.0 here.
