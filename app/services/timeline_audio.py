@@ -146,7 +146,12 @@ async def synthesize(
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     TTS_API_URL,
-                    params={"key": settings.GEMINI_API_KEY},
+                    # Key goes in a header, not a URL query param — httpx's
+                    # INFO-level request log prints the full URL (including
+                    # query string) to the journal on every call, which was
+                    # leaking this key into plaintext logs. Headers aren't
+                    # logged, so this stops that.
+                    headers={"x-goog-api-key": settings.GEMINI_API_KEY},
                     json=payload,
                 )
                 if response.status_code == 429:
