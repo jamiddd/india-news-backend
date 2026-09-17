@@ -71,6 +71,7 @@ from app.schemas import (
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
     ReadEventRequest,
     DonationLinkRequest, DonationLinkResponse,
+    VerifyPurchaseRequest, VerifyPurchaseResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     StarredSourcesOut,
     BlockedSourcesOut,
@@ -97,6 +98,7 @@ from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
+from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
 from scripts.enrich_all_clusters import enrich_clusters
 
 # Per-run ceiling for the recurring news-enrich.timer. At a 20-minute cadence
@@ -2750,6 +2752,24 @@ async def razorpay_webhook(request: Request, db: AsyncSession = Depends(get_db))
     await db.execute(statement)
     await db.commit()
     return {"message": "Recorded"}
+
+
+@app.post(f"{settings.API_V1_STR}/billing/verify-purchase", response_model=VerifyPurchaseResponse)
+@limiter.limit("20/minute")
+async def verify_play_purchase(request: Request, payload: VerifyPurchaseRequest):
+    """Confirms a Play Billing purchase token is real and currently paid for.
+
+    See app/services/play_billing.py's module doc for why this exists and why
+    it is deliberately anonymous (no user_id). Rate limited because each call
+    hits the Play Developer API, which has its own quota.
+    """
+    try:
+        result = await verify_purchase(payload.product_id, payload.purchase_token, payload.product_type)
+    except PlayBillingNotConfigured:
+        raise HTTPException(status_code=503, detail="Purchase verification is not configured")
+    if not result.valid:
+        logger.info("Rejected purchase verification: %s", result.reason)
+    return VerifyPurchaseResponse(valid=result.valid)
 
 
 def _require_admin(request: Request) -> None:

@@ -560,6 +560,18 @@ class DonationLinkResponse(BaseModel):
     url: str
 
 
+class VerifyPurchaseRequest(BaseModel):
+    # Matches BillingProductIds in BillingManager.kt.
+    product_id: str = Field(max_length=128)
+    purchase_token: str = Field(max_length=2048)
+    # BillingClient.ProductType value: "subs" or "inapp".
+    product_type: Literal["subs", "inapp"]
+
+
+class VerifyPurchaseResponse(BaseModel):
+    valid: bool
+
+
 class SaveStoryRequest(BaseModel):
     cluster_id: int
 

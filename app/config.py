@@ -157,6 +157,20 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_SECRET: Optional[str] = None
     RAZORPAY_WEBHOOK_SECRET: Optional[str] = None
 
+    # Server-side verification of Play Billing purchases (see
+    # app/services/play_billing.py and BillingManager.kt) — a rooted/tampered
+    # device can fake the local "purchase succeeded" callback without ever
+    # completing a real Play transaction, so the client asks this backend to
+    # re-check the purchase token directly against Google before trusting it.
+    # This is a separate service account from FIREBASE_CREDENTIALS_PATH:
+    # grant it only Play Console "View financial data" access for this app,
+    # nothing more. Absent config = the endpoint refuses verification
+    # requests (503), same "absent config" convention as SUPABASE_URL etc.
+    # Never commit this file — bind-mounted onto the droplet like the
+    # Firebase credential.
+    GOOGLE_PLAY_SERVICE_ACCOUNT_PATH: Optional[str] = None
+    ANDROID_PACKAGE_NAME: str = "com.jamid.news"
+
     # Human-reviewed AI daily poll. All secrets are backend-only.
     POLL_ADMIN_USERNAME: str = "admin"
     POLL_ADMIN_PASSWORD: Optional[str] = None
