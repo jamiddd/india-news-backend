@@ -242,6 +242,22 @@ STYLE = """
     table{border-collapse:collapse}
     th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:.94em}
     th{color:var(--ink-3);font-weight:600;font-size:.82em;text-transform:uppercase;letter-spacing:.04em}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    button:disabled:hover{border-color:var(--line)}
+    button.busy{opacity:1;cursor:progress;border-color:var(--accent);color:var(--accent)}
+    button.busy::before{
+      content:"";display:inline-block;width:.9em;height:.9em;margin-right:8px;vertical-align:-.12em;
+      border:2px solid currentColor;border-right-color:transparent;border-radius:50%;
+      animation:busy-spin .7s linear infinite;
+    }
+    @keyframes busy-spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){button.busy::before{animation-duration:2s}}
+    .busy-note{
+      position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:50;
+      max-width:min(92vw,460px);padding:10px 16px;border:1px solid var(--line);border-radius:10px;
+      background:var(--surface);color:var(--ink);box-shadow:0 6px 24px rgba(0,0,0,.18);
+      font-size:.94em;text-align:center;
+    }
 """
 
 # The app's own OIN mark (see app/static/home.html), inlined so the admin
@@ -277,6 +293,7 @@ NAV_GROUPS = [
         ("/admin/polls", "Polls"),
         ("/admin/quiz", "Quiz"),
         ("/admin/quiz-bank", "Quiz bank"),
+        ("/admin/poll-bank", "Poll bank"),
         ("/admin/feedback", "Feedback"),
         ("/admin/reports", "Story reports"),
     ]),
@@ -378,6 +395,62 @@ NAV_TOGGLE_SCRIPT = (
 )
 
 
+# Every admin action is a plain POST form whose handler blocks until Claude (or
+# the DB) answers, which can take a while — with no feedback the page looks
+# dead and the operator clicks again. On submit this locks *every* POST form's
+# buttons on the page (not just the clicked form: approving one breaking
+# candidate while regenerating another would race), spins the clicked button,
+# and shows a status note. A form with data-busy-msg overrides the note text.
+#
+# The clicked button's name/value is copied into a hidden input *before*
+# anything is disabled: disabled controls are left out of the form data, so
+# without this `action=approve|regenerate|reject` would silently vanish.
+# A second submit while locked is cancelled, and `pageshow` unlocks the page
+# when the browser restores it from the back/forward cache still disabled.
+# Forms whose own onsubmit confirm() was declined arrive with defaultPrevented
+# set and are left alone.
+BUSY_SUBMIT_SCRIPT = """<script>(function(){
+var locked=false,note=null;
+function unlock(){
+  locked=false;
+  if(note){note.remove();note=null;}
+  document.querySelectorAll('button.busy').forEach(function(b){
+    b.classList.remove('busy');if(b.dataset.idleLabel!==undefined){b.textContent=b.dataset.idleLabel;}
+  });
+  document.querySelectorAll('button[data-was-enabled]').forEach(function(b){
+    b.disabled=false;b.removeAttribute('data-was-enabled');
+  });
+  document.querySelectorAll('input[data-busy-carry]').forEach(function(i){i.remove();});
+}
+document.addEventListener('submit',function(e){
+  var form=e.target;
+  if(e.defaultPrevented||!form||(form.method||'').toLowerCase()!=='post')return;
+  if(locked){e.preventDefault();return;}
+  locked=true;
+  var sub=e.submitter||form.querySelector('button:not([type=button]),input[type=submit]');
+  if(sub&&sub.name){
+    var carry=document.createElement('input');
+    carry.type='hidden';carry.name=sub.name;carry.value=sub.value;
+    carry.setAttribute('data-busy-carry','');
+    form.appendChild(carry);
+  }
+  document.querySelectorAll('button:not([type=button]),input[type=submit]').forEach(function(b){
+    if(!b.disabled){b.setAttribute('data-was-enabled','');b.disabled=true;}
+  });
+  if(sub){
+    sub.classList.add('busy');
+    if(sub.tagName==='BUTTON'){sub.dataset.idleLabel=sub.textContent;}
+  }
+  note=document.createElement('div');
+  note.className='busy-note';note.setAttribute('role','status');
+  note.textContent=form.getAttribute('data-busy-msg')||
+    'Working\\u2026 this can take up to a minute. Please don\\u2019t reload or click again.';
+  document.body.appendChild(note);
+});
+window.addEventListener('pageshow',function(e){if(e.persisted)unlock();});
+})()</script>"""
+
+
 def layout(title: str, body: str, current: str | None = None) -> HTMLResponse:
     """Renders the admin shell. `current` is the href of the page rendering
     it — pass it to get the sidebar with that page highlighted; omit it (as
@@ -403,7 +476,8 @@ def layout(title: str, body: str, current: str | None = None) -> HTMLResponse:
         f"<title>{title}</title><style>{STYLE}</style>{THEME_INIT_SCRIPT}</head>"
         f"<body><div class=shell>{header}<div class=shell-body>{sidebar}"
         f"<div class=wrap><div class=wrap-inner><main>{body}</main></div></div>"
-        f"</div></div>{THEME_TOGGLE_SCRIPT}{NAV_TOGGLE_SCRIPT if current else ''}</body></html>")
+        f"</div></div>{THEME_TOGGLE_SCRIPT}{NAV_TOGGLE_SCRIPT if current else ''}"
+        f"{BUSY_SUBMIT_SCRIPT}</body></html>")
 
 
 def login_form(title: str, action: str) -> HTMLResponse:
