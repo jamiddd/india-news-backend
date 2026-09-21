@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import html
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +29,8 @@ from app.admin_session import (
 )
 from app.database import get_db
 from app.models import StoryCluster, StoryTimelineFeature, utc_now
+from app.services import timeline_narration as narration
+from app.services.timeline_audio import SCRIPT_VERSION, is_configured
 
 router = APIRouter(prefix="/admin/timelines")
 TITLE = "Timelines"
@@ -52,7 +54,65 @@ async def login(request: Request):
     return response
 
 
-def _pick_row(row: StoryTimelineFeature, csrf: str) -> str:
+NARRATE_CONFIRM = (
+    "Generate narration for this timeline? This calls Claude and Sarvam (roughly Rs 15-20 for a typical "
+    "story), takes a few minutes, and replaces its current audio only if it succeeds."
+)
+NOTICES = {
+    "already-running": "That timeline is already being narrated.",
+    "not-eligible": "That timeline can't be narrated (it isn't a coherent timeline with written beats yet).",
+    "not-configured": "Narration isn't configured on this server (SARVAM_API_KEY / Supabase storage).",
+}
+
+
+def _audio_summary(row: StoryTimelineFeature) -> str:
+    if not row.audio_url:
+        return "<span class=meta>No narration audio yet.</span>"
+    seconds = row.audio_duration_seconds or 0
+    when = f"{row.audio_generated_at:%Y-%m-%d %H:%M} UTC" if row.audio_generated_at else "an unknown time"
+    current = (row.spoken_script or {}).get("version") == SCRIPT_VERSION
+    kind = "<b class=done>Current narration</b>" if current else "<b>Older narration (previous voice)</b>"
+    return f"{kind} &middot; {seconds // 60}:{seconds % 60:02d} &middot; generated {when}"
+
+
+def _run_summary(status: dict | None) -> str:
+    if not status:
+        return ""
+    state = status.get("state")
+    message = html.escape(status.get("message") or "")
+    at = (status.get("at") or "")[:16].replace("T", " ")
+    if state == "running":
+        return f"<b>Generating&hellip;</b> started {html.escape(at)} UTC. This takes a few minutes; the page refreshes itself."
+    if state == "failed":
+        return f"<b class=danger>Last run failed:</b> {message} <span class=meta>({html.escape(at)} UTC)</span>"
+    return f"<span class=meta>Last run: {message} ({html.escape(at)} UTC)</span>"
+
+
+def _narration_block(row: StoryTimelineFeature, csrf: str, status: dict | None, configured: bool) -> str:
+    running = bool(status) and status.get("state") == "running"
+    blocked = narration.can_narrate(row)
+    if running:
+        control = "<button disabled>Generating&hellip;</button>"
+    elif blocked:
+        control = f"<button disabled>Generate narration</button> <span class=meta>({html.escape(blocked)})</span>"
+    elif not configured:
+        control = "<button disabled>Generate narration</button> <span class=meta>(not configured on this server)</span>"
+    else:
+        label = "Regenerate narration" if row.audio_url else "Generate narration"
+        control = (
+            f"<form method=post action='/admin/timelines/narrate' data-busy-msg='Starting&hellip;' "
+            f"onsubmit=\"return confirm('{html.escape(NARRATE_CONFIRM, quote=True)}')\">"
+            f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+            f"<input type=hidden name=row_id value='{row.id}'>"
+            f"<button>{label}</button></form>")
+    run = _run_summary(status)
+    return (
+        f"<p class=meta>Narration: {_audio_summary(row)}</p>"
+        + (f"<p class=meta>{run}</p>" if run else "")
+        + control)
+
+
+def _pick_row(row: StoryTimelineFeature, csrf: str, status: dict | None = None, configured: bool = True) -> str:
     label = html.escape(row.title or row.anchor_label or f"Cluster {row.anchor_cluster_id}")
     flags = []
     if row.is_editorial_pick:
@@ -72,7 +132,7 @@ def _pick_row(row: StoryTimelineFeature, csrf: str) -> str:
         f"{'Remove editorial pick' if action == 'unpick' else 'Make editorial pick'}</button>")
 
     return (
-        f"<div class=task><h2>{label}</h2>"
+        f"<div class=task id='row-{row.id}'><h2>{label}</h2>"
         f"<p class=meta>{' · '.join(flags)}</p>"
         f"<p class=meta>anchor cluster "
         f"<a target=_blank href='/api/v1/clusters/{row.anchor_cluster_id}'>{row.anchor_cluster_id}</a>"
@@ -80,7 +140,8 @@ def _pick_row(row: StoryTimelineFeature, csrf: str) -> str:
         f"<form method=post action='/admin/timelines/update'>"
         f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
         f"<input type=hidden name=cluster_id value='{row.anchor_cluster_id}'>"
-        f"<input type=hidden name=action value='{action}'>{button}</form></div>")
+        f"<input type=hidden name=action value='{action}'>{button}</form>"
+        f"{_narration_block(row, csrf, status, configured)}</div>")
 
 
 def _search_result(cluster: StoryCluster, csrf: str) -> str:
@@ -95,7 +156,7 @@ def _search_result(cluster: StoryCluster, csrf: str) -> str:
 
 
 @router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, q: str = "", db: AsyncSession = Depends(get_db)):
+async def dashboard(request: Request, q: str = "", notice: str = "", db: AsyncSession = Depends(get_db)):
     csrf = session_csrf(request)
     if not csrf:
         return RedirectResponse("/admin/timelines/login", status_code=303)
@@ -119,15 +180,25 @@ async def dashboard(request: Request, q: str = "", db: AsyncSession = Depends(ge
             + ("".join(_search_result(c, csrf) for c in results) if results
                else "<p class=meta>No unpicked clusters match.</p>"))
 
-    picks_html = "".join(_pick_row(row, csrf) for row in picks) if picks else "<p class=meta>No timeline rows yet.</p>"
+    statuses = await narration.get_statuses(row.id for row in picks)
+    configured = is_configured()
+    picks_html = (
+        "".join(_pick_row(row, csrf, statuses.get(row.id), configured) for row in picks)
+        if picks else "<p class=meta>No timeline rows yet.</p>")
+    any_running = any(status.get("state") == "running" for status in statuses.values())
+    # A run is started on one worker/server and finishes minutes later, so
+    # while any is in flight the page re-polls itself (statuses are shared).
+    refresh = "<script>setTimeout(function(){location.reload()},15000)</script>" if any_running else ""
+    notice_html = f"<p class=danger>{html.escape(NOTICES[notice])}</p>" if notice in NOTICES else ""
 
     return layout(TITLE, (
+        f"{notice_html}"
         f"<h1>Timeline editorial picks</h1>"
         f"<p class=meta>Up to 5 slots show in the Timeline/Context tab; editorial picks fill first, "
         f"the generation script fills the rest by chain length &times; recency.</p>"
         f"<form method=get><input name=q placeholder='search by headline' "
         f"value='{html.escape(q, quote=True)}'><button>Search</button></form>"
-        f"{search_html}<h2>Current rows</h2>{picks_html}"), current="/admin/timelines")
+        f"{search_html}<h2>Current rows</h2>{picks_html}{refresh}"), current="/admin/timelines")
 
 
 @router.post("/update")
@@ -161,3 +232,52 @@ async def update(request: Request, db: AsyncSession = Depends(get_db)):
 
     await db.commit()
     return RedirectResponse("/admin/timelines", status_code=303)
+
+
+@router.post("/narrate")
+async def narrate(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Start narrating one timeline (Claude writes the spoken script, Sarvam
+    voices it, the row is updated). Returns at once — the work takes minutes,
+    so it runs as a background task and the page shows its status."""
+    fields = await form_fields(request)
+    verify(request, fields)
+    try:
+        row_id = int(fields["row_id"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid row id")
+    row = await db.get(StoryTimelineFeature, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    if narration.can_narrate(row):
+        return RedirectResponse("/admin/timelines?notice=not-eligible", status_code=303)
+    if not is_configured():
+        return RedirectResponse("/admin/timelines?notice=not-configured", status_code=303)
+    if await narration.in_progress(row_id):
+        return RedirectResponse("/admin/timelines?notice=already-running", status_code=303)
+
+    # Marked running before the response so the redirected page already shows
+    # it; the task itself takes the per-row lease that makes a second click a no-op.
+    await narration.set_status(row_id, "running")
+    background_tasks.add_task(narration.narrate_row, row_id)
+    return RedirectResponse(f"/admin/timelines#row-{row_id}", status_code=303)
+
+
+@router.get("/narrate/{row_id}")
+async def narration_status(row_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """JSON status of a narration run, for polling."""
+    if not session_csrf(request):
+        raise HTTPException(status_code=401, detail="Not signed in")
+    row = await db.get(StoryTimelineFeature, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+    status = (await narration.get_statuses([row_id])).get(row_id) or {}
+    running = await narration.in_progress(row_id) or status.get("state") == "running"
+    return JSONResponse({
+        "row_id": row_id,
+        "state": "running" if running else status.get("state", "idle"),
+        "message": status.get("message", ""),
+        "has_audio": bool(row.audio_url),
+        "audio_is_current": (row.spoken_script or {}).get("version") == SCRIPT_VERSION and bool(row.audio_url),
+        "audio_generated_at": row.audio_generated_at.isoformat() if row.audio_generated_at else None,
+    })

@@ -87,6 +87,13 @@ def _configured() -> bool:
     return bool(settings.SARVAM_API_KEY and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY)
 
 
+def is_configured() -> bool:
+    """True when narration audio can be produced on this server (Sarvam key
+    plus the Supabase storage credentials). Lets callers such as the admin
+    page say so up front instead of failing minutes into a run."""
+    return _configured()
+
+
 def script_hash(spoken_script: dict) -> str:
     """Stable hash of the spoken script's actual content, used to skip
     re-synthesizing audio when nothing changed — see the 06:00 IST daily
