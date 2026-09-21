@@ -124,6 +124,7 @@ from app.services.firebase_auth import (
 from app.poll_admin import router as poll_admin_router
 from app.quiz_admin import router as quiz_admin_router
 from app.quiz_bank_admin import router as quiz_bank_admin_router
+from app.poll_bank_admin import router as poll_bank_admin_router
 from app.admin_home import router as admin_home_router
 from app.story_reports_admin import router as story_reports_admin_router
 from app.feedback_admin import router as feedback_admin_router
@@ -391,6 +392,10 @@ async def lifespan(app: FastAPI):
             # that already exist — daily_editorial_features predates
             # background_image, so add it here idempotently on every startup.
             await conn.execute(text("ALTER TABLE daily_editorial_features ADD COLUMN IF NOT EXISTS background_image JSON"))
+            # Same story for the poll bank columns on poll_fallbacks.
+            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS category VARCHAR(50)"))
+            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
+            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS used_count INTEGER NOT NULL DEFAULT 0"))
         finally:
             await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
@@ -404,6 +409,7 @@ app = FastAPI(
 app.include_router(poll_admin_router)
 app.include_router(quiz_admin_router)
 app.include_router(quiz_bank_admin_router)
+app.include_router(poll_bank_admin_router)
 app.include_router(admin_home_router)
 app.include_router(story_reports_admin_router)
 app.include_router(feedback_admin_router)

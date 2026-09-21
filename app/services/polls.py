@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.models import Article, DailyPoll, PollFallback, PollOption, PollVote, Source, StoryCluster, utc_now
 from app.services.enrichment import parse_json_response
+from app.services.llm_gen import call_claude_json
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -74,6 +75,42 @@ def validate_draft(data: dict) -> tuple[str, str, list[str]]:
     if any(not value or len(value) > 300 for value in options):
         raise ValueError(f"Poll option empty or absurdly long: {[len(value) for value in options]}")
     return question, context, options
+
+
+# For poll_bank_admin.py's "Generate via Claude" button — same neutrality rules
+# as generate_draft's prompt, but evergreen: the bank is what activate_poll()
+# publishes when no news-based draft was approved, so it must not go stale.
+POLL_BANK_SYSTEM = (
+    "You write a single neutral public-opinion poll for the evergreen question bank of an "
+    "Indian news app. Return JSON only: {\"question\": string ending ?, "
+    "\"context\": one neutral factual sentence, \"options\": 2-4 mutually exclusive balanced strings}.\n"
+    "Rules:\n"
+    "- A timeless policy, civic, economic, science, technology, education, environment or "
+    "public-service issue — not this week's news.\n"
+    "- Never poll on a person's guilt, tragedy, death, communal identity, religion, caste, "
+    "active crime, or an unverifiable claim.\n"
+    "- Avoid loaded premises; include nuance when a binary choice is misleading.\n"
+    "- Keep it tight for a phone screen: question under about 140 characters, context one "
+    "sentence, options as short noun phrases rather than sentences."
+)
+
+
+async def draft_bank_poll(category: str | None, existing_questions: list[str]) -> dict | None:
+    """One Claude-drafted poll for the bank, validated with the same rules as
+    the daily draft. Returns None if the Claude request itself failed; raises
+    ValueError if it answered with something validate_draft rejects. The
+    result is only ever a suggestion for the admin form — never saved directly.
+
+    `existing_questions` goes into the prompt as an avoid-list; without it
+    repeated clicks converge on the same handful of "safest" topics."""
+    user_content = f"Write a poll about: {category}." if category else "Write a poll on any suitable evergreen topic."
+    if existing_questions:
+        user_content += "\nDo not repeat or closely paraphrase these existing questions:\n" + "\n".join(f"- {q}" for q in existing_questions)
+    payload = await call_claude_json(POLL_BANK_SYSTEM, user_content, max_tokens=500)
+    if payload is None:
+        return None
+    question, context, options = validate_draft(payload)
+    return {"question": question, "context": context, "options": options, "category": category}
 
 
 async def generate_draft(session: AsyncSession, poll_date: date, replace: bool = False) -> DailyPoll:
@@ -199,6 +236,7 @@ async def activate_poll(session: AsyncSession, poll_date: date) -> DailyPoll:
             session.add(poll); await session.flush()
         session.add_all(PollOption(poll_id=poll.id, position=i, text=value) for i, value in enumerate(fallback.options))
         fallback.last_used_at = utc_now()
+        fallback.used_count += 1
     previous = (await session.execute(select(DailyPoll).where(DailyPoll.status == "active", DailyPoll.id != poll.id))).scalars().all()
     for old in previous: old.status = "closed"
     await session.commit(); await session.refresh(poll)

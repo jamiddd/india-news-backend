@@ -430,13 +430,25 @@ class StoryReport(Base):
 
 
 class PollFallback(Base):
+    """The poll question bank.
+
+    Evergreen polls that activate_poll() publishes when no AI draft was
+    approved for the day, least-recently-used first. Seeded from the
+    hardcoded FALLBACKS in services/polls.py, and managed (added, generated
+    via Claude, retired) from /admin/poll-bank. category/created_at/
+    used_count were added after the table shipped — see the idempotent
+    ALTERs in main.py's lifespan.
+    """
     __tablename__ = "poll_fallbacks"
     id = Column(Integer, primary_key=True)
     question = Column(Text, nullable=False)
     context = Column(Text, nullable=False)
-    options = Column(JSON, nullable=False)
+    options = Column(JSON, nullable=False)  # 2-4 strings
     active = Column(Boolean, nullable=False, default=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
+    category = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    used_count = Column(Integer, nullable=False, default=0)
 
 
 class Source(Base):
