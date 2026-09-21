@@ -59,6 +59,10 @@ def test_with_ending_single_sentence_only_gets_the_tail():
     assert ta._with_ending("Just one sentence.") == "Just one sentence. ......."
 
 
+def test_with_ending_can_omit_the_trailing_dots():
+    assert ta._with_ending("One. Two.", trailing_dots=False) == "One. .... Two."
+
+
 def test_build_chunks_folds_intro_into_first_and_closing_into_last():
     chunks, intro_share = ta.build_chunks(SCRIPT)
     assert len(chunks) == len(SCRIPT["beats"])
@@ -66,14 +70,18 @@ def test_build_chunks_folds_intro_into_first_and_closing_into_last():
     assert "On the third of September" in chunks[0]
     assert chunks[1] == "The next day, it grew. ......."
     assert chunks[-1].startswith("Then it ended.")
-    assert chunks[-1].rstrip().endswith("right here on Open Indian Voice. .......")
+    # The last chunk ends on the fixed sign-off with NO trailing dots, and the
+    # script's own "Open Indian Voice" closing comes right before it.
+    assert "right here on Open Indian Voice. .... " + ta.SIGN_OFF in chunks[-1]
+    assert chunks[-1].endswith(ta.SIGN_OFF)
     assert 0 < intro_share < 1
 
 
 def test_build_chunks_single_beat_gets_intro_and_closing():
     chunks, _ = ta.build_chunks({**SCRIPT, "beats": ["Only beat."]})
     assert len(chunks) == 1
-    assert "Open Indian Voice!" in chunks[0] and "Only beat." in chunks[0] and chunks[0].rstrip().endswith(".......")
+    assert "Open Indian Voice!" in chunks[0] and "Only beat." in chunks[0]
+    assert chunks[0].endswith(ta.SIGN_OFF)
 
 
 def test_split_for_limit_leaves_short_text_alone_and_splits_long_at_sentences():

@@ -100,24 +100,37 @@ def script_hash(spoken_script: dict) -> str:
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 
 
-def _with_ending(text: str) -> str:
+def _with_ending(text: str, *, trailing_dots: bool = True) -> str:
     """Give a chunk the pause structure the approved narration style relies
     on: a run of dots before the final sentence and a trailing run after it
     (`... head. .... Last sentence. .......`). Without them the voice rushes
-    the last word of every clip ("Google" -> "ggl") and the seam between
-    beats sounds abrupt. Done here, not asked of the script writer, so the
-    pattern is applied identically to every chunk."""
+    the last word of a clip ("Google" -> "ggl") and the seam between beats
+    sounds abrupt. Done here, not asked of the script writer, so the pattern
+    is applied identically to every chunk.
+
+    The final chunk of a story is the exception (trailing_dots=False): the
+    run after the very last sentence is where the voice was heard adding
+    stray words of its own after the sign-off, so that chunk ends cleanly on
+    the sign-off's own full stop."""
     sentences = _SENTENCE_BREAK.split(text.strip())
     last = sentences[-1]
     head = " ".join(sentences[:-1])
-    return f"{head} .... {last} ......." if head else f"{last} ......."
+    tail = " ......." if trailing_dots else ""
+    return f"{head} .... {last}{tail}" if head else f"{last}{tail}"
+
+
+# Fixed spoken last line, added by code after the script's own closing (which
+# ends with the "Open Indian Voice" sign-off). Giving the voice an explicit
+# final sentence keeps it from inventing one of its own after the last word.
+SIGN_OFF = "Thank you and have a nice day."
 
 
 def build_chunks(spoken_script: dict) -> tuple[list[str], float]:
     """Returns (chunks, intro_share): one text chunk per beat, ready to send.
 
     chunks[0] is the intro followed by beat 0, chunks[-1] ends with the
-    closing, and every chunk in between is one beat. intro_share is the
+    closing and then SIGN_OFF, and every chunk in between is one beat.
+    intro_share is the
     fraction of chunks[0]'s spoken text taken up by the intro — where beat 0
     starts inside that clip — used to estimate beat 0's offset. Callers must
     have checked that intro and beats are present."""
@@ -127,9 +140,9 @@ def build_chunks(spoken_script: dict) -> tuple[list[str], float]:
     chunks = list(beats)
     chunks[0] = f"{intro} {chunks[0]}"
     intro_share = min((len(intro) + 1) / len(chunks[0]), 1.0)
-    if closing:
-        chunks[-1] = f"{chunks[-1]} {closing}"
-    return [_with_ending(c) for c in chunks], intro_share
+    chunks[-1] = " ".join(part for part in (chunks[-1], closing, SIGN_OFF) if part)
+    last = len(chunks) - 1
+    return [_with_ending(c, trailing_dots=(i != last)) for i, c in enumerate(chunks)], intro_share
 
 
 def _split_for_limit(text: str) -> list[str]:
