@@ -1113,6 +1113,44 @@ VERIFIED_SOURCES = [
         "region": "national"
     },
 
+    # India — markets. Added 2026-09-21, live-tested (200, valid items)
+    # from a user-supplied list. Not added: ET Stocks & Markets (near-dup
+    # of Top Market Stories), BS markets-106 (subset of latest.rss),
+    # Financial Express /market/feed/ (serves HTML, not RSS), Reuters Agency
+    # feed (404), Google News nifty/sensex queries (redirect links).
+    {
+        "name": "Economic Times Markets",
+        "slug": "economic-times-markets",
+        "feed_url": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+        "homepage_url": "https://economictimes.indiatimes.com/markets",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Livemint Markets",
+        "slug": "livemint-markets",
+        "feed_url": "https://www.livemint.com/rss/markets",
+        "homepage_url": "https://www.livemint.com/market",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Livemint Companies",
+        "slug": "livemint-companies",
+        "feed_url": "https://www.livemint.com/rss/companies",
+        "homepage_url": "https://www.livemint.com/companies",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "The Hindu Business Line Markets",
+        "slug": "the-hindu-business-line-markets",
+        "feed_url": "https://www.thehindubusinessline.com/markets/feeder/default.rss",
+        "homepage_url": "https://www.thehindubusinessline.com/markets",
+        "category": "business",
+        "region": "national"
+    },
+
     # India — regional
     {
         "name": "Greater Kashmir",
