@@ -51,37 +51,36 @@ def configured(monkeypatch):
 # --- chunking -------------------------------------------------------------
 
 
-def test_with_ending_puts_a_run_up_before_the_last_sentence():
-    assert ta._with_ending("One. Two. Three.") == "One. Two. .... Three. ......."
-
-
-def test_with_ending_single_sentence_only_gets_the_tail():
-    assert ta._with_ending("Just one sentence.") == "Just one sentence. ......."
-
-
-def test_with_ending_can_omit_the_trailing_dots():
-    assert ta._with_ending("One. Two.", trailing_dots=False) == "One. .... Two."
-
-
-def test_build_chunks_folds_intro_into_first_and_closing_into_last():
-    chunks, intro_share = ta.build_chunks(SCRIPT)
+def test_build_chunks_folds_intro_into_first_and_closing_and_sign_off_into_last():
+    chunks, intro_chars = ta.build_chunks(SCRIPT)
     assert len(chunks) == len(SCRIPT["beats"])
     assert chunks[0].startswith("Heyyy everyone, welcome back to Open Indian Voice!")
     assert "On the third of September" in chunks[0]
-    assert chunks[1] == "The next day, it grew. ......."
+    assert chunks[1] == "The next day, it grew."
     assert chunks[-1].startswith("Then it ended.")
-    # The last chunk ends on the fixed sign-off with NO trailing dots, and the
-    # script's own "Open Indian Voice" closing comes right before it.
-    assert "right here on Open Indian Voice. .... " + ta.SIGN_OFF in chunks[-1]
+    assert "right here on Open Indian Voice. " + ta.SIGN_OFF in chunks[-1]
     assert chunks[-1].endswith(ta.SIGN_OFF)
-    assert 0 < intro_share < 1
+    assert intro_chars == len(SCRIPT["intro"]) + 1
 
 
-def test_build_chunks_single_beat_gets_intro_and_closing():
+def test_no_chunk_carries_a_dot_pause_marker():
+    """Pauses are real silence in the audio; dots in the text made the voice
+    speak stray words, so none may ever be sent."""
+    chunks, _ = ta.build_chunks(SCRIPT)
+    for chunk in chunks:
+        assert "..." not in chunk and ". ." not in chunk
+
+
+def test_build_chunks_single_beat_gets_intro_closing_and_sign_off():
     chunks, _ = ta.build_chunks({**SCRIPT, "beats": ["Only beat."]})
     assert len(chunks) == 1
     assert "Open Indian Voice!" in chunks[0] and "Only beat." in chunks[0]
     assert chunks[0].endswith(ta.SIGN_OFF)
+
+
+def test_split_last_sentence():
+    assert ta.split_last_sentence("One. Two! Three?") == ("One. Two!", "Three?")
+    assert ta.split_last_sentence("Only one sentence.") == ("", "Only one sentence.")
 
 
 def test_split_for_limit_leaves_short_text_alone_and_splits_long_at_sentences():
@@ -189,21 +188,27 @@ def _stub_pipeline(monkeypatch, durations):
     return sent
 
 
-async def test_generate_audio_returns_one_offset_per_beat(configured, monkeypatch):
-    sent = _stub_pipeline(monkeypatch, [40.0, 20.0, 30.0])
+async def test_generate_audio_returns_one_offset_per_beat_and_uses_real_silence(configured, monkeypatch):
+    # Calls, in order: chunk 0 lead-in, chunk 0 last sentence, chunk 1 (one
+    # sentence, so a single call), chunk 2 lead-in, chunk 2 last sentence.
+    sent = _stub_pipeline(monkeypatch, [30.0, 10.0, 20.0, 25.0, 4.0])
     result = await ta.generate_audio(77, SCRIPT)
 
-    assert len(sent) == 3  # one call per beat
+    assert len(sent) == 5
+    assert all("..." not in text and ". ." not in text for text in sent)  # no dot markers reach the voice
+    assert sent[-1] == ta.SIGN_OFF  # the final sentence is voiced on its own
+
     offsets = result["audio_beat_offsets"]
     assert len(offsets) == len(SCRIPT["beats"])  # the app indexes beats by this
-    # Beats 1 and 2 start exactly where their clip starts (40s + 0.5s gap,
-    # then 20s + 0.5s gap).
-    assert offsets[1] == pytest.approx(40.5)
-    assert offsets[2] == pytest.approx(61.0)
-    # Beat 0 starts partway through the first clip, after the spoken intro.
-    assert 0 < offsets[0] < 40.0
+    # chunk 0 = 30s lead-in + 0.5s silence + 10s last sentence, then a 0.9s gap
+    assert offsets[1] == pytest.approx(30 + 0.5 + 10 + 0.9)
+    # chunk 1 = 20s, then a 0.9s gap
+    assert offsets[2] == pytest.approx(30 + 0.5 + 10 + 0.9 + 20 + 0.9)
+    # Beat 0 starts partway through the lead-in, after the spoken intro.
+    assert 0 < offsets[0] < 30.0
     assert offsets == sorted(offsets)
-    assert result["audio_duration_seconds"] == round(40 + 20 + 30 + 3 * 0.5)
+    # chunk 2 = 25s lead-in + 0.5s silence + 4s last sentence; no trailing gap
+    assert result["audio_duration_seconds"] == round(40.5 + 0.9 + 20 + 0.9 + 25 + 0.5 + 4)
     assert result["audio_url"] == f"https://cdn.example/77-{result['spoken_script_hash']}.m4a"
     assert result["spoken_script_hash"] == ta.script_hash(SCRIPT)
 
