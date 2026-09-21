@@ -87,6 +87,7 @@ import asyncio
 import logging
 import os
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, FrozenSet, List, Optional
 
@@ -114,6 +115,16 @@ DEFAULT_SLOTS = 5
 # every slot this cycle — bounds LLM spend against a bad run of blobs
 # instead of scanning all 474+ distinct chains looking for 5 good ones.
 DEFAULT_SCAN_CAP_MULTIPLIER = 4
+
+
+@dataclass
+class GenerationReport:
+    """What one cycle actually did, for the admin notification. Chains that
+    were unchanged since the last cycle (no LLM call) appear nowhere here."""
+    titles: List[str] = field(default_factory=list)  # coherent narratives written this cycle
+    rejected: int = 0  # narratives the LLM judged incoherent
+    failed: int = 0  # chains whose narrative generation errored
+    unfilled: int = 0  # slots left empty after the fallback scan
 
 
 def rank_chains(chains: List[FrozenSet[int]], by_id: Dict[int, Cluster]) -> List[FrozenSet[int]]:
@@ -211,6 +222,7 @@ async def _find_existing_row(
 
 async def generate_for_chain(
     session, chain_ids: FrozenSet[int], is_editorial_pick: bool, by_id: Dict[int, Cluster], *, dry_run: bool,
+    report: Optional[GenerationReport] = None,
 ) -> tuple[Optional[int], Optional[bool]]:
     """Returns (anchor_cluster_id, coherent) — coherent is None when nothing
     could be determined this cycle (empty chain after filtering, or
@@ -267,6 +279,8 @@ async def generate_for_chain(
         narrative = await generate_narrative(session, members)
     except TimelineNarrativeError as e:
         logger.error("narrative generation failed for chain anchor=%s: %s", anchor_cluster_id, e)
+        if report is not None:
+            report.failed += 1
         return anchor_cluster_id, None
 
     existing.coherent = bool(narrative.get("coherent"))
@@ -276,6 +290,12 @@ async def generate_for_chain(
     existing.anchor_label = None  # story_chains.py's get_story_timeline computes this separately; not needed here since the narrative's own title carries the same role
     existing.cluster_ids = sorted_ids
     existing.narrative_generated_at = datetime.now(timezone.utc)
+
+    if report is not None:
+        if existing.coherent:
+            report.titles.append(existing.title or f"Cluster {anchor_cluster_id}")
+        else:
+            report.rejected += 1
 
     # spoken_script is stored whenever the narrative regenerates, independent
     # of whether audio synthesis itself succeeds — so the text is never
@@ -330,11 +350,16 @@ async def set_last_seen_in_top(session, anchor_cluster_id: int, value: bool, *, 
         row.last_seen_in_top = value
 
 
-async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optional[int] = None, dry_run: bool = False) -> None:
+async def run(
+    *, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optional[int] = None, dry_run: bool = False,
+) -> GenerationReport:
     """The actual generation cycle — called by both this script's CLI
     (`main`, below) and scripts/run_timeline_scheduler.py's daemon loop, so
-    the two never drift into re-implementing selection separately."""
+    the two never drift into re-implementing selection separately. Returns
+    what the cycle generated, which the scheduler turns into the admin push
+    (a dry run generates nothing, so its report only carries `unfilled`)."""
     scan_cap = scan_cap or slots * DEFAULT_SCAN_CAP_MULTIPLIER
+    report = GenerationReport()
 
     async with AsyncSessionLocal() as session:
         by_id, assignment, known_incoherent_ids, picked_rows = await load_candidates(session, days)
@@ -363,7 +388,7 @@ async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optiona
                 continue
             used_cluster_ids |= chain_ids
             editorial_count += 1
-            anchor_cluster_id, _coherent = await generate_for_chain(session, chain_ids, True, by_id, dry_run=dry_run)
+            anchor_cluster_id, _coherent = await generate_for_chain(session, chain_ids, True, by_id, dry_run=dry_run, report=report)
             if anchor_cluster_id is not None:
                 attempted_anchor_ids.add(anchor_cluster_id)
                 filled_anchor_ids.add(anchor_cluster_id)
@@ -386,7 +411,7 @@ async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optiona
                     continue
                 scanned += 1
                 used_cluster_ids |= chain_ids
-                anchor_cluster_id, coherent = await generate_for_chain(session, chain_ids, False, by_id, dry_run=dry_run)
+                anchor_cluster_id, coherent = await generate_for_chain(session, chain_ids, False, by_id, dry_run=dry_run, report=report)
                 if anchor_cluster_id is None:
                     continue
                 attempted_anchor_ids.add(anchor_cluster_id)
@@ -400,6 +425,7 @@ async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optiona
             "filled %d/%d slots (%d editorial, %d algorithmic; scanned %d fallback candidates)",
             len(filled_anchor_ids), slots, editorial_count, len(filled_anchor_ids) - editorial_count, scanned,
         )
+        report.unfilled = max(remaining, 0)
         if remaining > 0:
             logger.warning("%d slot(s) left unfilled this cycle — ran out of coherent candidates within the scan cap", remaining)
 
@@ -421,6 +447,7 @@ async def run(*, days: int = DAYS, slots: int = DEFAULT_SLOTS, scan_cap: Optiona
             await session.commit()
 
     logger.info("done.")
+    return report
 
 
 async def main() -> None:

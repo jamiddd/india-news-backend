@@ -38,9 +38,24 @@ IST = ZoneInfo("Asia/Kolkata")
 RUN_TIMES = [time(6, 0)]
 
 
+async def notify_generated(report) -> None:
+    """Tell the admin what this cycle produced. Best-effort and outside
+    run_once's try block on purpose: by now the cycle has committed, so a
+    notification problem must not be reported as a generation failure."""
+    from app.database import AsyncSessionLocal
+    from app.services.admin_notify import notify_admin_timelines_generated
+    try:
+        async with AsyncSessionLocal() as session:
+            await notify_admin_timelines_generated(
+                session, report.titles, report.rejected, report.failed, report.unfilled,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"timeline generation notification failed: {exc}", flush=True)
+
+
 async def run_once() -> None:
     try:
-        await run_generation()
+        report = await run_generation()
     except Exception as exc:
         # Best-effort, same posture as run_poll_scheduler.py's prepare():
         # one failed cycle (a transient LLM/DB error) shouldn't kill the
@@ -52,6 +67,8 @@ async def run_once() -> None:
         print(f"timeline generation cycle failed: {exc}", flush=True)
         from app.services.admin_notify import notify_admin_failure
         await notify_admin_failure("timeline_scheduler", exc)
+    else:
+        await notify_generated(report)
 
 
 PRIMARY_SCHEDULER_HOST = "newsapp"

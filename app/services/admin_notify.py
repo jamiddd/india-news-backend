@@ -19,6 +19,11 @@ event-driven off the poller cycle rather than once a day — but reuses the
 same delivery mechanism (_push_to_admin) and the same
 ADMIN_USER_EMAIL/admin_alerts channel, since it's the same person reviewing
 on the same device. See backend/docs/breaking-human-review-plan.md.
+
+notify_admin_timelines_generated is the third: sent once after the daily
+timeline generation cycle (scripts/run_timeline_scheduler.py, 06:00 IST) with
+a summary of what was written, and only when the cycle actually generated
+something.
 """
 from __future__ import annotations
 
@@ -169,6 +174,75 @@ async def notify_admin_breaking_review(session: AsyncSession, new_count: int, re
     pushed = await _push_to_admin(session, title, body, url)
     emailed = await send_admin_email(title, f"{body}\n\n{url}")
     return pushed or emailed
+
+
+_MAX_TITLES_IN_BODY = 5
+
+
+def compose_timeline_generation(
+    titles: list[str], rejected: int, failed: int, unfilled: int,
+) -> tuple[str, str] | None:
+    """(title, body) for the timeline generation push, or None if the cycle
+    generated nothing at all.
+
+    `titles` are the coherent narratives written this cycle; `rejected` are
+    chains the LLM judged incoherent, `failed` are chains whose generation
+    errored, `unfilled` is how many of the tab's slots ended up empty. Every
+    chain unchanged since the last cycle costs no LLM call and reports
+    nothing — returning None there is what keeps a quiet news day from
+    becoming a daily "nothing happened" push.
+    """
+    if not (titles or rejected or failed):
+        return None
+
+    counts = []
+    if titles:
+        counts.append(f"{len(titles)} generated")
+    if failed:
+        counts.append(f"{failed} failed")
+    if rejected:
+        counts.append(f"{rejected} rejected")
+    title = f"Timelines: {', '.join(counts)}"
+
+    lines = list(titles[:_MAX_TITLES_IN_BODY])
+    if len(titles) > _MAX_TITLES_IN_BODY:
+        lines.append(f"+{len(titles) - _MAX_TITLES_IN_BODY} more")
+    if rejected:
+        lines.append(f"{rejected} rejected as incoherent")
+    if unfilled:
+        lines.append(f"{unfilled} slot{'s' if unfilled != 1 else ''} unfilled")
+    return title, " · ".join(lines)
+
+
+async def notify_admin_timelines_generated(
+    session: AsyncSession, titles: list[str], rejected: int, failed: int, unfilled: int,
+) -> bool:
+    """Push + email after a timeline generation cycle (scripts/run_timeline_
+    scheduler.py), deep-linking to the Timelines admin page. Same channels as
+    notify_admin_breaking_review, and the same posture: best-effort, never
+    raises — the cycle's own commit has already happened by the time this
+    runs, and a notification failure must not be reported as a generation
+    failure.
+    """
+    try:
+        if not (settings.ADMIN_USER_EMAIL or settings.ADMIN_ALERT_TOPIC or settings.ADMIN_ALERT_EMAIL_TO):
+            return False
+        composed = compose_timeline_generation(titles, rejected, failed, unfilled)
+        if composed is None:
+            logger.info("Timeline generation push skipped: nothing generated this cycle")
+            return False
+        title, body = composed
+        # Imported here, like admin_home in notify_admin_reviews_ready, so the
+        # generation path does not depend on the admin page module at import time.
+        from app.admin_session import admin_url
+        url = admin_url("/admin/timelines")
+
+        pushed = await _push_to_admin(session, title, body, url)
+        emailed = await send_admin_email(title, f"{body}\n\n{url}")
+        return pushed or emailed
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Timeline generation notification failed: %s", type(e).__name__)
+        return False
 
 
 async def notify_admin_failure(source: str, error: Exception) -> bool:

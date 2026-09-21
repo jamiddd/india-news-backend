@@ -212,8 +212,16 @@ services:
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
       # Developer alerts — run_timeline_scheduler.py's failure path calls
-      # notify_admin_failure(), which is email-only. See admin_notify.py /
+      # notify_admin_failure() (email-only), and each finished cycle sends the
+      # "timelines generated" push + email via notify_admin_timelines_generated(),
+      # so this container also needs the FCM credentials and the admin
+      # device/topic settings, like pollworker above. See admin_notify.py /
       # the `app` service above.
+      - ADMIN_USER_EMAIL=${ADMIN_USER_EMAIL:-}
+      - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+      - ADMIN_ALERT_TOPIC=${ADMIN_ALERT_TOPIC:-admin-alerts}
       - ADMIN_ALERT_EMAIL_TO=${ADMIN_ALERT_EMAIL_TO:-}
       - BREVO_API_KEY=${BREVO_API_KEY:-}
       - BREVO_SENDER_EMAIL=${BREVO_SENDER_EMAIL:-}
+    volumes:
+      - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro

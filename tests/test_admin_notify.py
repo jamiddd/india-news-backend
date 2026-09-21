@@ -9,7 +9,7 @@ import pytest
 
 from app.config import settings
 from app.services import admin_notify
-from app.services.admin_notify import compose
+from app.services.admin_notify import compose, compose_timeline_generation
 
 
 def _task(*, exists=True, status="approved", waiting=False, summary="x"):
@@ -67,6 +67,85 @@ class TestCompose:
         """Rejected means the reviewer chose the fallback. Re-notifying would
         be nagging about a settled question."""
         assert compose(_tasks(_task(status="rejected"), _task(status="approved"))) is None
+
+
+class TestComposeTimelineGeneration:
+    def test_nothing_generated_sends_nothing(self):
+        """Unchanged chains cost no LLM call and report nothing; a quiet day
+        must not become a daily "nothing happened" push. Unfilled slots alone
+        don't count — that is the previous state persisting, not news."""
+        assert compose_timeline_generation([], rejected=0, failed=0, unfilled=0) is None
+        assert compose_timeline_generation([], rejected=0, failed=0, unfilled=3) is None
+
+    def test_generated_titles_are_listed(self):
+        title, body = compose_timeline_generation(
+            ["Manipur talks", "Monsoon session"], rejected=0, failed=0, unfilled=0)
+        assert title == "Timelines: 2 generated"
+        assert body == "Manipur talks · Monsoon session"
+
+    def test_failures_and_rejections_are_surfaced_with_the_counts(self):
+        title, body = compose_timeline_generation(
+            ["Manipur talks"], rejected=2, failed=1, unfilled=1)
+        assert title == "Timelines: 1 generated, 1 failed, 2 rejected"
+        assert "2 rejected as incoherent" in body
+        assert body.endswith("1 slot unfilled")
+
+    def test_only_failures_still_notifies(self):
+        """Generation erroring is exactly what the admin needs to hear about,
+        even when nothing else was produced."""
+        title, body = compose_timeline_generation([], rejected=0, failed=2, unfilled=0)
+        assert title == "Timelines: 2 failed"
+
+    def test_long_title_lists_are_capped(self):
+        titles = [f"Story {i}" for i in range(7)]
+        _, body = compose_timeline_generation(titles, rejected=0, failed=0, unfilled=2)
+        assert "Story 4" in body and "Story 5" not in body
+        assert "+2 more" in body
+        assert "2 slots unfilled" in body
+
+
+class TestNotifyAdminTimelinesGenerated:
+    @pytest.fixture(autouse=True)
+    def channels(self, monkeypatch):
+        monkeypatch.setattr(settings, "ADMIN_ALERT_TOPIC", "admin-alerts")
+        monkeypatch.setattr(settings, "ADMIN_USER_EMAIL", None)
+        self.pushes = []
+        self.emails = []
+
+        async def push(session, title, body, url):
+            self.pushes.append((title, body, url))
+            return True
+
+        async def email(subject, body):
+            self.emails.append((subject, body))
+            return True
+
+        monkeypatch.setattr(admin_notify, "_push_to_admin", push)
+        monkeypatch.setattr(admin_notify, "send_admin_email", email)
+
+    async def test_pushes_and_emails_with_a_link_to_the_timelines_page(self):
+        result = await admin_notify.notify_admin_timelines_generated(
+            None, ["Manipur talks"], rejected=0, failed=0, unfilled=0)
+        assert result is True
+        assert self.pushes == [(
+            "Timelines: 1 generated", "Manipur talks", "https://admin.openindiannews.com/timelines")]
+        assert self.emails[0][0] == "Timelines: 1 generated"
+        assert self.emails[0][1].endswith("https://admin.openindiannews.com/timelines")
+
+    async def test_nothing_generated_sends_nothing(self):
+        result = await admin_notify.notify_admin_timelines_generated(
+            None, [], rejected=0, failed=0, unfilled=0)
+        assert result is False
+        assert self.pushes == [] and self.emails == []
+
+    async def test_never_raises_when_delivery_blows_up(self, monkeypatch):
+        async def boom(session, title, body, url):
+            raise RuntimeError("db gone")
+
+        monkeypatch.setattr(admin_notify, "_push_to_admin", boom)
+        result = await admin_notify.notify_admin_timelines_generated(
+            None, ["Manipur talks"], rejected=0, failed=0, unfilled=0)
+        assert result is False
 
 
 class TestPushToAdminTopic:

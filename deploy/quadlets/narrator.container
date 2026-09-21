@@ -12,7 +12,16 @@
 # /etc/containers/systemd/narrator.container, then `systemctl daemon-reload
 # && systemctl start narrator.service`.
 #
-# TODO before first use: replace <ENV_PATH> with the real absolute path.
+# TODO before first use: replace <ENV_PATH> and <FIREBASE_HOST_PATH> with
+# the real absolute paths (same values as pollworker.container on this host).
+#
+# The Firebase key is mounted because each finished generation cycle sends
+# the admin a "timelines generated" push (admin_notify.py's
+# notify_admin_timelines_generated). Everything else that push needs —
+# FIREBASE_CREDENTIALS_PATH, ADMIN_USER_EMAIL, ADMIN_ALERT_TOPIC,
+# ADMIN_ALERT_EMAIL_TO, BREVO_* — already arrives via the shared .env.
+# Without this mount the push silently no-ops (only the email still goes).
+#
 # newsapp's .env MUST set PRIMARY_SCHEDULER_HOST=newsapp — the process
 # exits immediately at startup otherwise (see
 # scripts/run_timeline_scheduler.py's _assert_primary_host()).
@@ -27,6 +36,7 @@ Image=localhost/india-news-backend-app:latest
 ContainerName=news_narrator_prod
 Exec=python3 scripts/run_timeline_scheduler.py
 EnvironmentFile=<ENV_PATH>/india-news-backend/.env
+Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
 
 [Service]
 Restart=always

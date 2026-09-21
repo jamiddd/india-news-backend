@@ -37,7 +37,10 @@ uvicorn app.main:app --reload --port 8000
 2. In the droplet's `.env`, set `FIREBASE_CREDENTIALS_HOST_PATH` to that file's path — `docker-compose.prod.yml` bind-mounts it into the container and points `FIREBASE_CREDENTIALS_PATH` at the mounted location. Login fails with a 500 until this is set.
 3. `GOOGLE_OAUTH_CLIENT_ID` is deprecated (Firebase covers Google Sign-In verification now) and can be left unset.
 
+Production runs as Podman quadlets (`deploy/quadlets/`), not compose — see `docs/podman-migration-plan.md`. To ship a code change:
+
 ```bash
-chmod +x scripts/deploy_digitalocean.sh
-./scripts/deploy_digitalocean.sh
+git pull origin main
+podman build -t localhost/india-news-backend-app:latest .
+sudo systemctl restart app.service   # or contentworker, pollworker, narrator
 ```
