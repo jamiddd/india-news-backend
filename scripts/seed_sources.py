@@ -1032,6 +1032,482 @@ VERIFIED_SOURCES = [
         "homepage_url": "https://medicaldialogues.in/videos",
         "category": "health",
         "region": "national"
+    },
+
+    # --- Added 2026-09-14: feedspot gap-analysis, live-verified (see
+    # rss-feed-gap-analysis.md) --------------------------------------------
+
+    # India — national/analysis
+    {
+        # feedspot's scroll.in/feed link is dead (301s to HTML page listing);
+        # this feedburner URL is the one that actually works.
+        "name": "Scroll.in",
+        "slug": "scroll-in",
+        "feed_url": "https://feeds.feedburner.com/ScrollinArticles.rss",
+        "homepage_url": "https://scroll.in",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Times Now",
+        "slug": "times-now",
+        "feed_url": "https://www.timesnownews.com/feeds/gns-en-latest.xml",
+        "homepage_url": "https://www.timesnownews.com",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "India TV News",
+        "slug": "india-tv-news",
+        "feed_url": "https://www.indiatvnews.com/rssnews/topstory.xml",
+        "homepage_url": "https://www.indiatvnews.com",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Alt News",
+        "slug": "alt-news",
+        "feed_url": "https://www.altnews.in/feed/",
+        "homepage_url": "https://www.altnews.in",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "The Quint",
+        "slug": "the-quint",
+        "feed_url": "https://prod-qt-images.s3.amazonaws.com/production/thequint/feed.xml",
+        "homepage_url": "https://www.thequint.com",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        # NOTE: this is Firstpost's web-stories feed (only URL feedspot
+        # surfaced) — items are short-form web-story cards, not full
+        # articles. Confirm this is the right content shape before relying
+        # on it; a standard article feed may exist under a different path.
+        "name": "Firstpost",
+        "slug": "firstpost",
+        "feed_url": "https://www.firstpost.com/commonfeeds/v1/mfp/rss/web-stories.xml",
+        "homepage_url": "https://www.firstpost.com",
+        "category": "national",
+        "region": "national"
+    },
+
+    # India — business
+    {
+        # feedspot's home_page_top_stories.rss path is WAF-blocked (403);
+        # this /latest.rss path works.
+        "name": "Business Standard",
+        "slug": "business-standard",
+        "feed_url": "https://www.business-standard.com/rss/latest.rss",
+        "homepage_url": "https://www.business-standard.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "The Hindu Business Line",
+        "slug": "the-hindu-business-line",
+        "feed_url": "https://www.thehindubusinessline.com/?service=rss",
+        "homepage_url": "https://www.thehindubusinessline.com",
+        "category": "business",
+        "region": "national"
+    },
+
+    # India — regional
+    {
+        "name": "Greater Kashmir",
+        "slug": "greater-kashmir",
+        "feed_url": "https://prod-qt-images.s3.amazonaws.com/production/greaterkashmir/feed.xml",
+        "homepage_url": "https://www.greaterkashmir.com",
+        "category": "regional_north",
+        "region": "north"
+    },
+    {
+        "name": "Kashmir Observer",
+        "slug": "kashmir-observer",
+        "feed_url": "https://kashmirobserver.net/feed/",
+        "homepage_url": "https://kashmirobserver.net",
+        "category": "regional_north",
+        "region": "north"
+    },
+    {
+        "name": "Telangana Today",
+        "slug": "telangana-today",
+        "feed_url": "https://telanganatoday.com/feed",
+        "homepage_url": "https://telanganatoday.com",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        "name": "The Siasat Daily",
+        "slug": "the-siasat-daily",
+        "feed_url": "https://www.siasat.com/feed/",
+        "homepage_url": "https://www.siasat.com",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        # feedspot listed no working URL for Onmanorama; found this one
+        # working during live verification.
+        "name": "Onmanorama",
+        "slug": "onmanorama",
+        "feed_url": "https://www.onmanorama.com/news.feeds.rss.xml",
+        "homepage_url": "https://www.onmanorama.com",
+        "category": "regional_south",
+        "region": "south"
+    },
+    {
+        # feedspot listed no working URL for Sentinel Assam; found this one
+        # working during live verification.
+        "name": "The Sentinel Assam",
+        "slug": "sentinel-assam",
+        "feed_url": "https://www.sentinelassam.com/feed",
+        "homepage_url": "https://www.sentinelassam.com",
+        "category": "northeast",
+        "region": "northeast"
+    },
+
+    # India — lifestyle
+    {
+        "name": "The Better India",
+        "slug": "the-better-india",
+        "feed_url": "https://thebetterindia.com/feed/",
+        "homepage_url": "https://thebetterindia.com",
+        "category": "lifestyle",
+        "region": "national"
+    },
+
+    # International — science (mapped to "tech" category: app's interest
+    # picker (InterestPickerScreen.kt) has no "science" topic yet — adding
+    # one there is a separate app-side change. Revisit if science coverage
+    # grows enough to warrant its own topic.)
+    {
+        "name": "Science News Magazine",
+        "slug": "science-news-magazine",
+        "feed_url": "https://www.sciencenews.org/feed",
+        "homepage_url": "https://www.sciencenews.org",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Knowable Magazine",
+        "slug": "knowable-magazine",
+        "feed_url": "https://knowablemagazine.org/rss",
+        "homepage_url": "https://knowablemagazine.org",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Phys.org",
+        "slug": "phys-org",
+        "feed_url": "https://phys.org/rss-feed/",
+        "homepage_url": "https://phys.org",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "AGU's Eos",
+        "slug": "agu-eos",
+        "feed_url": "https://eos.org/feed",
+        "homepage_url": "https://eos.org",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "NSF News",
+        "slug": "nsf-news",
+        "feed_url": "https://www.nsf.gov/rss/rss_www_news.xml",
+        "homepage_url": "https://www.nsf.gov",
+        "category": "tech",
+        "region": "national"
+    },
+
+    # International — technology
+    {
+        "name": "IEEE Spectrum",
+        "slug": "ieee-spectrum",
+        "feed_url": "https://feeds.feedburner.com/IeeeSpectrumFullText",
+        "homepage_url": "https://spectrum.ieee.org",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "WIRED",
+        "slug": "wired",
+        "feed_url": "https://www.wired.com/feed/rss",
+        "homepage_url": "https://www.wired.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "The Verge",
+        "slug": "the-verge",
+        "feed_url": "https://www.theverge.com/rss/index.xml",
+        "homepage_url": "https://www.theverge.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "TechCrunch",
+        "slug": "techcrunch",
+        "feed_url": "https://techcrunch.com/feed/",
+        "homepage_url": "https://techcrunch.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "VentureBeat",
+        "slug": "venturebeat",
+        "feed_url": "https://feeds.feedburner.com/venturebeat/SZYF",
+        "homepage_url": "https://venturebeat.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "O'Reilly Radar",
+        "slug": "oreilly-radar",
+        "feed_url": "https://feeds.feedburner.com/oreilly/radar/atom",
+        "homepage_url": "https://www.oreilly.com/radar/",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Hackaday",
+        "slug": "hackaday",
+        "feed_url": "https://hackaday.com/blog/feed/",
+        "homepage_url": "https://hackaday.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "BleepingComputer",
+        "slug": "bleepingcomputer",
+        "feed_url": "https://www.bleepingcomputer.com/feed/",
+        "homepage_url": "https://www.bleepingcomputer.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "TechRepublic",
+        "slug": "techrepublic",
+        "feed_url": "https://www.techrepublic.com/rssfeeds/articles/",
+        "homepage_url": "https://www.techrepublic.com",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "Tech.eu",
+        "slug": "tech-eu",
+        "feed_url": "https://tech.eu/feed/",
+        "homepage_url": "https://tech.eu",
+        "category": "tech",
+        "region": "national"
+    },
+
+    # International — business
+    {
+        "name": "Forbes Business",
+        "slug": "forbes-business",
+        "feed_url": "https://www.forbes.com/business/feed/",
+        "homepage_url": "https://www.forbes.com/business",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Business Insider",
+        "slug": "business-insider",
+        "feed_url": "https://feeds.businessinsider.com/custom/all",
+        "homepage_url": "https://www.businessinsider.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Fast Company",
+        "slug": "fast-company",
+        "feed_url": "https://www.fastcompany.com/latest/rss?truncated=true",
+        "homepage_url": "https://www.fastcompany.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Inc.",
+        "slug": "inc",
+        "feed_url": "https://www.inc.com/rss/",
+        "homepage_url": "https://www.inc.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Foundr",
+        "slug": "foundr",
+        "feed_url": "https://foundr.com/articles/feed",
+        "homepage_url": "https://foundr.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Tim Ferriss Blog",
+        "slug": "tim-ferriss-blog",
+        "feed_url": "https://tim.blog/feed/",
+        "homepage_url": "https://tim.blog",
+        "category": "business",
+        "region": "national"
+    },
+
+    # International — personal finance
+    {
+        "name": "The Penny Hoarder",
+        "slug": "the-penny-hoarder",
+        "feed_url": "https://www.thepennyhoarder.com/rss/",
+        "homepage_url": "https://www.thepennyhoarder.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Making Sense of Cents",
+        "slug": "making-sense-of-cents",
+        "feed_url": "https://www.makingsenseofcents.com/feed",
+        "homepage_url": "https://www.makingsenseofcents.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Financial Samurai",
+        "slug": "financial-samurai",
+        "feed_url": "https://www.financialsamurai.com/feed/",
+        "homepage_url": "https://www.financialsamurai.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "The College Investor",
+        "slug": "the-college-investor",
+        "feed_url": "https://thecollegeinvestor.com/feed/",
+        "homepage_url": "https://thecollegeinvestor.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Clever Girl Finance",
+        "slug": "clever-girl-finance",
+        "feed_url": "https://www.clevergirlfinance.com/feed/",
+        "homepage_url": "https://www.clevergirlfinance.com",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Millennial Money — Investing",
+        "slug": "millennial-money-investing",
+        "feed_url": "https://millennialmoney.com/category/investing/feed/",
+        "homepage_url": "https://millennialmoney.com",
+        "category": "business",
+        "region": "national"
+    },
+
+    # International — crypto / blockchain
+    {
+        "name": "The Defiant",
+        "slug": "the-defiant",
+        "feed_url": "https://thedefiant.io/api/feed",
+        "homepage_url": "https://thedefiant.io",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Bitcoin.com",
+        "slug": "bitcoin-com",
+        "feed_url": "https://news.bitcoin.com/feed/",
+        "homepage_url": "https://news.bitcoin.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Crypto Briefing",
+        "slug": "crypto-briefing",
+        "feed_url": "https://cryptobriefing.com/feed/",
+        "homepage_url": "https://cryptobriefing.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "NewsBTC",
+        "slug": "newsbtc",
+        "feed_url": "https://www.newsbtc.com/feed/",
+        "homepage_url": "https://www.newsbtc.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "CryptoPotato",
+        "slug": "cryptopotato",
+        "feed_url": "https://cryptopotato.com/feed/",
+        "homepage_url": "https://cryptopotato.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Cryptonews",
+        "slug": "cryptonews",
+        "feed_url": "https://cryptonews.com/news/feed/",
+        "homepage_url": "https://cryptonews.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Blockchain.News",
+        "slug": "blockchain-news",
+        "feed_url": "https://blockchain.news/rss",
+        "homepage_url": "https://blockchain.news",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Inside Bitcoins",
+        "slug": "inside-bitcoins",
+        "feed_url": "https://insidebitcoins.com/feed",
+        "homepage_url": "https://insidebitcoins.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "BitDegree Crypto News",
+        "slug": "bitdegree-crypto-news",
+        "feed_url": "https://www.bitdegree.org/crypto/news/rss",
+        "homepage_url": "https://www.bitdegree.org/crypto",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "The Crypto Update",
+        "slug": "the-crypto-update",
+        "feed_url": "https://thecryptoupdates.com/feed/",
+        "homepage_url": "https://thecryptoupdates.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "MultiChain Blog",
+        "slug": "multichain-blog",
+        "feed_url": "https://www.multichain.com/feed/",
+        "homepage_url": "https://www.multichain.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "101 Blockchains",
+        "slug": "101-blockchains",
+        "feed_url": "https://101blockchains.com/feed/",
+        "homepage_url": "https://101blockchains.com",
+        "category": "crypto",
+        "region": "national"
+    },
+    {
+        "name": "Master The Crypto",
+        "slug": "master-the-crypto",
+        "feed_url": "https://masterthecrypto.com/feed/",
+        "homepage_url": "https://masterthecrypto.com",
+        "category": "crypto",
+        "region": "national"
     }
 ]
 
