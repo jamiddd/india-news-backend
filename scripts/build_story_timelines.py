@@ -31,7 +31,7 @@ its last stored coherent verdict rather than re-asking the LLM.
 
 Spoken narration audio (app/services/timeline_audio.py) follows the same
 cost discipline one level down: the narrative's spoken_script is stored
-every time the narrative regenerates, but Gemini TTS is only actually
+every time the narrative regenerates, but the TTS is only actually
 called when its hash differs from the row's last-synthesized
 spoken_script_hash — so a narrative regeneration that happens to produce
 byte-identical spoken text (or a coherent:false chain, which never gets a

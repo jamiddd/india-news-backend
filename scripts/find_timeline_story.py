@@ -1,6 +1,6 @@
 """One-off lookup: find a story_timeline_features row by (partial,
 case-insensitive) title match, so its id can be fed into
-regenerate_one_timeline_audio.py <row_id>.
+backfill_timeline_audio.py --ids <row_id>.
 
 Why this exists: when a listener flags "the voice sounds wrong on that
 one story" there's no id in hand, only a fragment of the headline as

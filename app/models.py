@@ -949,7 +949,7 @@ class StoryTimelineFeature(Base):
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
     # Spoken narration audio (see app/services/timeline_audio.py). Every
-    # column here is nullable and additive — Gemini TTS is a second vendor
+    # column here is nullable and additive — the TTS engine is a second vendor
     # on top of an Anthropic-only backend, so a row with all of these null
     # must render identically to a pre-audio row; the tab never depends on
     # audio being present. spoken_script/spoken_script_hash exist separately

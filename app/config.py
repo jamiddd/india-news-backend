@@ -101,13 +101,17 @@ class Settings(BaseSettings):
     EDITORIAL_BACKGROUND_BUCKET: str = "editorial-backgrounds"
 
     # Spoken narration for the Timeline/Context tab (see app/services/
-    # timeline_audio.py) — Gemini is used only as the TTS engine, reusing the
-    # same Supabase Storage project/service key as editorial backgrounds
-    # above. Absent GEMINI_API_KEY = feature no-ops (no audio synthesized,
+    # timeline_audio.py) — Sarvam AI (Bulbul v3) is the TTS engine, reusing
+    # the same Supabase Storage project/service key as editorial backgrounds
+    # above. Absent SARVAM_API_KEY = feature no-ops (no audio synthesized,
     # tab renders exactly as it does without audio), same "absent config"
     # convention as SUPABASE_URL/EDITORIAL_BACKGROUND_BUCKET.
-    GEMINI_API_KEY: Optional[str] = None
+    SARVAM_API_KEY: Optional[str] = None
     TIMELINE_AUDIO_BUCKET: str = "timeline-audio"
+    # No longer read by any code: Gemini TTS was replaced by Sarvam. The
+    # setting (and its compose/.env entries) is kept on purpose so an
+    # existing deployment's env keeps loading unchanged.
+    GEMINI_API_KEY: Optional[str] = None
 
     # Daily sign-level horoscope provider. Kept server-side so the provider
     # can be changed or the feature disabled without releasing a new app.
