@@ -17,7 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import form_fields, layout, session_csrf, verify
+from app.admin_session import custom_select, form_fields, layout, session_csrf, verify
 from app.database import get_db
 from app.models import QuizBankQuestion, utc_now
 from app.services.daily_games import BANK_QUIZ_SYSTEM, validate_quiz_question
@@ -44,9 +44,10 @@ def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) ->
         f"value='{html.escape(draft_options[i] if i < len(draft_options) else '')}'></label>"
         for i in range(OPTION_COUNT)
     )
-    correct_choices = "".join(
-        f"<option value={i}{' selected' if correct_index == i else ''}>Option {i + 1}</option>"
-        for i in range(OPTION_COUNT)
+    correct_select = custom_select(
+        "correct_index",
+        [(str(i), f"Option {i + 1}") for i in range(OPTION_COUNT)],
+        selected=str(correct_index) if correct_index is not None else None,
     )
     return (
         "<section class=task><h2>Add a question</h2>"
@@ -62,7 +63,7 @@ def _add_form(csrf: str, error: str | None = None, draft: dict | None = None) ->
         f"<input type=hidden name=csrf value='{csrf}'>"
         f"<label>Question<textarea name=question required>{html.escape(draft.get('question', ''))}</textarea></label>"
         f"{options}"
-        f"<label>Correct answer<select name=correct_index>{correct_choices}</select></label>"
+        f"<label>Correct answer{correct_select}</label>"
         f"<label>Explanation<input name=explanation value='{html.escape(draft.get('explanation') or '')}'></label>"
         f"<label>Category (optional)<input name=category placeholder='e.g. history, geography' "
         f"value='{html.escape(draft.get('category') or '')}'></label>"

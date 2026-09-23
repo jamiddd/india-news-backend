@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import re
 import secrets
 import time
@@ -258,6 +259,38 @@ STYLE = """
       background:var(--surface);color:var(--ink);box-shadow:0 6px 24px rgba(0,0,0,.18);
       font-size:.94em;text-align:center;
     }
+
+    /* ---------- custom dropdown (see custom_select()) ----------
+       Replaces the browser's native <select> chrome so the trigger and the
+       open panel both pick up the same tokens as everything else in the
+       form (border, radius, focus ring, dark mode) instead of the OS
+       widget. Only the trigger button is a real focusable control; the
+       panel is a tabindex=-1 listbox that DROPDOWN_SCRIPT opens/closes and
+       drives with arrow keys, matching the native <select> keyboard model. */
+    .dd{position:relative;width:100%;margin:5px 0 12px}
+    .dd-btn{
+      width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;
+      padding:10px 12px;margin:0;border:1px solid var(--line);border-radius:8px;
+      background:var(--bg);color:var(--ink);font:inherit;text-align:left;cursor:pointer;
+    }
+    .dd-btn:hover{border-color:var(--accent)}
+    .dd-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+    .dd-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dd-chevron{width:16px;height:16px;flex:0 0 auto;color:var(--ink-3);transition:transform .15s ease}
+    .dd.is-open .dd-chevron{transform:rotate(180deg)}
+    .dd-panel{
+      position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;
+      margin:0;padding:6px;list-style:none;max-height:260px;overflow-y:auto;
+      background:var(--content-bg);border:1px solid var(--line);border-radius:10px;
+      box-shadow:0 8px 24px rgba(0,0,0,.16);
+    }
+    .dd-panel:focus{outline:none}
+    .dd-opt{
+      padding:9px 10px;border-radius:6px;font-size:.94em;color:var(--ink);cursor:pointer;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .dd-opt:hover,.dd-opt.is-active{background:var(--surface)}
+    .dd-opt.is-selected{color:var(--accent);font-weight:600}
 """
 
 # The app's own OIN mark (see app/static/home.html), inlined so the admin
@@ -306,6 +339,114 @@ NAV_GROUPS = [
         ("/admin/announcements", "Announcements"),
     ]),
 ]
+
+
+def custom_select(name: str, options: list[tuple[str, str]], selected: str | None = None) -> str:
+    """Renders a `.dd` custom dropdown (see STYLE and DROPDOWN_SCRIPT) that
+    posts like a native <select name=NAME>: a hidden input carries the
+    value, a styled button shows the current label, and a listbox panel
+    holds the options. `options` is [(value, label), ...]; with no match
+    for `selected` (or none given) the first option is picked, same as a
+    plain <select> with no `selected` attribute set."""
+    values = [v for v, _ in options]
+    if selected not in values:
+        selected = values[0] if values else ""
+    selected_label = next((lbl for v, lbl in options if v == selected), "")
+    dd_id = f"dd-{name}"
+    opts_html = "".join(
+        f"<li role=option id='{dd_id}-opt-{i}' data-value='{html.escape(v)}' "
+        f"class='dd-opt{' is-selected' if v == selected else ''}' "
+        f"aria-selected='{'true' if v == selected else 'false'}'>{html.escape(lbl)}</li>"
+        for i, (v, lbl) in enumerate(options)
+    )
+    return (
+        f"<div class=dd id='{dd_id}'>"
+        "<button type=button class=dd-btn aria-haspopup=listbox aria-expanded=false>"
+        f"<span class=dd-label>{html.escape(selected_label)}</span>"
+        "<svg class=dd-chevron viewBox='0 0 20 20' aria-hidden=true focusable=false>"
+        "<path d='M5.5 7.5 10 12l4.5-4.5' fill=none stroke=currentColor stroke-width=1.6 "
+        "stroke-linecap=round stroke-linejoin=round/></svg>"
+        "</button>"
+        f"<ul class=dd-panel role=listbox tabindex=-1 hidden>{opts_html}</ul>"
+        f"<input type=hidden name='{html.escape(name)}' value='{html.escape(selected)}'>"
+        "</div>"
+    )
+
+
+# Drives every `.dd` custom dropdown (see custom_select()/STYLE). The
+# trigger button toggles the panel; the panel itself takes focus (tabindex
+# -1) while open so arrow keys/Home/End/Enter/Escape work on it directly,
+# same keys a native <select> responds to. Selecting an option writes the
+# hidden input's value and fires a `change` event on it, so any future code
+# that listens for `change` sees the same event a native <select> would emit.
+DROPDOWN_SCRIPT = """<script>(function(){
+function opts(dd){return Array.prototype.slice.call(dd.querySelectorAll('.dd-opt'));}
+function setActive(dd,list,index){
+  list.forEach(function(o,i){o.classList.toggle('is-active',i===index);});
+  var panel=dd.querySelector('.dd-panel');
+  if(list[index]){panel.setAttribute('aria-activedescendant',list[index].id);list[index].scrollIntoView({block:'nearest'});}
+}
+function closeDd(dd,refocus){
+  var btn=dd.querySelector('.dd-btn'),panel=dd.querySelector('.dd-panel');
+  dd.classList.remove('is-open');btn.setAttribute('aria-expanded','false');panel.hidden=true;
+  if(refocus)btn.focus();
+}
+function openDd(dd){
+  document.querySelectorAll('.dd.is-open').forEach(function(o){if(o!==dd)closeDd(o,false);});
+  var btn=dd.querySelector('.dd-btn'),panel=dd.querySelector('.dd-panel'),list=opts(dd);
+  dd.classList.add('is-open');btn.setAttribute('aria-expanded','true');panel.hidden=false;
+  var idx=list.findIndex(function(o){return o.classList.contains('is-selected');});
+  setActive(dd,list,idx<0?0:idx);
+  panel.focus();
+}
+function selectOpt(dd,opt){
+  opts(dd).forEach(function(o){o.classList.remove('is-selected');o.setAttribute('aria-selected','false');});
+  opt.classList.add('is-selected');opt.setAttribute('aria-selected','true');
+  dd.querySelector('.dd-label').textContent=opt.textContent;
+  var input=dd.querySelector('input[type=hidden]');
+  input.value=opt.getAttribute('data-value');
+  input.dispatchEvent(new Event('change',{bubbles:true}));
+  closeDd(dd,true);
+}
+document.querySelectorAll('.dd').forEach(function(dd){
+  var btn=dd.querySelector('.dd-btn'),panel=dd.querySelector('.dd-panel');
+  btn.addEventListener('click',function(e){
+    e.stopPropagation();
+    dd.classList.contains('is-open')?closeDd(dd,false):openDd(dd);
+  });
+  btn.addEventListener('keydown',function(e){
+    if(['ArrowDown','ArrowUp','Enter',' '].indexOf(e.key)===-1)return;
+    e.preventDefault();
+    if(!dd.classList.contains('is-open'))openDd(dd);
+  });
+  panel.addEventListener('click',function(e){
+    var opt=e.target.closest('.dd-opt');
+    if(opt)selectOpt(dd,opt);
+  });
+  panel.addEventListener('mouseover',function(e){
+    var opt=e.target.closest('.dd-opt');
+    if(!opt)return;
+    setActive(dd,opts(dd),opts(dd).indexOf(opt));
+  });
+  panel.addEventListener('keydown',function(e){
+    var list=opts(dd);
+    var idx=list.findIndex(function(o){return o.classList.contains('is-active');});
+    if(idx<0)idx=0;
+    if(e.key==='ArrowDown'){e.preventDefault();setActive(dd,list,Math.min(idx+1,list.length-1));}
+    else if(e.key==='ArrowUp'){e.preventDefault();setActive(dd,list,Math.max(idx-1,0));}
+    else if(e.key==='Home'){e.preventDefault();setActive(dd,list,0);}
+    else if(e.key==='End'){e.preventDefault();setActive(dd,list,list.length-1);}
+    else if(e.key==='Enter'||e.key===' '){e.preventDefault();if(list[idx])selectOpt(dd,list[idx]);}
+    else if(e.key==='Escape'){e.preventDefault();closeDd(dd,true);}
+    else if(e.key==='Tab'){closeDd(dd,false);}
+  });
+});
+document.addEventListener('click',function(e){
+  document.querySelectorAll('.dd.is-open').forEach(function(dd){
+    if(!dd.contains(e.target))closeDd(dd,false);
+  });
+});
+})()</script>"""
 
 
 def _sidebar(current: str | None) -> str:
@@ -478,7 +619,7 @@ def layout(title: str, body: str, current: str | None = None) -> HTMLResponse:
         f"<body><div class=shell>{header}<div class=shell-body>{sidebar}"
         f"<div class=wrap><div class=wrap-inner><main>{body}</main></div></div>"
         f"</div></div>{THEME_TOGGLE_SCRIPT}{NAV_TOGGLE_SCRIPT if current else ''}"
-        f"{BUSY_SUBMIT_SCRIPT}</body></html>")
+        f"{DROPDOWN_SCRIPT}{BUSY_SUBMIT_SCRIPT}</body></html>")
 
 
 def login_form(title: str, action: str) -> HTMLResponse:

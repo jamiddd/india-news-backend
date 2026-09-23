@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.admin_session import (
     credentials_match,
+    custom_select,
     form_fields,
     layout,
     login_form,
@@ -109,9 +110,9 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         if rows else "<p class=meta>No announcements scheduled from now onward.</p>"
     )
 
-    kind_options = "".join(f"<option value='{k}'>{k}</option>" for k in KINDS)
-    action_options = "".join(
-        f"<option value='{a}'>{a or '(none)'}</option>" for a in ACTION_TYPES
+    kind_select = custom_select("kind", [(k, k) for k in KINDS])
+    action_select = custom_select(
+        "action_type", [(a, a or "(none)") for a in ACTION_TYPES]
     )
 
     body = (
@@ -120,11 +121,11 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         f"queued while active. Auto-expires at End — nothing to clean up.</p>"
         f"<form method=post action='/admin/announcements/add'>"
         f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
-        f"<label>Kind<select name=kind>{kind_options}</select></label>"
+        f"<label>Kind{kind_select}</label>"
         f"<label>Title<input name=title maxlength=120 required></label>"
         f"<label>Body<input name=body maxlength=240></label>"
         f"<label>CTA label<input name=cta_label maxlength=40></label>"
-        f"<label>Action type<select name=action_type>{action_options}</select></label>"
+        f"<label>Action type{action_select}</label>"
         f"<label>Action value (URL or story cluster id)<input name=action_value maxlength=500></label>"
         f"<label>Starts (UTC)<input type=datetime-local name=starts_at required></label>"
         f"<label>Ends (UTC)<input type=datetime-local name=ends_at required></label>"
