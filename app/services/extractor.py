@@ -245,6 +245,20 @@ def _extract_brightcove_embed(html: str) -> Optional[tuple[str, str, str]]:
     return None
 
 
+def _extract_video_object_media(html: str) -> Optional[str]:
+    """
+    A VideoObject ld+json block whose contentUrl/embedUrl is itself a direct
+    media file (News18 Videos: media.nw18.com/.../720p-h264.mp4), for pages
+    with no og:video, player widget or <video> tag. Must read only the
+    VideoObject block — News18's page also embeds the URLs of several
+    related videos, so a page-wide .mp4/.m3u8 search would grab the wrong one.
+    """
+    for url in _ld_json_video_object_urls(_ld_json_entries(html)):
+        if url and _MEDIA_FILE_RE.search(url):
+            return url
+    return None
+
+
 def _extract_youtube_video_id(html: str) -> Optional[str]:
     """
     Unlike Brightcove/Al Jazeera, HT/Livemint's own video pages carry
@@ -468,7 +482,8 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
       via Brightcove's Playback API), a YouTube embed (normalized to a
       stable youtube.com/embed/<id> URL, and annotated with its Shorts flag
       and real duration — there's no raw stream to resolve, the app plays
-      this only in its dedicated fullscreen YouTube screen), then a
+      this only in its dedicated fullscreen YouTube screen), a VideoObject
+      ld+json block's direct .mp4/.m3u8/.webm contentUrl, then a
       native <video>/<source> tag's direct .mp4/.m3u8/.webm src as a last
       resort
 
@@ -516,6 +531,8 @@ async def extract_full_content(client: AsyncSession, url: str, title: Optional[s
             youtube_video_id = _extract_youtube_video_id(response.text)
             if youtube_video_id:
                 og_video_url = f"{_YOUTUBE_EMBED_PREFIX}{youtube_video_id}"
+        if not og_video_url:
+            og_video_url = _extract_video_object_media(response.text)
         if not og_video_url:
             og_video_url = _extract_video_tag(response.text, url)
 

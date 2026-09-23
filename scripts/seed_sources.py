@@ -1057,6 +1057,212 @@ VERIFIED_SOURCES = [
         "region": "national"
     },
     {
+        # Only /feedapi/ works; the usual WordPress /feed and /rss paths 404.
+        "name": "News9 Live",
+        "slug": "news9-live",
+        "feed_url": "https://www.news9live.com/feedapi/latest-news/",
+        "homepage_url": "https://www.news9live.com",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        # Oneindia English section feeds. The feeds contain stray empty
+        # <item></item> elements, so the parser must skip items without a link.
+        "name": "Oneindia India",
+        "slug": "oneindia-india",
+        "feed_url": "https://www.oneindia.com/rss/feeds/news-india-fb.xml",
+        "homepage_url": "https://www.oneindia.com/india",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Oneindia World",
+        "slug": "oneindia-world",
+        "feed_url": "https://www.oneindia.com/rss/feeds/news-international-fb.xml",
+        "homepage_url": "https://www.oneindia.com/international",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "Oneindia Sports",
+        "slug": "oneindia-sports",
+        "feed_url": "https://www.oneindia.com/rss/feeds/news-sports-fb.xml",
+        "homepage_url": "https://www.oneindia.com/sports",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "Oneindia Cricket",
+        "slug": "oneindia-cricket",
+        "feed_url": "https://www.oneindia.com/rss/feeds/news-sports-cricket-fb.xml",
+        "homepage_url": "https://www.oneindia.com/cricket",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "Oneindia Entertainment",
+        "slug": "oneindia-entertainment",
+        "feed_url": "https://www.oneindia.com/rss/feeds/news-entertainment-fb.xml",
+        "homepage_url": "https://www.oneindia.com/entertainment",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        # ABP Live English section feeds (news.abplive.com). Each feed only
+        # carries ~10 items, so poll often enough not to miss any.
+        "name": "ABP Live India",
+        "slug": "abp-live-india",
+        "feed_url": "https://news.abplive.com/news/india/feed",
+        "homepage_url": "https://news.abplive.com/news/india",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live World",
+        "slug": "abp-live-world",
+        "feed_url": "https://news.abplive.com/news/world/feed",
+        "homepage_url": "https://news.abplive.com/news/world",
+        "category": "world",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Business",
+        "slug": "abp-live-business",
+        "feed_url": "https://news.abplive.com/business/feed",
+        "homepage_url": "https://news.abplive.com/business",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Sports",
+        "slug": "abp-live-sports",
+        "feed_url": "https://news.abplive.com/sports/feed",
+        "homepage_url": "https://news.abplive.com/sports",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Technology",
+        "slug": "abp-live-technology",
+        "feed_url": "https://news.abplive.com/technology/feed",
+        "homepage_url": "https://news.abplive.com/technology",
+        "category": "tech",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Entertainment",
+        "slug": "abp-live-entertainment",
+        "feed_url": "https://news.abplive.com/entertainment/movies/feed",
+        "homepage_url": "https://news.abplive.com/entertainment",
+        "category": "entertainment",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Health",
+        "slug": "abp-live-health",
+        "feed_url": "https://news.abplive.com/health/feed",
+        "homepage_url": "https://news.abplive.com/health",
+        "category": "health",
+        "region": "national"
+    },
+    {
+        "name": "ABP Live Education",
+        "slug": "abp-live-education",
+        "feed_url": "https://news.abplive.com/education/feed",
+        "homepage_url": "https://news.abplive.com/education",
+        "category": "education",
+        "region": "national"
+    },
+    {
+        # Video-only feed (200 items, ~2.5 days deep). Items link to
+        # news18.com/videos/... pages; descriptions are YouTube boilerplate.
+        # Not listed on news18.com/rss — found by probing. (shorts.xml
+        # exists too but is stale, newest item 7 Aug.)
+        "name": "News18 Videos",
+        "slug": "news18-videos",
+        "feed_url": "https://www.news18.com/commonfeeds/v1/eng/rss/video.xml",
+        "homepage_url": "https://www.news18.com/videos/",
+        "category": "national",
+        "region": "national"
+    },
+
+    # Indian Express — additional section feeds (index: indianexpress.com/rss/)
+    {
+        "name": "Indian Express Business",
+        "slug": "indian-express-business",
+        "feed_url": "https://indianexpress.com/section/business/feed/",
+        "homepage_url": "https://indianexpress.com/section/business/",
+        "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Explained",
+        "slug": "indian-express-explained",
+        "feed_url": "https://indianexpress.com/section/explained/feed/",
+        "homepage_url": "https://indianexpress.com/section/explained/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Editorials",
+        "slug": "indian-express-editorials",
+        "feed_url": "https://indianexpress.com/section/opinion/editorials/feed/",
+        "homepage_url": "https://indianexpress.com/section/opinion/editorials/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Columns",
+        "slug": "indian-express-columns",
+        "feed_url": "https://indianexpress.com/section/opinion/columns/feed/",
+        "homepage_url": "https://indianexpress.com/section/opinion/columns/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Cities",
+        "slug": "indian-express-cities",
+        "feed_url": "https://indianexpress.com/section/cities/feed/",
+        "homepage_url": "https://indianexpress.com/section/cities/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Research",
+        "slug": "indian-express-research",
+        "feed_url": "https://indianexpress.com/section/research/feed/",
+        "homepage_url": "https://indianexpress.com/section/research/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Long Reads",
+        "slug": "indian-express-long-reads",
+        "feed_url": "https://indianexpress.com/section/long-reads/feed/",
+        "homepage_url": "https://indianexpress.com/section/long-reads/",
+        "category": "national",
+        "region": "national"
+    },
+    {
+        "name": "Indian Express Cricket",
+        "slug": "indian-express-cricket",
+        "feed_url": "https://indianexpress.com/section/sports/cricket/feed/",
+        "homepage_url": "https://indianexpress.com/section/sports/cricket/",
+        "category": "sports",
+        "region": "national"
+    },
+    {
+        # Video feed — the freshest of Indian Express's video feeds (30 items,
+        # newest ~10 days old at check time; videos/news-video was ~41 days).
+        # It updates slowly.
+        "name": "Indian Express Videos (Explained)",
+        "slug": "indian-express-videos-explained",
+        "feed_url": "https://indianexpress.com/videos/explained/feed/",
+        "homepage_url": "https://indianexpress.com/videos/explained/",
+        "category": "national",
+        "region": "national"
+    },
+    {
         "name": "India TV News",
         "slug": "india-tv-news",
         "feed_url": "https://www.indiatvnews.com/rssnews/topstory.xml",
