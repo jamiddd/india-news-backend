@@ -285,6 +285,34 @@ class AdminTopic(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class Announcement(Base):
+    """A server-driven banner shown at the top of the app (event/offer/info)
+    — see GET /announcements/active and app/admin_announcements.py. Modeled
+    on AdminTopic above, but scheduled by a datetime window instead of a
+    single calendar date, since a promo or event needs a start and end time
+    rather than just "today".
+
+    Several rows can be active at once; the app shows one at a time
+    (highest `priority` first) and queues the rest, revealing the next one
+    once the user dismisses the current one. Dismissal is tracked
+    client-side (by id) — the server doesn't know or care which users have
+    seen or closed a given announcement.
+    """
+    __tablename__ = "announcements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    kind = Column(String(20), nullable=False, default="info")
+    title = Column(String(120), nullable=False)
+    body = Column(String(240), nullable=True)
+    cta_label = Column(String(40), nullable=True)
+    action_type = Column(String(20), nullable=True)
+    action_value = Column(String(500), nullable=True)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
 class DailySpellingBee(Base):
     __tablename__ = "daily_spelling_bees"
     id = Column(Integer, primary_key=True, index=True)

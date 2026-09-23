@@ -303,6 +303,7 @@ NAV_GROUPS = [
         ("/admin/timelines", "Timelines"),
         ("/admin/breaking", "Breaking review"),
         ("/admin/topics", "Topics"),
+        ("/admin/announcements", "Announcements"),
     ]),
 ]
 

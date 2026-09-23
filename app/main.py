@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import secrets
+from html import escape as html_escape
 from urllib.parse import urlsplit, urlunsplit
 from functools import lru_cache
 from datetime import date, datetime, time, timedelta, timezone
@@ -52,7 +53,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, AdminTopic, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, AdminTopic, Announcement, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
@@ -60,6 +61,7 @@ from app.schemas import (
     TimelineFeaturesOut, TimelineFeatureListItemOut, TimelineFeatureDetailOut, TimelineBeatOut,
     BreakingStoriesOut, BreakingStoryOut, BreakingStoryDetailOut, BreakingBeatOut,
     AdminTopicsOut, AdminTopicOut,
+    AnnouncementsOut, AnnouncementOut,
     UserAuthRequest, UserAuthResponse, UserPreferences, AccountDeleteRequest,
     DeviceTokenRegisterRequest,
     DailyCrosswordOut, CrosswordCheckRequest, CrosswordCheckResponse,
@@ -79,6 +81,7 @@ from app.schemas import (
     FeedbackRequest, FeedbackResponse,
     HeroStoriesOut, HeroStoryOut, HeroFramingOut,
 )
+from app.services.announcements import sort_active
 from app.services.affinity import record_engagement, score_clusters_for_user
 from app.services.explore_bandit import pick_candidate, record_exposure, EXPLORE_PROMOTED_BOOST, EXPLORE_SLOT_POSITION
 from uuid import uuid4
@@ -133,6 +136,7 @@ from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
 from app.admin_breaking import router as admin_breaking_router
 from app.admin_topics import router as admin_topics_router
+from app.admin_announcements import router as admin_announcements_router
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -418,6 +422,7 @@ app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
 app.include_router(admin_breaking_router)
 app.include_router(admin_topics_router)
+app.include_router(admin_announcements_router)
 
 
 @app.middleware("http")
@@ -1103,6 +1108,79 @@ async def assetlinks(request: Request):
             },
         }
     ])
+
+
+@app.get("/story/{cluster_id}", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
+    """Web fallback for a story's deep link (see StoryCluster.deepLinkUrl in
+    the app, which builds this same URL for shareCluster/shareStory2, and
+    AndroidManifest.xml's matching App Link intent-filter).
+
+    An installed app never lets this render for a human tap — the
+    pathPrefix="/story/" App Link (verified via the assetlinks.json above,
+    which covers the whole domain, not just this path) hands the URL
+    straight to MainActivity.handleStoryDeepLinkIntent instead. This HTML is
+    reached only by a browser without the app, or by a link-preview crawler
+    (hence the og:* tags below), or before App Link verification has
+    propagated to a given device.
+    """
+    query = (
+        select(StoryCluster)
+        .where(StoryCluster.id == cluster_id)
+        .options(selectinload(StoryCluster.articles))
+    )
+    result = await db.execute(query)
+    cluster = result.scalar_one_or_none()
+
+    if not cluster:
+        return HTMLResponse(
+            status_code=404,
+            content=(
+                "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+                "<title>Story not found — Open Indian News</title>"
+                "<link rel=\"stylesheet\" href=\"/static/site.css?v=8\"></head><body>"
+                "<main class=\"wrap doc\" style=\"text-align:center; padding-top:4rem;\">"
+                "<h1>Story not found</h1>"
+                "<p class=\"updated\">This story may have aged out or been removed.</p>"
+                "<p style=\"margin:28px 0\"><a class=\"btn btn-primary\" href=\"/\">Open Indian News</a></p>"
+                "</main></body></html>"
+            ),
+        )
+
+    headline = html_escape(cluster.headline)
+    summary_bullets = [b.strip() for b in (cluster.summary or "").split("\n•") if b.strip()]
+    description = html_escape(" ".join(summary_bullets)[:280] or "Read the full multi-outlet coverage on Open Indian News.")
+    image_url = next((a.image_url for a in cluster.articles if a.image_url), None)
+    page_url = f"{project_base_url() or 'https://openindiannews.com'}/story/{cluster.id}"
+    image_tag = f'<meta property="og:image" content="{html_escape(image_url)}">' if image_url else ""
+
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n<head>\n'
+        '<meta charset="UTF-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        f"<title>{headline} — Open Indian News</title>\n"
+        f'<meta name="description" content="{description}">\n'
+        '<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">\n'
+        '<meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">\n'
+        f'<meta property="og:type" content="article">\n'
+        f'<meta property="og:title" content="{headline}">\n'
+        f'<meta property="og:description" content="{description}">\n'
+        f'<meta property="og:url" content="{html_escape(page_url)}">\n'
+        f"{image_tag}\n"
+        '<link rel="stylesheet" href="/static/site.css?v=8">\n'
+        "<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>\">\n"
+        "</head>\n<body>\n"
+        '<main class="wrap doc" style="text-align:center; padding-top:4rem;">\n'
+        f"<h1>{headline}</h1>\n"
+        f'<p class="updated">{description}</p>\n'
+        '<p style="margin:28px 0">'
+        '<a class="btn btn-primary" href="/download">Get the app to read the full story</a>'
+        "</p>\n"
+        "</main>\n</body>\n</html>"
+    )
 
 
 @app.get("/download", response_class=HTMLResponse)
@@ -2316,6 +2394,50 @@ async def list_active_admin_topics(request: Request, db: AsyncSession = Depends(
     items = [AdminTopicOut(id=row.id, word=row.word) for row in result.scalars().all()]
     result_out = AdminTopicsOut(items=items)
     await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/announcements/active", response_model=AnnouncementsOut)
+@limiter.limit("60/minute")
+async def list_active_announcements(request: Request, db: AsyncSession = Depends(get_db)):
+    """The top-of-app banner — see app/models.py's Announcement and
+    app/admin_announcements.py. Several rows can be scheduled at once; the
+    app shows one at a time (highest priority first) and queues the rest.
+    Auto-expires: a row simply stops being returned once `ends_at` has
+    passed, no admin cleanup needed."""
+    cache_key = "announcements:active"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return AnnouncementsOut.model_validate_json(cached)
+
+    now = utc_now()
+    # Table is small and admin-managed (same scale as AdminTopic) — the
+    # active-window filter and priority ordering are pure logic (see
+    # app/services/announcements.py, unit-tested there) applied over a
+    # DB-side pre-filter that already excludes anything already expired.
+    result = await db.execute(
+        select(Announcement).where(Announcement.ends_at > now)
+    )
+    items = [
+        AnnouncementOut(
+            id=row.id,
+            kind=row.kind,
+            title=row.title,
+            body=row.body,
+            cta_label=row.cta_label,
+            action_type=row.action_type,
+            action_value=row.action_value,
+            priority=row.priority,
+        )
+        for row in sort_active(list(result.scalars().all()), now)
+    ]
+    result_out = AnnouncementsOut(items=items)
+    # Short TTL rather than the usual CACHE_TTL_SECONDS (5min) — an
+    # announcement's start/end boundary should take effect close to on
+    # time, and admin create/delete already busts this key immediately
+    # (see admin_announcements.py), so the short TTL only matters for the
+    # schedule boundary itself.
+    await _cache_set(cache_key, result_out.model_dump_json(), ttl=60)
     return result_out
 
 

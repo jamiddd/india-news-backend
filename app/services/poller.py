@@ -26,7 +26,7 @@ from app.services.dedup import (
     title_tokens,
 )
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
-from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size
+from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size, is_generic_branded_placeholder
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 from app.services.job_lease import job_lease
 
@@ -351,6 +351,8 @@ async def ingest_source(
                 or is_same_photo_different_size(candidate_image_url, kept)
                 for kept in image_urls
             ):
+                continue
+            if is_generic_branded_placeholder(candidate_image_url):
                 continue
             if await is_placeholder_image(session, source.id, candidate_image_url, url_hash):
                 continue

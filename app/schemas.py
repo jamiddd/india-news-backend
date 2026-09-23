@@ -273,6 +273,25 @@ class AdminTopicsOut(BaseModel):
     items: List[AdminTopicOut]
 
 
+class AnnouncementOut(BaseModel):
+    """GET /announcements/active list item — see app/models.py's
+    Announcement. `kind` and `action_type` are plain strings (not enums) so
+    an older client just ignores a value it doesn't recognize instead of
+    failing to parse the whole response."""
+    id: int
+    kind: str
+    title: str
+    body: Optional[str] = None
+    cta_label: Optional[str] = None
+    action_type: Optional[str] = None
+    action_value: Optional[str] = None
+    priority: int
+
+
+class AnnouncementsOut(BaseModel):
+    items: List[AnnouncementOut]
+
+
 class BreakingStoryDetailOut(BaseModel):
     id: int
     cluster_id: int

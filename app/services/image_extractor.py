@@ -72,6 +72,32 @@ def is_same_photo_different_size(url_a: str, url_b: str) -> bool:
 # unrelated stories from one outlet is rare.
 PLACEHOLDER_REUSE_THRESHOLD = 3
 
+# India Today's World section has no licensed photo for most wire-agency
+# pickups, so instead of a real per-story image its CMS falls back to a
+# branded "PTI: International" template card — a globe render, a flag
+# collage, a world-leaders composite, etc, always overlaid with that same
+# "INDIA TODAY / PTI: International" badge and always named like
+# "pti-international-2-original_284-sixteen_nine.png". Confirmed live
+# 2026-09-22: 14 of 21 India Today World RSS items on one poll used this
+# template, and the scraped article page's own og:image is the identical
+# templated URL, so there's no better fallback to prefer over dropping it.
+# The filename's own id increments on every upload, so
+# PLACEHOLDER_REUSE_THRESHOLD's exact-URL-reuse check never fires (no two
+# articles share a literal URL) — this catches it by name instead.
+_GENERIC_CARD_FILENAME_RE = re.compile(r"^pti-international-\d+-original_\d+-sixteen_nine$", re.IGNORECASE)
+
+
+def is_generic_branded_placeholder(image_url: Optional[str]) -> bool:
+    """True for India Today's "PTI: International" templated placeholder
+    card (see _GENERIC_CARD_FILENAME_RE) — a real-looking but non-story
+    image that a frequency-based check can't catch because its URL is
+    never exactly reused."""
+    if not image_url:
+        return False
+    basename = urlparse(image_url).path.rsplit("/", 1)[-1]
+    name = basename.rsplit(".", 1)[0]
+    return bool(_GENERIC_CARD_FILENAME_RE.match(name))
+
 
 async def is_placeholder_image(session: AsyncSession, source_id: int, image_url: Optional[str], url_hash: str) -> bool:
     """Detect a per-source default/placeholder image by frequency: if a
