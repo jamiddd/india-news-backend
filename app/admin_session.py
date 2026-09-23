@@ -400,13 +400,13 @@ function openDd(dd){
   panel.focus();
 }
 function selectOpt(dd,opt){
+  closeDd(dd,true);
   opts(dd).forEach(function(o){o.classList.remove('is-selected');o.setAttribute('aria-selected','false');});
   opt.classList.add('is-selected');opt.setAttribute('aria-selected','true');
   dd.querySelector('.dd-label').textContent=opt.textContent;
   var input=dd.querySelector('input[type=hidden]');
   input.value=opt.getAttribute('data-value');
   input.dispatchEvent(new Event('change',{bubbles:true}));
-  closeDd(dd,true);
 }
 document.querySelectorAll('.dd').forEach(function(dd){
   var btn=dd.querySelector('.dd-btn'),panel=dd.querySelector('.dd-panel');
@@ -419,9 +419,17 @@ document.querySelectorAll('.dd').forEach(function(dd){
     e.preventDefault();
     if(!dd.classList.contains('is-open'))openDd(dd);
   });
-  panel.addEventListener('click',function(e){
+  // mousedown, not click: Safari can skip firing `click` on a plain
+  // <li> when the preceding mousedown blurs the focused listbox (which
+  // is exactly what selecting an option does here), so the panel's
+  // hide-on-select never ran in Safari even though Chrome/Firefox fired
+  // click reliably. mousedown always fires, and preventDefault stops the
+  // native focus/selection side effects that caused the Safari gap.
+  panel.addEventListener('mousedown',function(e){
     var opt=e.target.closest('.dd-opt');
-    if(opt)selectOpt(dd,opt);
+    if(!opt)return;
+    e.preventDefault();
+    selectOpt(dd,opt);
   });
   panel.addEventListener('mouseover',function(e){
     var opt=e.target.closest('.dd-opt');
