@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import desc, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.admin_session import (
     credentials_match,
@@ -28,8 +29,10 @@ from app.admin_session import (
     verify,
 )
 from app.database import get_db
-from app.models import StoryCluster, StoryTimelineFeature, utc_now
+from app.models import Article, StoryCluster, StoryTimelineFeature, utc_now
+from app.redis_client import get_redis_client
 from app.services import timeline_narration as narration
+from app.services.image_extractor import is_hd_image
 from app.services.timeline_audio import SCRIPT_VERSION, is_configured
 
 router = APIRouter(prefix="/admin/timelines")
@@ -131,12 +134,18 @@ def _pick_row(row: StoryTimelineFeature, csrf: str, status: dict | None = None, 
         f"<button name=action value={action}>"
         f"{'Remove editorial pick' if action == 'unpick' else 'Make editorial pick'}</button>")
 
+    image_status = (
+        "<b class=done>manual image override</b>" if row.manual_image_url
+        else "<span class=meta>image: auto-selected</span>")
+
     return (
         f"<div class=task id='row-{row.id}'><h2>{label}</h2>"
         f"<p class=meta>{' · '.join(flags)}</p>"
         f"<p class=meta>anchor cluster "
         f"<a target=_blank href='/api/v1/clusters/{row.anchor_cluster_id}'>{row.anchor_cluster_id}</a>"
         f" · picked {row.picked_at:%Y-%m-%d %H:%M} UTC</p>"
+        f"<p class=meta>{image_status} &middot; "
+        f"<a href='/admin/timelines/image/{row.id}'>Choose image&hellip;</a></p>"
         f"<form method=post action='/admin/timelines/update'>"
         f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
         f"<input type=hidden name=cluster_id value='{row.anchor_cluster_id}'>"
@@ -281,3 +290,159 @@ async def narration_status(row_id: int, request: Request, db: AsyncSession = Dep
         "audio_is_current": (row.spoken_script or {}).get("version") == SCRIPT_VERSION and bool(row.audio_url),
         "audio_generated_at": row.audio_generated_at.isoformat() if row.audio_generated_at else None,
     })
+
+
+async def _invalidate_timeline_caches(row_id: int) -> None:
+    # GET /timelines, /timelines/archived, and /timelines/{id} each cache
+    # under these keys (see app/main.py) — without this, a manual image
+    # pick/clear wouldn't be visible in the app until CACHE_TTL_SECONDS
+    # expires. Same fail-open convention as _cache_get/_cache_set: caching
+    # is a perf optimization, never a correctness dependency. Keys must be
+    # kept in sync with main.py's — see that module's comments for the
+    # version history.
+    try:
+        client = get_redis_client()
+        await client.delete("timelines:list:v5")
+        await client.delete("timelines:archived:v5")
+        await client.delete(f"timelines:{row_id}:v4")
+    except Exception:
+        pass
+
+
+async def _gather_image_candidates(db: AsyncSession, row: StoryTimelineFeature) -> list[Article]:
+    """Every distinct-by-image_url article across this timeline's whole
+    chain (not just the current hero cluster — the admin should be able to
+    pick any photo any member outlet ran), sorted the same way the
+    auto-selector ranks them (HD first, then most recent) so the best
+    candidates surface first."""
+    cluster_ids = row.cluster_ids or []
+    if not cluster_ids:
+        return []
+    result = await db.execute(
+        select(StoryCluster)
+        .where(StoryCluster.id.in_(cluster_ids))
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+    )
+    seen_urls: set[str] = set()
+    candidates: list[Article] = []
+    for cluster in result.scalars().all():
+        for article in cluster.articles:
+            if not article.image_url or article.image_url in seen_urls:
+                continue
+            seen_urls.add(article.image_url)
+            candidates.append(article)
+    candidates.sort(
+        key=lambda a: (is_hd_image(a.image_width, a.image_height), a.published_at),
+        reverse=True,
+    )
+    return candidates
+
+
+def _image_option(article: Article, row: StoryTimelineFeature, csrf: str) -> str:
+    is_current = article.image_url == row.manual_image_url
+    hd_badge = " <b class=done>HD</b>" if is_hd_image(article.image_width, article.image_height) else ""
+    source_name = html.escape(article.source.name if article.source else "Unknown")
+    when = f"{article.published_at:%Y-%m-%d %H:%M} UTC"
+    image_url = html.escape(article.image_url, quote=True)
+    action = (
+        "<b class=done>Currently selected</b>" if is_current else
+        f"<form method=post action='/admin/timelines/image/set'>"
+        f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+        f"<input type=hidden name=row_id value='{row.id}'>"
+        f"<input type=hidden name=image_url value='{image_url}'>"
+        f"<button>Use this image</button></form>"
+    )
+    return (
+        f"<div style='display:inline-block;width:200px;margin:0 12px 20px 0;vertical-align:top'>"
+        f"<img src='{image_url}' loading=lazy alt='' "
+        f"style='width:200px;height:120px;object-fit:cover;border-radius:8px;display:block;background:var(--surface)'>"
+        f"<p class=meta style='margin:6px 0 2px'>{source_name}{hd_badge}</p>"
+        f"<p class=meta style='margin:0 0 6px'>{when}</p>"
+        f"{action}</div>")
+
+
+@router.get("/image/{row_id}", response_class=HTMLResponse)
+async def image_picker(row_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Lets an admin override the auto-selected lead image (list feed hero
+    + detail cover art — see StoryTimelineFeature.manual_image_url) with
+    any photo actually carried by an article somewhere in this timeline's
+    chain, rather than trusting the HD-then-recency auto-pick every time."""
+    csrf = session_csrf(request)
+    if not csrf:
+        return RedirectResponse("/admin/timelines/login", status_code=303)
+    row = await db.get(StoryTimelineFeature, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    label = html.escape(row.title or row.anchor_label or f"Cluster {row.anchor_cluster_id}")
+    candidates = await _gather_image_candidates(db, row)
+
+    if row.manual_image_url:
+        status_html = (
+            f"<p><b class=done>Manual override active</b></p>"
+            f"<form method=post action='/admin/timelines/image/clear'>"
+            f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+            f"<input type=hidden name=row_id value='{row.id}'>"
+            f"<button>Clear override (use auto-select)</button></form>")
+    else:
+        status_html = "<p class=meta>No override set — currently auto-selecting (HD first, then most recent).</p>"
+
+    grid_html = (
+        "".join(_image_option(a, row, csrf) for a in candidates) if candidates
+        else "<p class=meta>No article images found across this timeline's chain.</p>")
+
+    return layout(TITLE, (
+        f"<p><a href='/admin/timelines'>&larr; Back to timelines</a></p>"
+        f"<h1>Choose image &mdash; {label}</h1>"
+        f"{status_html}"
+        f"<h2>Available images ({len(candidates)})</h2>"
+        f"<div>{grid_html}</div>"), current="/admin/timelines")
+
+
+@router.post("/image/set")
+async def set_image(request: Request, db: AsyncSession = Depends(get_db)):
+    fields = await form_fields(request)
+    verify(request, fields)
+    try:
+        row_id = int(fields["row_id"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid row id")
+    image_url = fields.get("image_url", "")
+
+    row = await db.get(StoryTimelineFeature, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    # Re-derive the candidate set server-side rather than trusting the
+    # posted URL outright — it must be a real image already carried by some
+    # article in this chain, not an arbitrary string a form could be made
+    # to submit.
+    candidates = await _gather_image_candidates(db, row)
+    if image_url not in {a.image_url for a in candidates}:
+        raise HTTPException(status_code=400, detail="Not a valid image for this timeline")
+
+    row.manual_image_url = image_url
+    row.updated_at = utc_now()
+    await db.commit()
+    await _invalidate_timeline_caches(row_id)
+    return RedirectResponse(f"/admin/timelines/image/{row_id}", status_code=303)
+
+
+@router.post("/image/clear")
+async def clear_image(request: Request, db: AsyncSession = Depends(get_db)):
+    fields = await form_fields(request)
+    verify(request, fields)
+    try:
+        row_id = int(fields["row_id"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid row id")
+
+    row = await db.get(StoryTimelineFeature, row_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    row.manual_image_url = None
+    row.updated_at = utc_now()
+    await db.commit()
+    await _invalidate_timeline_caches(row_id)
+    return RedirectResponse(f"/admin/timelines/image/{row_id}", status_code=303)

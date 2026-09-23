@@ -984,6 +984,12 @@ class StoryTimelineFeature(Base):
     narrative_generated_at = Column(DateTime(timezone=True), nullable=True)
     picked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    # An admin's manual pick from among the chain's own article images (see
+    # app/admin_timelines.py's image picker) — overrides the auto-selected
+    # image (hero cluster's HD-then-recency winner for the list feed, first
+    # beat-with-an-image for the detail screen's cover art) wherever this
+    # timeline's image is shown. NULL means "no override, keep auto-selecting".
+    manual_image_url = Column(Text, nullable=True)
 
     # Spoken narration audio (see app/services/timeline_audio.py). Every
     # column here is nullable and additive — the TTS engine is a second vendor

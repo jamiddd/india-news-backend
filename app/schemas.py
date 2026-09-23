@@ -205,6 +205,13 @@ class TimelineFeatureListItemOut(BaseModel):
     anchor_cluster: Optional[StoryClusterListOut] = None
     dropped_from_top_at: Optional[datetime] = None  # None for active items; set for archived ("Past stories") items
     has_audio: bool = False  # lets the list show a headphone badge without hydrating beats/audio_url
+    # An admin's manual image pick (see StoryTimelineFeature.manual_image_url
+    # and app/admin_timelines.py's picker) — overrides anchor_cluster's own
+    # auto-selected image when set. None means "no override, use
+    # anchor_cluster.imageUrl as before" — the client already falls back to
+    # that, so a legacy cached response without this field renders exactly
+    # as it did before this override existed.
+    image_url: Optional[str] = None
 
 
 class TimelineFeaturesOut(BaseModel):
@@ -227,6 +234,10 @@ class TimelineFeatureDetailOut(BaseModel):
     audio_url: Optional[str] = None
     audio_duration_seconds: Optional[int] = None
     audio_beat_offsets: Optional[List[float]] = None  # seconds, parallel to `beats`
+    # Same admin manual override as TimelineFeatureListItemOut.image_url —
+    # None means "no override, use the client's own first-beat-with-an-image
+    # scan" (see StoryTimelineFeature.manual_image_url).
+    image_url: Optional[str] = None
 
 
 class BreakingBeatOut(BaseModel):

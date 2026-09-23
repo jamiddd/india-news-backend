@@ -2248,11 +2248,12 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     link via GET /timelines/{id} still resolves) but stops appearing in
     this list, rather than being deleted or blanked."""
     # Bumped to :v2 when has_audio was added to the response shape, :v4 when
-    # anchor_cluster started reordering its articles by image quality — an
-    # old cached blob would otherwise keep serving the old order until
+    # anchor_cluster started reordering its articles by image quality, :v5
+    # when the manual image_url override was added — an old cached blob
+    # would otherwise keep serving the old shape/order until
     # CACHE_TTL_SECONDS expired, which is a silent staleness window rather
     # than a deliberate choice.
-    cache_key = "timelines:list:v4"
+    cache_key = "timelines:list:v5"
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2284,6 +2285,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
                 _cluster_to_list_out(hero_by_row_id[row.id], image_priority_sort=True)
                 if row.id in hero_by_row_id else None
             ),
+            image_url=row.manual_image_url,
             has_audio=row.audio_url is not None,
         )
         for row in rows
@@ -2304,7 +2306,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
     Same coherent/title/beats guard as the active list; ordered by when
     each one dropped, not by when it was last generated."""
-    cache_key = "timelines:archived:v4"  # bumped alongside timelines:list:v4, see that endpoint's comment
+    cache_key = "timelines:archived:v5"  # bumped alongside timelines:list:v5, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2337,6 +2339,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
                 _cluster_to_list_out(hero_by_row_id[row.id], image_priority_sort=True)
                 if row.id in hero_by_row_id else None
             ),
+            image_url=row.manual_image_url,
             dropped_from_top_at=row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
         )
@@ -2356,7 +2359,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
     round-trip. A direct link to a timeline that has fallen out of the
     list view (last_seen_in_top=false) still resolves here — only
     GET /timelines (the list) hides it."""
-    cache_key = f"timelines:{timeline_id}:v3"  # bumped alongside timelines:list:v3, see that endpoint's comment
+    cache_key = f"timelines:{timeline_id}:v4"  # bumped alongside timelines:list:v5, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeatureDetailOut.model_validate_json(cached)
@@ -2402,6 +2405,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         audio_url=row.audio_url,
         audio_duration_seconds=row.audio_duration_seconds,
         audio_beat_offsets=row.audio_beat_offsets,
+        image_url=row.manual_image_url,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
