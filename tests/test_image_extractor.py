@@ -1,13 +1,22 @@
 """
 Pure-logic tests for app/services/image_extractor.py — pulling an image URL
-out of a feedparser entry, and is_broken_image_url's HEAD-check filter.
+out of a feedparser entry, is_broken_image_url's HEAD-check filter, and
+fetch_image_dimensions/is_hd_image's HD ranking signal.
 Uses hand-built stub objects standing in for real feedparser.FeedParserDict
 entries (attribute access, same shape) and a stub HTTP client. No real
 network.
 """
+import io
 from types import SimpleNamespace
 
-from app.services.image_extractor import extract_rss_image, is_broken_image_url
+from PIL import Image
+
+from app.services.image_extractor import (
+    extract_rss_image,
+    is_broken_image_url,
+    is_hd_image,
+    fetch_image_dimensions,
+)
 
 
 class _StubEntry:
@@ -116,3 +125,64 @@ class TestIsBrokenImageUrl:
     async def test_request_exception_fails_open(self):
         client = _StubClient(exception=TimeoutError("boom"))
         assert await is_broken_image_url(client, "https://example.com/img.jpg") is False
+
+
+def _png_bytes(width: int, height: int) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (width, height)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+class TestIsHdImage:
+    def test_hd_landscape(self):
+        assert is_hd_image(1920, 1080) is True
+
+    def test_hd_by_long_edge_regardless_of_orientation(self):
+        assert is_hd_image(720, 1600) is True
+
+    def test_below_threshold_is_not_hd(self):
+        assert is_hd_image(640, 480) is False
+
+    def test_missing_dimensions_are_not_hd(self):
+        assert is_hd_image(None, None) is False
+        assert is_hd_image(1920, None) is False
+
+
+class _StubGetResponse:
+    def __init__(self, status_code=200, content=b""):
+        self.status_code = status_code
+        self.content = content
+
+
+class _StubGetClient:
+    """Stands in for curl_cffi's AsyncSession — only .get() is used."""
+
+    def __init__(self, response=None, exception=None):
+        self._response = response
+        self._exception = exception
+
+    async def get(self, url, **kwargs):
+        if self._exception is not None:
+            raise self._exception
+        return self._response
+
+
+class TestFetchImageDimensions:
+    async def test_none_url_is_unknown(self):
+        assert await fetch_image_dimensions(_StubGetClient(), None) == (None, None)
+
+    async def test_parses_dimensions_from_real_header_bytes(self):
+        client = _StubGetClient(_StubGetResponse(200, _png_bytes(300, 200)))
+        assert await fetch_image_dimensions(client, "https://example.com/img.png") == (300, 200)
+
+    async def test_error_status_fails_open(self):
+        client = _StubGetClient(_StubGetResponse(404, b""))
+        assert await fetch_image_dimensions(client, "https://example.com/img.png") == (None, None)
+
+    async def test_unparseable_content_fails_open(self):
+        client = _StubGetClient(_StubGetResponse(200, b"not an image"))
+        assert await fetch_image_dimensions(client, "https://example.com/img.png") == (None, None)
+
+    async def test_request_exception_fails_open(self):
+        client = _StubGetClient(exception=TimeoutError("boom"))
+        assert await fetch_image_dimensions(client, "https://example.com/img.png") == (None, None)

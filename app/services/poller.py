@@ -26,7 +26,7 @@ from app.services.dedup import (
     title_tokens,
 )
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
-from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size, is_generic_branded_placeholder
+from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size, is_generic_branded_placeholder, fetch_image_dimensions
 from app.services.content_cleaner import decode_entities, clean_extracted_text
 from app.services.job_lease import job_lease
 
@@ -360,6 +360,10 @@ async def ingest_source(
                 continue
             image_urls.append(candidate_image_url)
         image_url = image_urls[0] if image_urls else None
+        # Best-effort only (see fetch_image_dimensions) — used later to rank
+        # this article's image against other candidates when a timeline
+        # chain has to pick one lead image (main.py's _cluster_to_list_out).
+        image_width, image_height = await fetch_image_dimensions(client, image_url)
         # Prefer a real video (RSS video enclosure/media, then scraped
         # og:video) over the image — a video is a strictly richer lead media
         # when a story has both.
@@ -461,6 +465,8 @@ async def ingest_source(
                 word_count=word_count_val,
                 image_url=image_url,
                 image_urls=image_urls or None,
+                image_width=image_width,
+                image_height=image_height,
                 video_url=video_url,
                 brightcove_account_id=extraction.brightcove_account_id,
                 brightcove_player_id=extraction.brightcove_player_id,
@@ -570,6 +576,8 @@ async def ingest_source(
                 word_count=word_count_val,
                 image_url=image_url,
                 image_urls=image_urls or None,
+                image_width=image_width,
+                image_height=image_height,
                 video_url=video_url,
                 brightcove_account_id=extraction.brightcove_account_id,
                 brightcove_player_id=extraction.brightcove_player_id,

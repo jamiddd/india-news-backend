@@ -697,6 +697,15 @@ class Article(Base):
     # app and API schema don't need to change to keep reading a single lead
     # image. NULL for legacy rows predating this column.
     image_urls = Column(JSON, nullable=True)
+    # Pixel dimensions of image_url, read from the image's own header bytes
+    # at ingest time (see image_extractor.fetch_image_dimensions) — used to
+    # rank candidate images by quality (HD first) when a timeline chain has
+    # to pick one lead image out of many member clusters (see main.py's
+    # _cluster_to_list_out image_priority_sort). Both NULL when the fetch
+    # failed/timed out (fails open — see that function) or for rows that
+    # predate this column; NULL is "unknown", not "not HD".
+    image_width = Column(Integer, nullable=True)
+    image_height = Column(Integer, nullable=True)
     video_url = Column(Text, nullable=True)
     # "image" or "video" — mirrors which of image_url/video_url is the lead
     # media to show; None for legacy rows predating this column. Derived at

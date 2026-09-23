@@ -25,6 +25,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
+from app.services.image_extractor import is_hd_image
 
 logger = logging.getLogger(__name__)
 
@@ -345,10 +346,32 @@ def _truncate_content_preview(content: Optional[str], limit: int = CONTENT_PREVI
     return content[:limit].rsplit(" ", 1)[0].rstrip() + "…"
 
 
-def _cluster_to_list_out(cluster: StoryCluster) -> StoryClusterListOut:
+def _cluster_to_list_out(cluster: StoryCluster, *, image_priority_sort: bool = False) -> StoryClusterListOut:
     """Slim counterpart to _cluster_to_out for list endpoints — see
     StoryClusterListOut/ArticleListOut for what's dropped and why. Same
-    selectinload requirement as _cluster_to_out."""
+    selectinload requirement as _cluster_to_out.
+
+    image_priority_sort reorders the emitted `articles` by (is_hd desc,
+    published_at desc) instead of the relationship's default order — the
+    app's StoryCluster.imageUrl (Kotlin) always takes the first non-PIB
+    article with an image, so whichever article ends up first here is what
+    actually gets shown. Only the timeline feed opts in
+    (_hero_clusters_for_timeline_rows' callers): that hero cluster's
+    articles can span a whole story chain rather than one cluster's own
+    handful, so "first in relationship order" was really just "whichever
+    member cluster happened to load first" — see that function's docstring
+    for why recency alone was already a bad pick here. Every other caller
+    (the main feed, search, related stories) keeps the original order:
+    those clusters are small and a single-outlet's own reporting, where the
+    existing order already reads as "most relevant", and reordering there
+    would be a much wider behavior change than asked for."""
+    articles = cluster.articles
+    if image_priority_sort:
+        articles = sorted(
+            articles,
+            key=lambda art: (is_hd_image(art.image_width, art.image_height), art.published_at),
+            reverse=True,
+        )
     articles_out = [
         ArticleListOut(
             id=art.id,
@@ -364,7 +387,7 @@ def _cluster_to_list_out(cluster: StoryCluster) -> StoryClusterListOut:
             video_is_short=art.video_is_short,
             video_duration_seconds=art.video_duration_seconds,
         )
-        for art in cluster.articles
+        for art in articles
     ]
     return StoryClusterListOut(
         id=cluster.id,
@@ -2187,6 +2210,11 @@ async def _hero_clusters_for_timeline_rows(
     Returns row.id -> StoryCluster, keyed by the row's own id (not
     anchor_cluster_id, which this deliberately ignores) so callers can't
     accidentally fall back to the old behavior.
+
+    This only picks WHICH cluster; which of that cluster's own articles ends
+    up as the actual displayed photo is a separate, finer-grained decision —
+    pass the result through _cluster_to_list_out(image_priority_sort=True)
+    to also rank by image quality (HD first) before recency.
     """
     all_cluster_ids = {cid for row in rows for cid in (row.cluster_ids or [])}
     if not all_cluster_ids:
@@ -2219,11 +2247,12 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     generation cycle's selection keeps its row and narrative (a direct
     link via GET /timelines/{id} still resolves) but stops appearing in
     this list, rather than being deleted or blanked."""
-    # Bumped to :v2 when has_audio was added to the response shape — an old
-    # cached blob without that field would otherwise keep serving until
+    # Bumped to :v2 when has_audio was added to the response shape, :v4 when
+    # anchor_cluster started reordering its articles by image quality — an
+    # old cached blob would otherwise keep serving the old order until
     # CACHE_TTL_SECONDS expired, which is a silent staleness window rather
     # than a deliberate choice.
-    cache_key = "timelines:list:v3"
+    cache_key = "timelines:list:v4"
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2251,7 +2280,10 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
             story_count=len(row.cluster_ids or []),
             is_editorial_pick=row.is_editorial_pick,
             narrative_generated_at=row.narrative_generated_at,
-            anchor_cluster=_cluster_to_list_out(hero_by_row_id[row.id]) if row.id in hero_by_row_id else None,
+            anchor_cluster=(
+                _cluster_to_list_out(hero_by_row_id[row.id], image_priority_sort=True)
+                if row.id in hero_by_row_id else None
+            ),
             has_audio=row.audio_url is not None,
         )
         for row in rows
@@ -2272,7 +2304,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
     Same coherent/title/beats guard as the active list; ordered by when
     each one dropped, not by when it was last generated."""
-    cache_key = "timelines:archived:v3"  # bumped alongside timelines:list:v3, see that endpoint's comment
+    cache_key = "timelines:archived:v4"  # bumped alongside timelines:list:v4, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2301,7 +2333,10 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
             story_count=len(row.cluster_ids or []),
             is_editorial_pick=row.is_editorial_pick,
             narrative_generated_at=row.narrative_generated_at,
-            anchor_cluster=_cluster_to_list_out(hero_by_row_id[row.id]) if row.id in hero_by_row_id else None,
+            anchor_cluster=(
+                _cluster_to_list_out(hero_by_row_id[row.id], image_priority_sort=True)
+                if row.id in hero_by_row_id else None
+            ),
             dropped_from_top_at=row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
         )

@@ -1,7 +1,9 @@
+import io
 import re
 import logging
 from typing import Any, Optional, TYPE_CHECKING
 from urllib.parse import urlparse, unquote
+from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +18,60 @@ logger = logging.getLogger(__name__)
 # How long to wait on the HEAD check in is_broken_image_url before giving up
 # and treating the URL as fine (fail open — see that function's docstring).
 BROKEN_IMAGE_CHECK_TIMEOUT_SECONDS = 5
+
+# How many leading bytes of a candidate image to pull via a Range request in
+# fetch_image_dimensions — enough header room for a JPEG's SOF marker to
+# show up even behind a large EXIF/thumbnail block (which maxes out at 64KB
+# per the JPEG spec), while PNG/WebP/GIF need only their first few dozen
+# bytes. PIL.Image.open() parses the header lazily and never decodes pixel
+# data unless .load() is called, so this stays cheap even when a server
+# ignores the Range header and returns the whole file.
+_DIMENSION_FETCH_RANGE_BYTES = 65536
+
+# The shorter of "HD" thresholds in common use (720p) — a photo whose longer
+# edge meets this is treated as HD regardless of orientation.
+HD_MIN_LONG_EDGE_PX = 1280
+
+
+def is_hd_image(width: Optional[int], height: Optional[int]) -> bool:
+    """True if a photo of these pixel dimensions counts as HD. Missing
+    dimensions (fetch failed, or a legacy row predating image_width/height)
+    are NOT HD by this check, but callers ranking candidates should still
+    treat "unknown" and "known non-HD" as separate buckets — see
+    main.py's _cluster_to_list_out image_priority_sort — since a legacy
+    photo with no recorded size is not necessarily low quality."""
+    return width is not None and height is not None and max(width, height) >= HD_MIN_LONG_EDGE_PX
+
+
+async def fetch_image_dimensions(
+    client: "CurlAsyncSession", image_url: Optional[str]
+) -> tuple[Optional[int], Optional[int]]:
+    """Best-effort (width, height) for a candidate lead image, read from
+    just the first _DIMENSION_FETCH_RANGE_BYTES bytes via a Range request —
+    most image CDNs honor it, so this is far cheaper than downloading the
+    whole photo just to learn its size.
+
+    Fails open (returns (None, None), i.e. "quality unknown") on any error,
+    timeout, non-2xx status, or an image PIL can't parse from a partial
+    read — this is a ranking signal, not a correctness dependency, and a
+    real photo should never be dropped over a flaky fetch or a truncated
+    header."""
+    if not image_url:
+        return None, None
+    try:
+        response = await client.get(
+            image_url,
+            timeout=BROKEN_IMAGE_CHECK_TIMEOUT_SECONDS,
+            headers={"Range": f"bytes=0-{_DIMENSION_FETCH_RANGE_BYTES - 1}"},
+            impersonate=IMPERSONATE,
+        )
+        if response.status_code >= 400:
+            return None, None
+        with Image.open(io.BytesIO(response.content)) as img:
+            width, height = img.size
+            return width, height
+    except Exception:
+        return None, None
 
 _IMG_TAG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
