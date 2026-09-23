@@ -90,6 +90,7 @@ from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from app.services.poller import poll_all_sources
 from app.services.extractor import _resolve_brightcove_policy_key, _resolve_brightcove_video
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
+from app.services.watch_feed import has_watchable_video, encode_cursor as encode_watch_cursor, decode_cursor as decode_watch_cursor
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.feed_gate import (
     LISTING_MAX_AGE,
@@ -2056,6 +2057,57 @@ async def list_for_you_clusters(
         next_cursor=next_cursor,
         has_more=has_more,
     )
+
+
+@app.get(f"{settings.API_V1_STR}/clusters/videos", response_model=PaginatedClustersListOut)
+@limiter.limit("60/minute")
+async def list_video_clusters(
+    request: Request,
+    limit: int = Query(20, ge=1, le=50),
+    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Feed for the app's Watch tab: stories carrying a video that fits its
+    pinned horizontal player (see app.services.watch_feed for the exact rule),
+    newest first. Registered before /clusters/{cluster_id} so "videos" isn't
+    parsed as a cluster id.
+
+    Deliberately not behind the multi-source feed gate (apply_feed_gate): that
+    gate curates "did this story make the cut" surfaces, but a video is worth
+    watching whether or not a second outlet has matched it yet. It still obeys
+    the listing age window, so nothing stale surfaces.
+    """
+    cache_key = f"cache:clusters:videos:v1:{limit}:{cursor or ''}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return PaginatedClustersListOut.model_validate_json(cached)
+
+    query = (
+        select(StoryCluster)
+        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+        .where(listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
+        .where(has_watchable_video())
+        .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
+    )
+    decoded = decode_watch_cursor(cursor)
+    if decoded is not None:
+        query = query.where(tuple_(StoryCluster.last_updated_at, StoryCluster.id) < decoded)
+
+    result = await db.execute(query.limit(limit + 1))
+    clusters = result.scalars().all()
+    has_more = len(clusters) > limit
+    items = clusters[:limit]
+    next_cursor = (
+        encode_watch_cursor(items[-1].last_updated_at, items[-1].id) if has_more and items else None
+    )
+
+    page = PaginatedClustersListOut(
+        items=[_cluster_to_list_out(c) for c in items],
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+    await _cache_set(cache_key, page.model_dump_json())
+    return page
 
 
 @app.get(f"{settings.API_V1_STR}/clusters/{{cluster_id}}", response_model=StoryClusterOut)
