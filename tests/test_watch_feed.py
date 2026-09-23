@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
 from app.models import StoryCluster
-from app.services.watch_feed import decode_cursor, encode_cursor, has_watchable_video
+from app.services.watch_feed import decode_cursor, encode_cursor, has_shorts_video, has_watchable_video
 
 
 def _sql() -> str:
@@ -46,6 +46,25 @@ class TestWatchableVideoClause:
         assert "%pib%" in sql
         assert "%press information bureau%" in sql
         assert "%pib.gov.in%" in sql
+
+
+class TestShortsClause:
+    def _sql(self) -> str:
+        query = select(StoryCluster.id).where(has_shorts_video())
+        return str(query.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+
+    def test_youtube_only(self):
+        sql = self._sql()
+        assert "articles.video_url ILIKE '%%youtube.com%%'" in sql
+        # Not negated (that is the watch clause's direct-stream branch).
+        assert "NOT (articles.video_url ILIKE" not in sql
+
+    def test_unknown_shape_counts_as_short(self):
+        # IS NOT false admits both true and NULL — unknown is portrait-safe.
+        assert "articles.video_is_short IS NOT false" in self._sql()
+
+    def test_excludes_pib(self):
+        assert "%%pib%%" in self._sql().lower()
 
 
 class TestCursor:

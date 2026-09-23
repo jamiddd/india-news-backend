@@ -10,7 +10,7 @@ from functools import lru_cache
 from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Optional, List, Dict
+from typing import Any, Literal, Optional, List, Dict
 from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -90,7 +90,7 @@ from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from app.services.poller import poll_all_sources
 from app.services.extractor import _resolve_brightcove_policy_key, _resolve_brightcove_video
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
-from app.services.watch_feed import has_watchable_video, encode_cursor as encode_watch_cursor, decode_cursor as decode_watch_cursor
+from app.services.watch_feed import has_watchable_video, has_shorts_video, encode_cursor as encode_watch_cursor, decode_cursor as decode_watch_cursor
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.feed_gate import (
     LISTING_MAX_AGE,
@@ -2065,6 +2065,11 @@ async def list_video_clusters(
     request: Request,
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[str] = Query(None, description="Cursor for pagination"),
+    kind: Literal["watch", "shorts"] = Query(
+        "watch",
+        description="'watch' (default): videos that fit a landscape player. 'shorts': YouTube Shorts "
+                     "and YouTube videos of unknown shape, for the app's vertical Swipe feed.",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Feed for the app's Watch tab: stories carrying a video that fits its
@@ -2077,7 +2082,7 @@ async def list_video_clusters(
     watching whether or not a second outlet has matched it yet. It still obeys
     the listing age window, so nothing stale surfaces.
     """
-    cache_key = f"cache:clusters:videos:v1:{limit}:{cursor or ''}"
+    cache_key = f"cache:clusters:videos:v2:{kind}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return PaginatedClustersListOut.model_validate_json(cached)
@@ -2086,7 +2091,7 @@ async def list_video_clusters(
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
         .where(listing_age_anchor() >= utc_now() - LISTING_MAX_AGE)
-        .where(has_watchable_video())
+        .where(has_shorts_video() if kind == "shorts" else has_watchable_video())
         .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
     )
     decoded = decode_watch_cursor(cursor)

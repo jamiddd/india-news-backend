@@ -1,4 +1,4 @@
-"""Which stories belong on the app's Watch tab.
+"""Which stories belong on the app's Watch tab (and its Swipe / Shorts view).
 
 The Watch tab pins a *horizontal* player over a list of other videos, so a
 story qualifies only when it carries a video that fits that player:
@@ -19,6 +19,12 @@ PIB (Press Information Bureau) releases are excluded to match the app's own
 StoryCluster.galleryMedia, which never surfaces a PIB article's video —
 listing a story whose only video the client would then refuse to show would
 put an unplayable row on the tab.
+
+The Swipe view is the mirror image: YouTube videos that are Shorts or of
+unknown shape (video_is_short IS NOT FALSE). Unknown counts as portrait there
+for the same reason it is excluded above — the app's portrait-safe path is
+the only one that can't look broken for a video of unknown shape. Direct
+streams never qualify: nothing records their orientation.
 
 Lives here rather than in main.py so it is testable without importing the
 whole FastAPI app, and so the app's client-side filter and this one stay
@@ -61,6 +67,23 @@ def has_watchable_video():
             Article.video_url.isnot(None),
             Article.video_url != "",
             or_(not_(_is_youtube()), Article.video_is_short.is_(False)),
+            not_(_is_pib()),
+        )
+    )
+
+
+def has_shorts_video():
+    """EXISTS clause for the Swipe view: a YouTube Short, or a YouTube video whose
+    shape we couldn't determine (see the module docstring)."""
+    return exists(
+        select(Article.id)
+        .join(Source, Source.id == Article.source_id)
+        .where(
+            Article.cluster_id == StoryCluster.id,
+            Article.video_url.isnot(None),
+            Article.video_url != "",
+            _is_youtube(),
+            Article.video_is_short.isnot(False),
             not_(_is_pib()),
         )
     )
