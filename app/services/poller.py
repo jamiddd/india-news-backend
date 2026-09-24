@@ -25,6 +25,7 @@ from app.services.dedup import (
     shares_topic,
     title_tokens,
 )
+from app.services.video_probe import probe_direct_video, is_too_short
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size, is_generic_branded_placeholder, fetch_image_dimensions
 from app.services.content_cleaner import decode_entities, clean_extracted_text
@@ -378,6 +379,16 @@ async def ingest_source(
         else:
             video_is_short = None
             video_duration_seconds = None
+        # A direct stream too short to be a real clip (a teaser loop) is dropped so it never
+        # reaches the Watch tab; a duration read off the manifest is kept for the client.
+        if video_url and not is_youtube_video_url(video_url):
+            probed_seconds, probed_bytes = await probe_direct_video(client, video_url)
+            if is_too_short(probed_seconds, probed_bytes):
+                video_url = None
+                video_is_short = None
+                video_duration_seconds = None
+            elif probed_seconds is not None:
+                video_duration_seconds = probed_seconds
         # A YouTube video is deliberately NOT media_type="video". The app
         # can't play one inline anywhere in its own design (YouTube's chrome
         # doesn't mix with it, and the logo/title/end-screen can't be

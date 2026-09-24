@@ -12,8 +12,8 @@ NULL — see models.Article.video_is_short, "NULL is unknown, not no"), would
 letterbox badly in the pinned player, so it is left to the feed and story
 detail, which have a portrait-safe path. An article whose video_url is NULL
 because its Brightcove manifest was an expiring link (has_pending_video) is
-also skipped: it can't be played without a per-article re-resolve the list
-can't afford.
+included: the list doesn't resolve it, the app does so for the one video it
+is about to play.
 
 PIB (Press Information Bureau) releases are excluded to match the app's own
 StoryCluster.galleryMedia, which never surfaces a PIB article's video —
@@ -36,6 +36,7 @@ from typing import Optional, Tuple
 from sqlalchemy import and_, exists, not_, or_, select
 
 from app.models import Article, Source, StoryCluster
+from app.services.video_probe import MIN_VIDEO_SECONDS as MIN_WATCH_SECONDS
 
 
 def _is_youtube():
@@ -53,6 +54,17 @@ def _is_pib():
     )
 
 
+def _has_pending_brightcove():
+    """video_url is NULL only because the expiring manifest was dropped at
+    scrape time; the app re-resolves it via GET /articles/{id}/video-url."""
+    return and_(
+        or_(Article.video_url.is_(None), Article.video_url == ""),
+        Article.brightcove_account_id.isnot(None),
+        Article.brightcove_player_id.isnot(None),
+        Article.brightcove_video_id.isnot(None),
+    )
+
+
 def has_watchable_video():
     """EXISTS clause: this cluster has at least one article the Watch tab can play.
 
@@ -64,9 +76,19 @@ def has_watchable_video():
         .join(Source, Source.id == Article.source_id)
         .where(
             Article.cluster_id == StoryCluster.id,
-            Article.video_url.isnot(None),
-            Article.video_url != "",
-            or_(not_(_is_youtube()), Article.video_is_short.is_(False)),
+            or_(
+                and_(
+                    Article.video_url.isnot(None),
+                    Article.video_url != "",
+                    or_(not_(_is_youtube()), Article.video_is_short.is_(False)),
+                    # Too short for the Watch tab; unknown length is kept.
+                    or_(
+                        Article.video_duration_seconds.is_(None),
+                        Article.video_duration_seconds >= MIN_WATCH_SECONDS,
+                    ),
+                ),
+                _has_pending_brightcove(),
+            ),
             not_(_is_pib()),
         )
     )

@@ -67,6 +67,9 @@ class ArticleListOut(BaseModel):
     video_url: Optional[str] = None
     video_is_short: Optional[bool] = None
     video_duration_seconds: Optional[int] = None
+    # See ArticleOut.has_pending_video. Shipped on list responses too so the
+    # Watch tab can list Brightcove stories and resolve the manifest on play.
+    has_pending_video: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

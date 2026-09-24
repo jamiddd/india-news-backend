@@ -387,6 +387,9 @@ def _cluster_to_list_out(cluster: StoryCluster, *, image_priority_sort: bool = F
             video_url=art.video_url,
             video_is_short=art.video_is_short,
             video_duration_seconds=art.video_duration_seconds,
+            has_pending_video=not art.video_url and bool(
+                art.brightcove_account_id and art.brightcove_player_id and art.brightcove_video_id
+            ),
         )
         for art in articles
     ]
@@ -2082,7 +2085,7 @@ async def list_video_clusters(
     watching whether or not a second outlet has matched it yet. It still obeys
     the listing age window, so nothing stale surfaces.
     """
-    cache_key = f"cache:clusters:videos:v2:{kind}:{limit}:{cursor or ''}"
+    cache_key = f"cache:clusters:videos:v3:{kind}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return PaginatedClustersListOut.model_validate_json(cached)
@@ -2398,6 +2401,76 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
             ),
             image_url=row.manual_image_url,
             dropped_from_top_at=row.dropped_from_top_at,
+            has_audio=row.audio_url is not None,
+        )
+        for row in rows
+    ]
+    result_out = TimelineFeaturesOut(timelines=items)
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
+TIMELINE_SEARCH_LIMIT = 30
+
+
+@app.get(f"{settings.API_V1_STR}/timelines/search", response_model=TimelineFeaturesOut)
+@limiter.limit("60/minute")
+async def search_timeline_features(
+    request: Request,
+    q: str = Query(..., min_length=2, max_length=100, description="Search text matched against timeline titles and context"),
+    limit: int = Query(TIMELINE_SEARCH_LIMIT, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search behind the search screen's Timelines tab. Unlike the list
+    endpoints it is not limited to the active top-5 or the 30-day archive:
+    any coherent timeline with a title and beats can match, so an older
+    story trail stays findable. Active ones sort first, then by recency.
+    Registered before /timelines/{timeline_id} so "search" is never parsed
+    as an id. Items carry dropped_from_top_at when they are past stories,
+    same as GET /timelines/archived."""
+    q = q.strip()
+    if len(q) < 2:
+        return TimelineFeaturesOut(timelines=[])
+    cache_key = f"cache:timelines:search:v1:{q.lower()}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
+
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    result = await db.execute(
+        select(StoryTimelineFeature)
+        .where(
+            StoryTimelineFeature.coherent.is_(True),
+            or_(
+                StoryTimelineFeature.title.ilike(pattern, escape="\\"),
+                StoryTimelineFeature.context.ilike(pattern, escape="\\"),
+            ),
+        )
+        .order_by(
+            desc(StoryTimelineFeature.last_seen_in_top),
+            desc(StoryTimelineFeature.narrative_generated_at),
+        )
+        .limit(limit)
+    )
+    rows = [r for r in result.scalars().all() if r.title and r.beats]
+
+    hero_by_row_id = await _hero_clusters_for_timeline_rows(db, rows)
+
+    items = [
+        TimelineFeatureListItemOut(
+            id=row.id,
+            title=row.title or "",
+            context=row.context or "",
+            story_count=len(row.cluster_ids or []),
+            is_editorial_pick=row.is_editorial_pick,
+            narrative_generated_at=row.narrative_generated_at,
+            anchor_cluster=(
+                _cluster_to_list_out(hero_by_row_id[row.id], image_priority_sort=True)
+                if row.id in hero_by_row_id else None
+            ),
+            image_url=row.manual_image_url,
+            dropped_from_top_at=None if row.last_seen_in_top else row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
         )
         for row in rows

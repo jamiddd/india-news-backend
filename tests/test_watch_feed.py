@@ -41,6 +41,12 @@ class TestWatchableVideoClause:
         # ...and a direct stream is admitted by NOT being YouTube at all.
         assert "NOT (articles.video_url ILIKE" in sql
 
+    def test_admits_pending_brightcove(self):
+        sql = _sql()
+        assert "articles.brightcove_account_id IS NOT NULL" in sql
+        assert "articles.brightcove_player_id IS NOT NULL" in sql
+        assert "articles.brightcove_video_id IS NOT NULL" in sql
+
     def test_excludes_pib(self):
         sql = _sql().lower()
         assert "%pib%" in sql
