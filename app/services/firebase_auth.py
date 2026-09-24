@@ -36,6 +36,7 @@ class VerifiedFirebaseIdentity:
     email: str
     name: str
     email_verified: bool
+    picture: Optional[str] = None  # Google/Apple-provided avatar url, if any
 
 
 class InvalidFirebaseIdToken(Exception):
@@ -69,6 +70,7 @@ async def verify_firebase_id_token(id_token_str: str) -> VerifiedFirebaseIdentit
         email=email,
         name=claims.get("name") or email,
         email_verified=bool(claims.get("email_verified", False)),
+        picture=claims.get("picture") or None,
     )
 
 

@@ -101,6 +101,7 @@ from app.services.feed_gate import (
 from app.services.related_stories import find_related_clusters
 from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
+from app.services import user_avatars as avatar_service
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
@@ -423,6 +424,7 @@ async def lifespan(app: FastAPI):
             # that already exist — daily_editorial_features predates
             # background_image, so add it here idempotently on every startup.
             await conn.execute(text("ALTER TABLE daily_editorial_features ADD COLUMN IF NOT EXISTS background_image JSON"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url VARCHAR(1024)"))
             # Same story for the poll bank columns on poll_fallbacks.
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS category VARCHAR(50)"))
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
@@ -638,6 +640,7 @@ async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSessio
             display_name=verified_name,
             provider=payload.provider,
             provider_uid=provider_uid,
+            photo_url=identity.picture,
             preferences=DEFAULT_PREFERENCES.model_dump(),
         )
         db.add(user)
@@ -645,6 +648,10 @@ async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSessio
         user.email = verified_email
         user.display_name = verified_name
         user.provider = payload.provider
+        # Seed from the provider's picture only while the user has none, so
+        # a photo they uploaded is never overwritten by their Google one.
+        if not user.photo_url and identity.picture:
+            user.photo_url = identity.picture
         user.updated_at = utc_now()
 
     await db.commit()
@@ -653,8 +660,54 @@ async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSessio
         user_id=user.id,
         email=user.email,
         display_name=user.display_name,
+        photo_url=user.photo_url,
         preferences=UserPreferences.model_validate(user.preferences or {}),
     )
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/photo")
+@limiter.limit("10/hour")
+async def upload_user_photo(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the caller's profile picture. The body is the raw image bytes
+    (image/jpeg, image/png or image/webp, max 2 MB) — no multipart, so no
+    extra dependency. Returns the new public url."""
+    content_type = request.headers.get("content-type", "")
+    if avatar_service.extension_for(content_type) is None:
+        raise HTTPException(status_code=415, detail="Photo must be JPEG, PNG or WebP")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > avatar_service.MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=413, detail="Photo is too large (max 2 MB)")
+    data = b""
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > avatar_service.MAX_AVATAR_BYTES:
+            raise HTTPException(status_code=413, detail="Photo is too large (max 2 MB)")
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty photo")
+    if not avatar_service.configured():
+        raise HTTPException(status_code=503, detail="Photo storage is not configured")
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    url = await avatar_service.upload_avatar(user_id, data, content_type)
+    if url is None:
+        raise HTTPException(status_code=502, detail="Could not store the photo")
+
+    old_url = user.photo_url
+    user.photo_url = url
+    user.updated_at = utc_now()
+    await db.commit()
+    if old_url != url:
+        await avatar_service.delete_avatar(old_url)
+    return {"photo_url": url}
 
 
 @app.put(f"{settings.API_V1_STR}/users/{{user_id}}/preferences", status_code=200)
@@ -1330,12 +1383,14 @@ async def delete_account(request: Request, payload: AccountDeleteRequest, db: As
     user = result.scalar_one_or_none()
     if user is not None:
         deleted_id = user.id
+        deleted_photo = user.photo_url
         await db.delete(user)
         await db.commit()
         # Drop any memoised verification for this account, so an ID token
         # still inside its lifetime can't be replayed against rows that no
         # longer exist (see app/services/request_auth.py).
         invalidate_token_cache_for_user(deleted_id)
+        await avatar_service.delete_avatar(deleted_photo)
 
     await delete_firebase_user(identity.uid)
 

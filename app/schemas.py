@@ -355,6 +355,7 @@ class UserAuthResponse(BaseModel):
     email: str
     display_name: str
     token: Optional[str] = None
+    photo_url: Optional[str] = None
     preferences: UserPreferences
 
 

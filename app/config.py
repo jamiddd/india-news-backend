@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: Optional[str] = None
     EDITORIAL_BACKGROUND_BUCKET: str = "editorial-backgrounds"
 
+    # Profile pictures uploaded from the app (POST /users/{id}/photo). Public
+    # bucket in the same Supabase project; objects are content-hashed, so a
+    # replaced photo gets a new url and clients never see a stale cached one.
+    USER_AVATAR_BUCKET: str = "user-avatars"
+
     # Spoken narration for the Timeline/Context tab (see app/services/
     # timeline_audio.py) — Sarvam AI (Bulbul v3) is the TTS engine, reusing
     # the same Supabase Storage project/service key as editorial backgrounds

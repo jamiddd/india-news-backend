@@ -19,6 +19,7 @@ class User(Base):
     display_name = Column(String(255), nullable=False)
     provider = Column(String(50), nullable=False)
     provider_uid = Column(String(255), nullable=True)
+    photo_url = Column(String(1024), nullable=True)
     preferences = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
