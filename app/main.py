@@ -2085,7 +2085,7 @@ async def list_video_clusters(
     watching whether or not a second outlet has matched it yet. It still obeys
     the listing age window, so nothing stale surfaces.
     """
-    cache_key = f"cache:clusters:videos:v3:{kind}:{limit}:{cursor or ''}"
+    cache_key = f"cache:clusters:videos:v4:{kind}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return PaginatedClustersListOut.model_validate_json(cached)
