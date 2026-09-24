@@ -8,7 +8,7 @@ Same session/CSRF/nav/login plumbing as app/admin_topics.py.
 from __future__ import annotations
 
 import html
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import delete, select
@@ -33,6 +33,9 @@ from app.redis_client import get_redis_client
 KINDS = ("event", "offer", "info")
 ACTION_TYPES = ("", "url", "story", "paywall")
 
+# The admin form works in IST (fixed +05:30, no DST); storage stays UTC.
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 async def _invalidate_active_cache() -> None:
     # GET /announcements/active caches under this key (see app/main.py) —
@@ -51,10 +54,10 @@ TITLE = "Announcements"
 
 def _parse_local_dt(raw: str, field: str) -> datetime:
     # <input type=datetime-local> posts "YYYY-MM-DDTHH:MM" with no
-    # timezone. Treated as UTC — matches Announcement.starts_at/ends_at's
-    # DateTime(timezone=True) columns.
+    # timezone. Interpreted as IST, then converted to UTC for storage in
+    # Announcement.starts_at/ends_at's DateTime(timezone=True) columns.
     try:
-        return datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        return datetime.fromisoformat(raw).replace(tzinfo=IST).astimezone(timezone.utc)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DDTHH:MM")
 
@@ -75,14 +78,18 @@ async def login(request: Request):
     return response
 
 
+def _fmt_ist(dt: datetime) -> str:
+    return dt.astimezone(IST).strftime("%Y-%m-%d %H:%M")
+
+
 def _row(row: Announcement, csrf: str) -> str:
     active = row.starts_at <= utc_now() < row.ends_at
     status = "<b>active</b>" if active else ("upcoming" if row.starts_at > utc_now() else "expired")
     return (
         f"<tr><td>{row.kind}</td>"
         f"<td>{html.escape(row.title)}</td>"
-        f"<td>{row.starts_at.isoformat()}</td>"
-        f"<td>{row.ends_at.isoformat()}</td>"
+        f"<td>{_fmt_ist(row.starts_at)}</td>"
+        f"<td>{_fmt_ist(row.ends_at)}</td>"
         f"<td>{row.priority}</td>"
         f"<td>{status}</td>"
         f"<td><form method=post action='/admin/announcements/{row.id}/delete'>"
@@ -103,7 +110,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
 
     table = (
-        "<table><tr><th>Kind</th><th>Title</th><th>Starts</th><th>Ends</th>"
+        "<table><tr><th>Kind</th><th>Title</th><th>Starts (IST)</th><th>Ends (IST)</th>"
         "<th>Priority</th><th>Status</th><th></th></tr>"
         + "".join(_row(r, csrf) for r in rows)
         + "</table>"
@@ -127,8 +134,8 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
         f"<label>CTA label<input name=cta_label maxlength=40></label>"
         f"<label>Action type{action_select}</label>"
         f"<label>Action value (URL or story cluster id)<input name=action_value maxlength=500></label>"
-        f"<label>Starts (UTC)<input type=datetime-local name=starts_at required></label>"
-        f"<label>Ends (UTC)<input type=datetime-local name=ends_at required></label>"
+        f"<label>Starts (IST)<input type=datetime-local name=starts_at required></label>"
+        f"<label>Ends (IST)<input type=datetime-local name=ends_at required></label>"
         f"<label>Priority (higher shows first)<input type=number name=priority value=0></label>"
         f"<button>Add announcement</button></form>"
         f"<h2>Scheduled ({len(rows)})</h2>{table}"
