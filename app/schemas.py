@@ -215,6 +215,7 @@ class TimelineFeatureListItemOut(BaseModel):
     # that, so a legacy cached response without this field renders exactly
     # as it did before this override existed.
     image_url: Optional[str] = None
+    view_count: int = 0  # unique viewers, see StoryTimelineFeature.view_count
 
 
 class TimelineFeaturesOut(BaseModel):
@@ -241,6 +242,7 @@ class TimelineFeatureDetailOut(BaseModel):
     # None means "no override, use the client's own first-beat-with-an-image
     # scan" (see StoryTimelineFeature.manual_image_url).
     image_url: Optional[str] = None
+    view_count: int = 0  # unique viewers, see StoryTimelineFeature.view_count
 
 
 class BreakingBeatOut(BaseModel):

@@ -1007,6 +1007,29 @@ class StoryTimelineFeature(Base):
     audio_beat_offsets = Column(JSON, nullable=True)  # [seconds, ...] per-beat start offsets into the concatenated audio, parallel to `beats`/`spoken_script.beats`
     audio_generated_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Unique-viewer count, denormalized from timeline_views so list/detail
+    # reads don't need a COUNT per row. Bumped only when a (timeline, user)
+    # pair is seen for the first time — see POST /timelines/{id}/view.
+    view_count = Column(Integer, nullable=False, default=0, server_default="0")
+
+
+class TimelineView(Base):
+    """One row per (timeline, user): the first time that user opened the
+    timeline. Follows the usual platform rule — a view is a unique viewer,
+    counted once no matter how often they reopen — so re-opens, scrolling
+    and refreshes never inflate the number. Requires a signed-in user, which
+    also keeps anonymous scripted hits from counting."""
+    __tablename__ = "timeline_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timeline_id = Column(Integer, ForeignKey("story_timeline_features.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    viewed_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("uq_timeline_views_timeline_user", "timeline_id", "user_id", unique=True),
+    )
+
 
 class BreakingStory(Base):
     """The "Breaking" slot — a pinned, badged card above the ranked feed for

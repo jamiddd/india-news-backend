@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import desc, or_, func, text, tuple_, case
+from sqlalchemy import update, desc, or_, func, text, tuple_, case
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -54,7 +54,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, BreakingStory, AdminTopic, Announcement, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, utc_now
 from app.schemas import (
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
@@ -429,6 +429,7 @@ async def lifespan(app: FastAPI):
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS category VARCHAR(50)"))
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS used_count INTEGER NOT NULL DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE story_timeline_features ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0"))
         finally:
             await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
@@ -656,6 +657,10 @@ async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSessio
 
     await db.commit()
     await db.refresh(user)
+    logger.info(
+        "login ok user=%s provider=%s token_picture=%s stored_photo=%s",
+        user.id, payload.provider, bool(identity.picture), bool(user.photo_url),
+    )
     return UserAuthResponse(
         user_id=user.id,
         email=user.email,
@@ -677,6 +682,10 @@ async def upload_user_photo(
     (image/jpeg, image/png or image/webp, max 2 MB) — no multipart, so no
     extra dependency. Returns the new public url."""
     content_type = request.headers.get("content-type", "")
+    logger.info(
+        "photo upload start user=%s type=%s length=%s",
+        user_id, content_type, request.headers.get("content-length"),
+    )
     if avatar_service.extension_for(content_type) is None:
         raise HTTPException(status_code=415, detail="Photo must be JPEG, PNG or WebP")
     declared = request.headers.get("content-length")
@@ -705,6 +714,7 @@ async def upload_user_photo(
     user.photo_url = url
     user.updated_at = utc_now()
     await db.commit()
+    logger.info("photo upload ok user=%s url=%s replaced=%s", user_id, url, bool(old_url))
     if old_url != url:
         await avatar_service.delete_avatar(old_url)
     return {"photo_url": url}
@@ -2368,7 +2378,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
     # would otherwise keep serving the old shape/order until
     # CACHE_TTL_SECONDS expired, which is a silent staleness window rather
     # than a deliberate choice.
-    cache_key = "timelines:list:v5"
+    cache_key = "timelines:list:v6"
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2402,6 +2412,7 @@ async def list_timeline_features(request: Request, db: AsyncSession = Depends(ge
             ),
             image_url=row.manual_image_url,
             has_audio=row.audio_url is not None,
+            view_count=row.view_count or 0,
         )
         for row in rows
     ]
@@ -2421,7 +2432,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
     the active top-5 within the last TIMELINE_ARCHIVE_MAX_AGE_DAYS days.
     Same coherent/title/beats guard as the active list; ordered by when
     each one dropped, not by when it was last generated."""
-    cache_key = "timelines:archived:v5"  # bumped alongside timelines:list:v5, see that endpoint's comment
+    cache_key = "timelines:archived:v6"  # bumped alongside timelines:list:v5, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeaturesOut.model_validate_json(cached)
@@ -2457,6 +2468,7 @@ async def list_archived_timeline_features(request: Request, db: AsyncSession = D
             image_url=row.manual_image_url,
             dropped_from_top_at=row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
+            view_count=row.view_count or 0,
         )
         for row in rows
     ]
@@ -2486,7 +2498,7 @@ async def search_timeline_features(
     q = q.strip()
     if len(q) < 2:
         return TimelineFeaturesOut(timelines=[])
-    cache_key = f"cache:timelines:search:v1:{q.lower()}:{limit}"
+    cache_key = f"cache:timelines:search:v2:{q.lower()}:{limit}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
@@ -2527,6 +2539,7 @@ async def search_timeline_features(
             image_url=row.manual_image_url,
             dropped_from_top_at=None if row.last_seen_in_top else row.dropped_from_top_at,
             has_audio=row.audio_url is not None,
+            view_count=row.view_count or 0,
         )
         for row in rows
     ]
@@ -2544,7 +2557,7 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
     round-trip. A direct link to a timeline that has fallen out of the
     list view (last_seen_in_top=false) still resolves here — only
     GET /timelines (the list) hides it."""
-    cache_key = f"timelines:{timeline_id}:v4"  # bumped alongside timelines:list:v5, see that endpoint's comment
+    cache_key = f"timelines:{timeline_id}:v5"  # bumped alongside timelines:list:v5, see that endpoint's comment
     cached = await _cache_get(cache_key)
     if cached:
         return TimelineFeatureDetailOut.model_validate_json(cached)
@@ -2591,9 +2604,46 @@ async def get_timeline_feature(request: Request, timeline_id: int, db: AsyncSess
         audio_duration_seconds=row.audio_duration_seconds,
         audio_beat_offsets=row.audio_beat_offsets,
         image_url=row.manual_image_url,
+        view_count=row.view_count or 0,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/timeline-views/{{timeline_id}}", status_code=200)
+@limiter.limit("60/minute")
+async def record_timeline_view(
+    request: Request,
+    user_id: str,
+    timeline_id: int,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Counts a unique viewer of a timeline. The caller is the signed-in
+    user; the first open by a given user inserts a timeline_views row and
+    bumps view_count, every later open is a no-op — so the number is unique
+    viewers, not opens. Returns the current count. Cached list/detail
+    responses catch up when their cache entry expires."""
+    row = (await db.execute(
+        select(StoryTimelineFeature).where(StoryTimelineFeature.id == timeline_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    inserted = await db.execute(
+        pg_insert(TimelineView)
+        .values(timeline_id=timeline_id, user_id=_caller.user_id)
+        .on_conflict_do_nothing(index_elements=["timeline_id", "user_id"])
+    )
+    if inserted.rowcount:
+        await db.execute(
+            update(StoryTimelineFeature)
+            .where(StoryTimelineFeature.id == timeline_id)
+            .values(view_count=StoryTimelineFeature.view_count + 1)
+        )
+    await db.commit()
+    await db.refresh(row)
+    return {"view_count": row.view_count}
 
 
 @app.get(f"{settings.API_V1_STR}/topics/active", response_model=AdminTopicsOut)
