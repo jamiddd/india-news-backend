@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Article, Source, StoryCluster
-from app.services.feed_gate import gate_min_sources
+from app.services.feed_gate import gate_min_sources, listing_age_anchor
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -51,6 +51,14 @@ MAX_TITLES_PER_STORY = 3
 # not a story worth leading a brief with, so they are skipped. Healthy stories
 # sat at <= 2.0 and runaways at >= 4.4, so 3 separates them with room to spare.
 MAX_ARTICLES_PER_OUTLET = 3.0
+# Same freshness rule the Top Headlines listing uses (feed_gate.listing_age_anchor
+# against LISTING_MAX_AGE), tightened to the brief's own frame: a story must have
+# become corroborated no earlier than this long before the day being summarised.
+# Without it, old clusters that keep absorbing new articles (the poller refreshes a
+# cluster's last_updated_at on every join, so a busy one never ages out of matching)
+# counted as "covered yesterday" — the BRICS cluster was 25 days old — while Top
+# Headlines never showed them because they fail this same age check.
+MAX_STORY_AGE_BEFORE_WINDOW = timedelta(days=1)
 
 
 @dataclass
@@ -113,7 +121,9 @@ async def select_stories(session: AsyncSession, brief_date: date) -> list[BriefS
     ranked = (
         await session.execute(
             select(Article.cluster_id, n_sources.label("n"))
+            .join(StoryCluster, StoryCluster.id == Article.cluster_id)
             .where(in_window)
+            .where(listing_age_anchor() >= start - MAX_STORY_AGE_BEFORE_WINDOW)
             .group_by(Article.cluster_id)
             .having(n_sources >= gate_min_sources())
             .order_by(n_sources.desc(), Article.cluster_id.desc())

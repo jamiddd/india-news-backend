@@ -54,6 +54,25 @@ MAX_ARTICLE_AGE = timedelta(days=4)
 # same event.
 CLUSTER_MATCH_WINDOW = timedelta(hours=48)
 
+# Guards against a cluster snowballing. An article joins a cluster if it shares
+# topic words with ANY member, and every join refreshes the cluster's
+# last_updated_at — so a busy cluster never leaves CLUSTER_MATCH_WINDOW, and each
+# added member widens what the next article can match (single-link chaining). Left
+# alone it drifts off-topic without bound: on 2026-09-25 one cluster started on
+# 09-01 held 1,721 articles (123 videos) from 81 outlets, another 1,031, mostly
+# unrelated to the headline; a healthy story has about as many articles as
+# outlets (12-49 that day). Two independent limits, either stops it:
+#   * a cluster stops accepting articles once its story is this old. Longer than
+#     CLUSTER_MATCH_WINDOW (which is about lag between outlets) so a live story is
+#     never cut short, and shorter than the feeds' 4-day LISTING_MAX_AGE, so a
+#     story that runs for days simply continues as a fresh cluster.
+#   * a cluster stops accepting articles at this size, however young. The clustering
+#     eval (scripts/eval_clustering.py MAX_PLAUSIBLE_CLUSTER) treats anything past 60
+#     as a collapse and the biggest genuine story it saw had ~20 articles, so 100 only
+#     ever bites on a blob.
+CLUSTER_MATCH_MAX_STORY_AGE = timedelta(hours=72)
+MAX_CLUSTER_ARTICLES = 100
+
 # Upper bound on candidate clusters pulled from the token index for a single
 # article, most-shared-tokens first. Generous enough never to bite in practice
 # (a real story shares tokens with only a handful of live clusters); this is a
@@ -142,7 +161,8 @@ async def _find_candidate_clusters(
     if len(tokens) < min_shared:
         return []
 
-    cutoff = utc_now() - CLUSTER_MATCH_WINDOW
+    now = utc_now()
+    cutoff = now - CLUSTER_MATCH_WINDOW
     candidate_ids_q = (
         select(ClusterToken.cluster_id)
         .join(StoryCluster, StoryCluster.id == ClusterToken.cluster_id)
@@ -151,6 +171,8 @@ async def _find_candidate_clusters(
         # query as a new one on every call.
         .where(ClusterToken.token.in_(sorted(tokens)))
         .where(StoryCluster.last_updated_at >= cutoff)
+        .where(StoryCluster.first_seen_at >= now - CLUSTER_MATCH_MAX_STORY_AGE)
+        .where(StoryCluster.article_count < MAX_CLUSTER_ARTICLES)
         .group_by(ClusterToken.cluster_id)
         .having(func.count() >= min_shared)
         .order_by(desc(func.count()))
