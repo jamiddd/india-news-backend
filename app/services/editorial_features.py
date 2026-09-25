@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import re
 from datetime import date, timedelta
+from urllib.parse import unquote, urlparse
 
 import httpx
 from sqlalchemy import select, text
@@ -39,19 +42,122 @@ QUOTES = [
 ]
 
 
+_MIN_IMAGE_WIDTH = 200
+_MAX_ASPECT_RATIO = 2.2  # wider/taller than this is usually a flag, banner or diagram
+_COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+_COMMONS_FILE_RE = re.compile(r"/wikipedia/commons/(?:thumb/)?[0-9a-f]/[0-9a-f]{2}/([^/]+)")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _commons_filename(url: str) -> str | None:
+    """File name of a Wikimedia Commons image URL, else None.
+
+    Images uploaded straight to en.wikipedia.org (not Commons) are often
+    non-free "fair use" files that may not be reused elsewhere, so they are
+    rejected here rather than shown with no licence to cite.
+    """
+    match = _COMMONS_FILE_RE.search(urlparse(url).path)
+    if not match:
+        return None
+    name = unquote(match.group(1))
+    return None if "|" in name else name
+
+
+def _usable_thumbnail(page: dict) -> str | None:
+    """Return the page's thumbnail URL unless it looks like a logo, icon, banner or non-Commons file."""
+    thumb = page.get("thumbnail") or {}
+    source = thumb.get("source")
+    width, height = thumb.get("width"), thumb.get("height")
+    if not source or not width or not height:
+        return None
+    if ".svg" in source.lower():
+        return None
+    if width < _MIN_IMAGE_WIDTH:
+        return None
+    if max(width / height, height / width) > _MAX_ASPECT_RATIO:
+        return None
+    if not _commons_filename(source):
+        return None
+    return source
+
+
+def _image_candidates(pages: list[dict]) -> list[str]:
+    """Thumbnails of the event's linked pages that pass the filters, in page order."""
+    return [url for url in (_usable_thumbnail(page) for page in pages) if url]
+
+
+def _clean_meta(value: str | None, limit: int = 80) -> str | None:
+    text_value = html.unescape(_TAG_RE.sub("", value or "")).strip()
+    if not text_value or text_value.lower().startswith("unknown author"):
+        return None
+    return text_value if len(text_value) <= limit else text_value[: limit - 1].rstrip() + "\u2026"
+
+
+async def _fetch_image_credits(client: httpx.AsyncClient, filenames: list[str]) -> dict[str, dict]:
+    """Author, licence and file-page URL per Commons file name. Files whose
+    licence can't be determined are omitted, so callers never show an image
+    they can't credit."""
+    credits: dict[str, dict] = {}
+    unique = list(dict.fromkeys(filenames))
+    for i in range(0, len(unique), 50):
+        chunk = unique[i : i + 50]
+        try:
+            response = await client.get(_COMMONS_API, params={
+                "action": "query", "format": "json", "formatversion": "2",
+                "titles": "|".join(f"File:{n}" for n in chunk),
+                "prop": "imageinfo", "iiprop": "extmetadata|url",
+                "iiextmetadatafilter": "LicenseShortName|Artist",
+            })
+            response.raise_for_status()
+            data = response.json().get("query", {})
+        except Exception:
+            logger.warning("Commons credit lookup failed", exc_info=True)
+            continue
+        for page in data.get("pages", []):
+            info = (page.get("imageinfo") or [{}])[0]
+            meta = info.get("extmetadata") or {}
+            licence = _clean_meta((meta.get("LicenseShortName") or {}).get("value"), 40)
+            if not licence or not page.get("title"):
+                continue
+            # Commons returns titles with spaces; callers look up by URL file name.
+            credits[page["title"].removeprefix("File:").replace(" ", "_")] = {
+                "author": _clean_meta((meta.get("Artist") or {}).get("value")),
+                "license": licence,
+                "url": info.get("descriptionurl"),
+            }
+    return credits
+
+
 async def _fetch_events(day: date) -> list[dict]:
     url = f"https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/{day.month:02d}/{day.day:02d}"
     async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "OpenIndianNews/1.0 (https://openindiannews.com)"}) as client:
         response = await client.get(url)
         response.raise_for_status()
-        raw_events = response.json().get("events", [])
+        raw_events = response.json().get("events", [])[:10]
+        candidates = [_image_candidates(item.get("pages") or []) for item in raw_events]
+        credits = await _fetch_image_credits(
+            client, [_commons_filename(u) for urls in candidates for u in urls]
+        )
     events = []
-    for item in raw_events[:10]:
+    for item, urls in zip(raw_events, candidates):
         pages = item.get("pages") or []
         article_url = None
         if pages:
             article_url = (((pages[0].get("content_urls") or {}).get("desktop") or {}).get("page"))
-        events.append({"year": int(item["year"]), "text": str(item["text"]), "article_url": article_url})
+        # First candidate we can actually credit; otherwise a text-only card.
+        image_url, credit = next(
+            ((u, credits[_commons_filename(u).replace(" ", "_")]) for u in urls if _commons_filename(u).replace(" ", "_") in credits),
+            (None, None),
+        )
+        events.append({
+            "year": int(item["year"]),
+            "text": str(item["text"]),
+            "article_url": article_url,
+            "image_url": image_url,
+            "image_author": credit["author"] if credit else None,
+            "image_license": credit["license"] if credit else None,
+            "image_source_url": credit["url"] if credit else None,
+        })
     if not events:
         raise RuntimeError("Wikimedia returned no historical events")
     return events

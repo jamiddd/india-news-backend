@@ -494,6 +494,11 @@ class HistoricalEventOut(BaseModel):
     year: int
     text: str
     article_url: Optional[str] = None
+    image_url: Optional[str] = None
+    # Wikimedia Commons credit for image_url; present whenever image_url is.
+    image_author: Optional[str] = None
+    image_license: Optional[str] = None
+    image_source_url: Optional[str] = None
 
 
 class OnThisDayOut(BaseModel):
