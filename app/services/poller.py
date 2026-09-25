@@ -25,6 +25,7 @@ from app.services.dedup import (
     shares_topic,
     title_tokens,
 )
+from app.services.listing_page import parse_listing_entries
 from app.services.video_probe import probe_direct_video, is_too_short
 from app.services.extractor import ExtractedArticle, extract_full_content, is_youtube_video_url, is_expiring_signed_video_url, IMPERSONATE
 from app.services.image_extractor import extract_rss_image, extract_rss_video, is_placeholder_image, is_broken_image_url, is_same_image_url, is_same_photo_different_size, is_generic_branded_placeholder, fetch_image_dimensions
@@ -136,11 +137,16 @@ async def fetch_feed_data(client: CurlAsyncSession, source: Source) -> Dict[str,
         last_modified = response.headers.get("last-modified")
 
         parsed = feedparser.parse(response.text)
+        items = parsed.entries
+        if not items:
+            # Dead-RSS publishers (Moneycontrol): the feed_url is an HTML
+            # section page carrying a JSON-LD ItemList — see listing_page.py.
+            items = parse_listing_entries(response.text)
         return {
             "status": 200,
             "etag": etag,
             "last_modified": last_modified,
-            "items": parsed.entries
+            "items": items
         }
     except Exception as e:
         logger.error(f"Error fetching feed [{source.name}]: {str(e)}")

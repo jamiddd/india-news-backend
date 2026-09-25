@@ -97,9 +97,19 @@ VERIFIED_SOURCES = [
     {
         "name": "Moneycontrol",
         "slug": "moneycontrol",
-        "feed_url": "https://www.moneycontrol.com/rss/MCtopnews.xml",
+        # Their RSS feeds are frozen (2016-2024); the section pages are the
+        # live listing, read via app/services/listing_page.py.
+        "feed_url": "https://www.moneycontrol.com/news/business/",
         "homepage_url": "https://www.moneycontrol.com",
         "category": "business",
+        "region": "national"
+    },
+    {
+        "name": "Moneycontrol",
+        "slug": "moneycontrol-india",
+        "feed_url": "https://www.moneycontrol.com/news/india/",
+        "homepage_url": "https://www.moneycontrol.com",
+        "category": "national",
         "region": "national"
     },
     {
