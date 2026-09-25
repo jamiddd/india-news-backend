@@ -130,3 +130,51 @@ async def pick_background(feature_date: date) -> dict | None:
     if not names:
         return None
     return {"url": public_url(names[feature_date.toordinal() % len(names)])}
+
+SOURCES_CACHE_KEY = "editorial:backgrounds:sources"
+SOURCES_FILE = "sources.json"
+
+
+async def _fetch_sources() -> dict[str, str]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(public_url(SOURCES_FILE))
+    if response.status_code == 404:
+        return {}
+    response.raise_for_status()
+    data = response.json()
+    return {str(k): str(v) for k, v in data.items() if isinstance(v, str) and v.startswith("http")}
+
+
+async def background_sources() -> dict[str, str]:
+    """Object name -> page the photo came from, read from an optional
+    `sources.json` uploaded to the same bucket ({"name.jpg": "https://..."}).
+    Redis-cached; fails open to {} so a missing file only hides the app's
+    "visit source" button."""
+    if not _configured():
+        return {}
+    redis_client = get_redis_client()
+    try:
+        cached = await redis_client.get(SOURCES_CACHE_KEY)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Background sources cache read failed: %s", exc)
+    try:
+        sources = await _fetch_sources()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Background sources fetch failed: %s", exc)
+        return {}
+    try:
+        await redis_client.setex(SOURCES_CACHE_KEY, LIST_CACHE_TTL_SECONDS, json.dumps(sources))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Background sources cache write failed: %s", exc)
+    return sources
+
+
+async def with_source_url(background: dict | None) -> dict | None:
+    """Copy of a stored background dict with `source_url` added when known."""
+    if not background or not background.get("url"):
+        return background
+    name = str(background["url"]).rsplit("/", 1)[-1]
+    source = (await background_sources()).get(name)
+    return {**background, "source_url": source} if source else background

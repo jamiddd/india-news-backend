@@ -481,6 +481,8 @@ class BackgroundImageOut(BaseModel):
     # Self-hosted in Supabase Storage, so there is no photographer credit to
     # carry any more — the old Unsplash attribution fields are gone.
     url: str
+    # Page the photo came from, when known (bucket's sources.json).
+    source_url: Optional[str] = None
 
 
 class QuoteOfTheDayOut(BaseModel):

@@ -26,6 +26,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
 from app.services.image_extractor import is_hd_image
+from app.services.editorial_backgrounds import with_source_url
 
 logger = logging.getLogger(__name__)
 
@@ -1002,7 +1003,7 @@ async def word_of_the_day(request: Request, date: str | None = Query(None), db: 
 @limiter.limit("30/minute")
 async def quote_of_the_day(request: Request, date: str | None = Query(None), db: AsyncSession = Depends(get_db)):
     feature = await get_or_create_editorial(db, resolve_puzzle_date(date))
-    return {"date": feature.feature_date, **feature.quote, "background_image": feature.background_image}
+    return {"date": feature.feature_date, **feature.quote, "background_image": await with_source_url(feature.background_image)}
 
 
 @app.get(f"{settings.API_V1_STR}/on-this-day", response_model=OnThisDayOut)
