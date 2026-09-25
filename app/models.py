@@ -1148,3 +1148,30 @@ class BreakingRefreshReview(Base):
 
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DailyBrief(Base):
+    """One row per calendar day: the "Daily Brief" for that morning, covering
+    the stories of the day BEFORE brief_date (Asia/Kolkata). Built at 05:00 IST
+    by app.services.daily_brief; served by GET /daily-brief.
+
+    items is the ordered story list the app renders (cluster_id, headline,
+    summary, category, source_count, image_url, audio_offset seconds); script
+    is the validated Claude script (intro / items[spoken] / closing) kept so a
+    regeneration can reuse it and an admin can read what was voiced. The three
+    audio_* columns are all NULL for a text-only brief (audio failed or was
+    not configured), which the app renders without a player."""
+    __tablename__ = "daily_briefs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    brief_date = Column(Date, nullable=False, unique=True, index=True)
+    # 'building' | 'ready' | 'failed'. Only 'ready' rows are served.
+    status = Column(String(16), nullable=False, default="building")
+    items = Column(JSON, nullable=True)
+    script = Column(JSON, nullable=True)
+    script_hash = Column(String(32), nullable=True)
+    audio_url = Column(Text, nullable=True)
+    audio_duration_seconds = Column(Integer, nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)

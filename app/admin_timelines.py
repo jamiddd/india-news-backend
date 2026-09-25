@@ -302,9 +302,9 @@ async def _invalidate_timeline_caches(row_id: int) -> None:
     # version history.
     try:
         client = get_redis_client()
-        await client.delete("timelines:list:v5")
-        await client.delete("timelines:archived:v5")
-        await client.delete(f"timelines:{row_id}:v4")
+        await client.delete("timelines:list:v6")
+        await client.delete("timelines:archived:v6")
+        await client.delete(f"timelines:{row_id}:v5")
     except Exception:
         pass
 

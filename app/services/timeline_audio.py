@@ -365,17 +365,40 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
         return None
 
     chunks, intro_chars = build_chunks(spoken_script)
+    the_hash = script_hash(spoken_script)
+    rendered = await render_and_upload(
+        f"cluster {anchor_cluster_id}", chunks, intro_chars, f"{anchor_cluster_id}-{the_hash}.{AUDIO_FILE_EXTENSION}",
+    )
+    if rendered is None:
+        return None
+    url, duration_seconds, offsets_seconds = rendered
 
-    # Synthesized one call at a time, not concurrently: a story is 10-30 short
-    # calls, about a minute or two of wall-clock, which the nightly cycle can
-    # afford, and it keeps well clear of any per-second rate limit.
+    return {
+        "audio_url": url,
+        "audio_duration_seconds": duration_seconds,
+        "audio_beat_offsets": offsets_seconds,
+        "spoken_script_hash": the_hash,
+    }
+
+
+async def render_and_upload(
+    label: str, chunks: list[str], intro_chars: int, object_name: str,
+) -> Optional[tuple[str, int, list[float]]]:
+    """Voice the chunks, stitch them, encode and upload as object_name.
+    Returns (public url, duration seconds, per-chunk start offsets in seconds)
+    or None on any failure. Shared by timelines and the Daily Brief; `label`
+    only names the caller in log lines.
+
+    Synthesized one call at a time, not concurrently: a story is 10-30 short
+    calls, about a minute or two of wall-clock, which the nightly cycle can
+    afford, and it keeps well clear of any per-second rate limit."""
     async def voice(part_text: str, beat: int) -> Optional[bytes]:
         pieces = []
         for part in _split_for_limit(part_text):
             wav = await synthesize(part)
             pcm = _wav_to_pcm(wav) if wav is not None else None
             if pcm is None:
-                logger.warning("audio synthesis failed for cluster %s (beat %s), skipping", anchor_cluster_id, beat)
+                logger.warning("audio synthesis failed for %s (beat %s), skipping", label, beat)
                 return None
             pieces.append(pcm)
         return _silence(SPLIT_GAP_SECONDS).join(pieces)
@@ -414,15 +437,7 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
     if encoded is None:
         return None
 
-    the_hash = script_hash(spoken_script)
-    object_name = f"{anchor_cluster_id}-{the_hash}.{AUDIO_FILE_EXTENSION}"
     url = await _upload_object(object_name, encoded, AUDIO_CONTENT_TYPE)
     if url is None:
         return None
-
-    return {
-        "audio_url": url,
-        "audio_duration_seconds": round(len(audio) / BYTES_PER_SECOND),
-        "audio_beat_offsets": offsets_seconds,
-        "spoken_script_hash": the_hash,
-    }
+    return url, round(len(audio) / BYTES_PER_SECOND), offsets_seconds

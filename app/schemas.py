@@ -338,6 +338,10 @@ class UserPreferences(BaseModel):
     # from this map gets the implicit default multiplier of 1.0 — this map
     # only needs to hold the sources a user has actually boosted.
     source_weights: dict[str, float] = Field(default_factory=dict)
+    # Zodiac sign key ("aries".."pisces") the Daily Horoscope screen opens on.
+    # None = the user never chose one (older clients / pre-existing rows), so
+    # a login must not overwrite whatever the device already has.
+    zodiac_sign: Optional[str] = None
 
 
 class DeviceTokenRegisterRequest(BaseModel):
@@ -719,3 +723,26 @@ class HeroStoryOut(BaseModel):
 
 class HeroStoriesOut(BaseModel):
     items: List[HeroStoryOut] = []
+
+
+class DailyBriefItemOut(BaseModel):
+    cluster_id: int
+    headline: str
+    summary: str
+    category: str
+    source_count: int
+    image_url: Optional[str] = None
+    # "most_covered" for the top slots, "category" for the per-category ones.
+    slot_kind: str = "category"
+    # Second at which this story starts in the audio; None on a text-only brief.
+    audio_offset: Optional[float] = None
+
+
+class DailyBriefOut(BaseModel):
+    brief_date: date
+    generated_at: Optional[datetime] = None
+    intro: str
+    items: List[DailyBriefItemOut]
+    # Public Supabase URL (see timeline_audio.py); both None on a text-only brief.
+    audio_url: Optional[str] = None
+    audio_duration_seconds: Optional[int] = None

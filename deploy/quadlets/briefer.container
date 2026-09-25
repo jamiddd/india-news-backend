@@ -1,0 +1,32 @@
+# Quadlet unit for `briefer` — the Daily Brief scheduler
+# (scripts/run_daily_brief_scheduler.py): builds the brief of yesterday's top
+# stories at 05:00 IST (Claude script + Sarvam audio).
+#
+# *** SINGLETON — install this file on newsapp ONLY, like narrator.container. ***
+#
+# INSTALL (newsapp only): copy to /etc/containers/systemd/briefer.container,
+# then `systemctl daemon-reload && systemctl start briefer.service`.
+#
+# TODO before first use: replace <ENV_PATH> and <FIREBASE_HOST_PATH> with the
+# real absolute paths (same values as narrator.container on this host). The
+# Firebase key is mounted for the admin failure alert (admin_notify.py).
+# newsapp's .env MUST set PRIMARY_SCHEDULER_HOST=newsapp or the process exits.
+
+[Unit]
+Description=News Daily Brief scheduler (SINGLETON — newsapp only)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/india-news-backend-app:latest
+ContainerName=news_briefer_prod
+Exec=python3 scripts/run_daily_brief_scheduler.py
+EnvironmentFile=<ENV_PATH>/india-news-backend/.env
+Volume=<FIREBASE_HOST_PATH>:/run/secrets/firebase-service-account.json:ro
+
+[Service]
+Restart=always
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

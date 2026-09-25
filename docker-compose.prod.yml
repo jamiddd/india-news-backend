@@ -225,3 +225,62 @@ services:
       - BREVO_SENDER_EMAIL=${BREVO_SENDER_EMAIL:-}
     volumes:
       - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro
+
+  # Daily Brief scheduler (scripts/run_daily_brief_scheduler.py): builds the
+  # 05:00 IST brief of yesterday's top stories (Claude script + Sarvam audio).
+  # SINGLETON like narrator above — newsapp ONLY, never newsapp-2; enforced by
+  # the same PRIMARY_SCHEDULER_HOST guard.
+  briefer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: news_briefer_prod
+    restart: always
+    command: ["python3", "scripts/run_daily_brief_scheduler.py"]
+    environment:
+      # Must be exactly "newsapp", and ONLY set in newsapp's .env — see
+      # run_daily_brief_scheduler.py's _assert_primary_host(). Deliberately
+      # not defaulted (no :-fallback) so an .env that forgets this fails
+      # loudly (container exits) instead of silently starting a second
+      # scheduler on the wrong droplet.
+      - PRIMARY_SCHEDULER_HOST=${PRIMARY_SCHEDULER_HOST}
+      - DATABASE_URL=${DATABASE_URL}
+      # Connection budget — see app/database.py for the arithmetic.
+      # Every container here builds its own engine, and both droplets
+      # share one 15-client Supabase session pooler.
+      - DB_POOL_SIZE=${DB_POOL_SIZE:-2}
+      - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-0}
+      - DB_POOL_TIMEOUT=${DB_POOL_TIMEOUT:-30}
+      # true ONLY when DATABASE_URL is the transaction pooler (6543).
+      - DB_PGBOUNCER=${DB_PGBOUNCER:-false}
+      # story_chains.py's load_clusters/load_baseline_rates cache their DB
+      # reads here (best-effort — _cache_get/_cache_set swallow Redis
+      # errors) rather than duplicating the egress on every scheduler run
+      # AND every /clusters/{id}/timeline or /related request.
+      - REDIS_URL=${REDIS_URL}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Spoken narration TTS (app/services/timeline_audio.py) — reuses the
+      # `app` service's Supabase project/bucket credentials below for
+      # storage; this is only the Sarvam key. Absent = no audio, narrative
+      # generation is unaffected.
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      # Legacy (Gemini TTS was replaced by Sarvam), kept so existing .env
+      # files keep working unchanged.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TIMELINE_AUDIO_BUCKET=${TIMELINE_AUDIO_BUCKET:-timeline-audio}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY:-}
+      # Developer alerts — run_daily_brief_scheduler.py's failure path calls
+      # notify_admin_failure() (email-only), and each finished cycle sends the
+      # "timelines generated" push + email via notify_admin_timelines_generated(),
+      # so this container also needs the FCM credentials and the admin
+      # device/topic settings, like pollworker above. See admin_notify.py /
+      # the `app` service above.
+      - ADMIN_USER_EMAIL=${ADMIN_USER_EMAIL:-}
+      - FIREBASE_CREDENTIALS_PATH=/run/secrets/firebase-service-account.json
+      - ADMIN_ALERT_TOPIC=${ADMIN_ALERT_TOPIC:-admin-alerts}
+      - ADMIN_ALERT_EMAIL_TO=${ADMIN_ALERT_EMAIL_TO:-}
+      - BREVO_API_KEY=${BREVO_API_KEY:-}
+      - BREVO_SENDER_EMAIL=${BREVO_SENDER_EMAIL:-}
+    volumes:
+      - ${FIREBASE_CREDENTIALS_HOST_PATH}:/run/secrets/firebase-service-account.json:ro

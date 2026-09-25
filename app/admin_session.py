@@ -334,6 +334,7 @@ NAV_GROUPS = [
         ("/admin/donations", "Donations"),
         ("/admin/users", "Users"),
         ("/admin/timelines", "Timelines"),
+        ("/admin/daily-brief", "Daily Brief"),
         ("/admin/breaking", "Breaking review"),
         ("/admin/topics", "Topics"),
         ("/admin/announcements", "Announcements"),

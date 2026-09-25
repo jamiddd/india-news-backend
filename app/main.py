@@ -54,8 +54,10 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, utc_now
 from app.schemas import (
+    DailyBriefItemOut,
+    DailyBriefOut,
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
@@ -137,6 +139,8 @@ from app.feedback_admin import router as feedback_admin_router
 from app.admin_donations import router as admin_donations_router
 from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
+from app.admin_daily_brief import router as admin_daily_brief_router
+from app.services.daily_brief import CACHE_KEY as DAILY_BRIEF_CACHE_KEY
 from app.admin_breaking import router as admin_breaking_router
 from app.admin_topics import router as admin_topics_router
 from app.admin_announcements import router as admin_announcements_router
@@ -450,6 +454,7 @@ app.include_router(feedback_admin_router)
 app.include_router(admin_donations_router)
 app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
+app.include_router(admin_daily_brief_router)
 app.include_router(admin_breaking_router)
 app.include_router(admin_topics_router)
 app.include_router(admin_announcements_router)
@@ -2358,6 +2363,41 @@ async def _hero_clusters_for_timeline_rows(
             continue
         hero_by_row_id[row.id] = max(candidates, key=lambda c: (c.distinct_source_count or 0, c.article_count or 0))
     return hero_by_row_id
+
+
+@app.get(f"{settings.API_V1_STR}/daily-brief", response_model=DailyBriefOut)
+@limiter.limit("60/minute")
+async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
+    """The latest ready Daily Brief: yesterday's top stories, each with a
+    one-line summary, plus the narration audio when it was produced (see
+    app/services/daily_brief.py). Built at 05:00 IST, so before then this is
+    still the previous morning's brief. 404 when none has ever been built —
+    the app shows its "not ready yet" state."""
+    cached = await _cache_get(DAILY_BRIEF_CACHE_KEY)
+    if cached:
+        return DailyBriefOut.model_validate_json(cached)
+
+    row = (
+        await db.execute(
+            select(DailyBrief)
+            .where(DailyBrief.status == "ready")
+            .order_by(desc(DailyBrief.brief_date))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if row is None or not row.items or not row.script:
+        raise HTTPException(status_code=404, detail="No daily brief yet")
+
+    result_out = DailyBriefOut(
+        brief_date=row.brief_date,
+        generated_at=row.generated_at,
+        intro=row.script.get("intro", ""),
+        items=[DailyBriefItemOut(**item) for item in row.items],
+        audio_url=row.audio_url,
+        audio_duration_seconds=row.audio_duration_seconds,
+    )
+    await _cache_set(DAILY_BRIEF_CACHE_KEY, result_out.model_dump_json())
+    return result_out
 
 
 @app.get(f"{settings.API_V1_STR}/timelines", response_model=TimelineFeaturesOut)
