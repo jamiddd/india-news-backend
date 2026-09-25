@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # The one place the served response's cache key lives, so a change to the
 # response shape (bump the suffix) and every invalidation stay in step. See
 # admin_timelines._invalidate_timeline_caches for what happens otherwise.
-CACHE_KEY = "daily_brief:latest:v1"
+CACHE_KEY = "daily_brief:latest:v2"
 LEASE_JOB = "daily_brief"
 LEASE_TTL_SECONDS = 30 * 60
 # Fewer than this many corroborated stories is not a brief worth publishing.

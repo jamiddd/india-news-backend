@@ -736,6 +736,10 @@ class DailyBriefItemOut(BaseModel):
     slot_kind: str = "category"
     # Second at which this story starts in the audio; None on a text-only brief.
     audio_offset: Optional[float] = None
+    # The same slim story the feed lists send for a card, so the app can open the
+    # story screen instantly from a tap (and backfill the full story after), like
+    # a feed card. None only if the story has since been deleted.
+    cluster: Optional[StoryClusterListOut] = None
 
 
 class DailyBriefOut(BaseModel):

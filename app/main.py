@@ -2388,11 +2388,29 @@ async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
     if row is None or not row.items or not row.script:
         raise HTTPException(status_code=404, detail="No daily brief yet")
 
+    # Attach each story's slim cluster, exactly as a feed list card carries it, so a
+    # tap opens the story screen instantly instead of waiting on a fetch.
+    clusters = {
+        c.id: c
+        for c in (
+            await db.execute(
+                select(StoryCluster)
+                .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+                .where(StoryCluster.id.in_([item["cluster_id"] for item in row.items]))
+            )
+        ).scalars().all()
+    }
     result_out = DailyBriefOut(
         brief_date=row.brief_date,
         generated_at=row.generated_at,
         intro=row.script.get("intro", ""),
-        items=[DailyBriefItemOut(**item) for item in row.items],
+        items=[
+            DailyBriefItemOut(
+                **item,
+                cluster=_cluster_to_list_out(clusters[item["cluster_id"]]) if item["cluster_id"] in clusters else None,
+            )
+            for item in row.items
+        ],
         audio_url=row.audio_url,
         audio_duration_seconds=row.audio_duration_seconds,
     )
