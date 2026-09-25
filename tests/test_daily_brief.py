@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.services.daily_brief_script import build_chunks, finalize_script
-from app.services.daily_brief_select import BriefStory, _entity_set, _same_event, brief_window
+from app.services.daily_brief_select import BriefStory, _entity_set, _same_event, brief_window, is_runaway_cluster
 from app.services.timeline_audio import SCRIPT_VERSION, SIGN_OFF
 
 
@@ -73,3 +73,16 @@ def test_build_chunks_puts_intro_first_and_closing_with_sign_off_last():
     assert intro_chars == len(script["intro"]) + 1
     assert chunks[-1].endswith(SIGN_OFF)
     assert script["closing"] in chunks[-1]
+
+
+def test_runaway_clusters_are_recognised_by_articles_per_outlet():
+    # Healthy stories seen in production: about one to two articles per outlet.
+    assert not is_runaway_cluster(34, 26)
+    assert not is_runaway_cluster(49, 24)
+    assert not is_runaway_cluster(12, 12)
+    # Runaway merges: hundreds or thousands of articles.
+    assert is_runaway_cluster(1721, 81)
+    assert is_runaway_cluster(420, 59)
+    assert is_runaway_cluster(258, 42)
+    # Missing counts must not flag a story.
+    assert not is_runaway_cluster(None, None)

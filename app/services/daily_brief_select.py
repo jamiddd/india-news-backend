@@ -43,6 +43,14 @@ CANDIDATE_LIMIT = 400
 # treated as the same event.
 ENTITY_OVERLAP_DUPLICATE = 0.5
 MAX_TITLES_PER_STORY = 3
+# A story normally has about as many articles as outlets covering it (2026-09-25
+# data: healthy top stories had 12-49 articles from 12-26 outlets, at most 2 per
+# outlet). Clusters far above that are runaway merges that absorbed unrelated
+# coverage — the BRICS "story" of that day held 1,721 articles and 123 videos,
+# most of them unrelated, and opening it in the app downloaded ~5 MB. They are
+# not a story worth leading a brief with, so they are skipped. Healthy stories
+# sat at <= 2.0 and runaways at >= 4.4, so 3 separates them with room to spare.
+MAX_ARTICLES_PER_OUTLET = 3.0
 
 
 @dataclass
@@ -71,6 +79,12 @@ def _keyword_pattern(category: str) -> Optional[re.Pattern]:
 
 
 _GATE_PATTERNS = {cat: _keyword_pattern(cat) for cat in CONTENT_GATED_CATEGORIES}
+
+
+def is_runaway_cluster(article_count: Optional[int], distinct_source_count: Optional[int]) -> bool:
+    """True for a cluster with implausibly many articles per outlet — see
+    MAX_ARTICLES_PER_OUTLET."""
+    return (article_count or 0) > MAX_ARTICLES_PER_OUTLET * max(distinct_source_count or 1, 1)
 
 
 def _entity_set(entities) -> set[str]:
@@ -161,7 +175,11 @@ async def select_stories(session: AsyncSession, brief_date: date) -> list[BriefS
     # Best first: most sources yesterday, then the cluster's own score, then
     # the newest cluster (deterministic).
     order = sorted(
-        (cid for cid in coverage if cid in clusters),
+        (
+            cid for cid in coverage
+            if cid in clusters
+            and not is_runaway_cluster(clusters[cid].article_count, clusters[cid].distinct_source_count)
+        ),
         key=lambda cid: (-coverage[cid], -(clusters[cid].headline_score or 0.0), -cid),
     )
     categories = {cid: category_of(cid) for cid in order}
