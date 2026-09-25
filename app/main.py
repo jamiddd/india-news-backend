@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import update, desc, or_, func, text, tuple_, case
+from sqlalchemy import delete as sa_delete
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -55,7 +56,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, utc_now
 from app.schemas import (
     DailyBriefItemOut,
     DailyBriefOut,
@@ -79,6 +80,7 @@ from app.schemas import (
     DonationLinkRequest, DonationLinkResponse,
     VerifyPurchaseRequest, VerifyPurchaseResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
+    FollowStoryRequest, FollowedStoryOut, FollowedStoriesOut,
     StarredSourcesOut,
     BlockedSourcesOut,
     ReportStoryRequest,
@@ -105,6 +107,7 @@ from app.services.related_stories import find_related_clusters
 from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
 from app.services import user_avatars as avatar_service
+from app.services import story_updates
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
@@ -3392,6 +3395,98 @@ async def list_saved_stories(
     ]
 
     return SavedStoriesOut(items=formatted, next_cursor=next_cursor, has_more=has_more)
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/followed-stories", status_code=200)
+@limiter.limit("60/minute")
+async def follow_story(
+    request: Request,
+    user_id: str,
+    payload: FollowStoryRequest,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Starts push notifications for genuine new developments on a cluster
+    (app/services/story_updates.py). Idempotent on (user_id, cluster_id)."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cluster = (
+        await db.execute(select(StoryCluster).where(StoryCluster.id == payload.cluster_id))
+    ).scalar_one_or_none()
+    if cluster is None:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+
+    await db.execute(
+        pg_insert(StoryFollow)
+        .values(user_id=user_id, cluster_id=payload.cluster_id)
+        .on_conflict_do_nothing(index_elements=["user_id", "cluster_id"])
+    )
+    await story_updates.seed_follow_state(db, cluster, utc_now())
+    await db.commit()
+    return {"message": "Following"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/followed-stories/{{cluster_id}}", status_code=200)
+@limiter.limit("60/minute")
+async def unfollow_story(
+    request: Request,
+    user_id: str,
+    cluster_id: int,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        sa_delete(StoryFollow).where(StoryFollow.user_id == user_id, StoryFollow.cluster_id == cluster_id)
+    )
+    await db.commit()
+    return {"message": "Unfollowed"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/followed-stories", status_code=200)
+@limiter.limit("20/minute")
+async def unfollow_all_stories(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(sa_delete(StoryFollow).where(StoryFollow.user_id == user_id))
+    await db.commit()
+    return {"message": "Unfollowed all"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/followed-stories", response_model=FollowedStoriesOut)
+@limiter.limit("60/minute")
+async def list_followed_stories(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows = (
+        await db.execute(
+            select(StoryFollow)
+            .options(selectinload(StoryFollow.cluster).selectinload(StoryCluster.articles).selectinload(Article.source))
+            .where(StoryFollow.user_id == user_id)
+            .order_by(desc(StoryFollow.id))
+        )
+    ).scalars().all()
+    return FollowedStoriesOut(
+        items=[
+            FollowedStoryOut(
+                followed_at=r.created_at,
+                last_notified_at=r.last_notified_at,
+                cluster=_cluster_to_list_out(r.cluster),
+            )
+            for r in rows
+        ]
+    )
 
 
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/star", status_code=200)

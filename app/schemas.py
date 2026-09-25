@@ -327,6 +327,9 @@ class UserPreferences(BaseModel):
     # both breaking alerts AND daily digests on at once. See
     # scripts/send_notifications.py for what each actually sends.
     breaking_notifications_enabled: bool = False
+    # Master switch for followed-story pushes (see app/services/story_updates.py).
+    # Off pauses the pushes but keeps the follows.
+    story_update_notifications_enabled: bool = True
     # List of "HH:MM" (UTC) — one digest notification per entry, per day. The
     # client converts each local time-of-day pick to UTC before saving (see
     # NewsViewModel's preferred-time setter), so the backend never needs a
@@ -621,6 +624,20 @@ class VerifyPurchaseResponse(BaseModel):
 
 class SaveStoryRequest(BaseModel):
     cluster_id: int
+
+
+class FollowStoryRequest(BaseModel):
+    cluster_id: int
+
+
+class FollowedStoryOut(BaseModel):
+    followed_at: datetime
+    last_notified_at: Optional[datetime] = None
+    cluster: StoryClusterListOut
+
+
+class FollowedStoriesOut(BaseModel):
+    items: List[FollowedStoryOut]
 
 
 class TimelinePickRequest(BaseModel):

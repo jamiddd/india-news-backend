@@ -36,6 +36,7 @@ class User(Base):
     device_tokens = relationship("DeviceToken", cascade="all, delete-orphan")
     game_sessions = relationship("GameSession", cascade="all, delete-orphan")
     saved_stories = relationship("SavedStory", cascade="all, delete-orphan")
+    story_follows = relationship("StoryFollow", cascade="all, delete-orphan")
 
 
 class DeviceToken(Base):
@@ -79,7 +80,7 @@ class NotificationLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False)
-    mode = Column(String(20), nullable=False)  # "daily" | "breaking"
+    mode = Column(String(20), nullable=False)  # "daily" | "breaking" | "story_update"
     daily_slot_utc = Column(String(5), nullable=True)  # "HH:MM", only set when mode == "daily"
     sent_at = Column(DateTime(timezone=True), default=utc_now, nullable=False, index=True)
     # UTC calendar day of sent_at, stored rather than derived because the
@@ -195,6 +196,57 @@ class SavedStory(Base):
     __table_args__ = (
         Index("uq_saved_stories_user_cluster", "user_id", "cluster_id", unique=True),
     )
+
+
+class StoryFollow(Base):
+    """A user following one cluster for push notifications on genuine new
+    developments (app/services/story_updates.py). Distinct from SavedStory:
+    a bookmark is a reading list, a follow is a standing alert request, and
+    it ends by itself once the story goes quiet.
+
+    last_development_id is the newest StoryDevelopment this follow has
+    already been pushed (or skipped past), so a development is never sent
+    twice; last_notified_at drives the per-story spacing limit."""
+    __tablename__ = "story_follows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_notified_at = Column(DateTime(timezone=True), nullable=True)
+    last_development_id = Column(Integer, nullable=True)
+
+    cluster = relationship("StoryCluster")
+
+    __table_args__ = (
+        Index("uq_story_follows_user_cluster", "user_id", "cluster_id", unique=True),
+    )
+
+
+class ClusterFollowState(Base):
+    """Per-cluster memory for development detection, shared by all of a
+    cluster's followers. known_bullets holds every summary bullet already
+    seen (baseline at first follow + each later summary), so a paraphrase
+    of an old point is never mistaken for news."""
+    __tablename__ = "cluster_follow_state"
+
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), primary_key=True)
+    known_bullets = Column(JSON, nullable=False, default=list)
+    last_source_count = Column(Integer, nullable=False, default=0)
+    last_checked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class StoryDevelopment(Base):
+    """One detected genuine development on a followed cluster. Append-only;
+    computed once per cluster and fanned out to every follower."""
+    __tablename__ = "story_developments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False, index=True)
+    headline = Column(Text, nullable=False)
+    bullet = Column(Text, nullable=False)
+    source_count = Column(Integer, nullable=False, default=0)
+    detected_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class UserSourceFollow(Base):

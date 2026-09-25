@@ -63,6 +63,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from typing import Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -77,6 +78,7 @@ from app.models import User, DeviceToken, NotificationLog, StoryCluster, utc_now
 from app.services.firebase_auth import _get_firebase_app
 from app.services.feed_gate import notifiable_clauses
 from app.services.job_lease import job_lease
+from app.services import story_updates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -122,7 +124,10 @@ def _due_daily_slots(times_utc: list, now: datetime) -> list:
     return [t for t in times_utc if _is_within_daily_window(t, now)]
 
 
-async def _send(app, token: str, title: str, body: str, cluster_id: int, channel_id: str) -> bool:
+async def _send(
+    app, token: str, title: str, body: str, cluster_id: int, channel_id: str,
+    extra: Optional[dict] = None,
+) -> bool:
     """Sends one message; returns False (and deletes the token row) if FCM
     reports it as dead, so future runs stop paying the cost of trying it.
 
@@ -144,6 +149,7 @@ async def _send(app, token: str, title: str, body: str, cluster_id: int, channel
             "body": body,
             "cluster_id": str(cluster_id),
             "channel_id": channel_id,
+            **(extra or {}),
         },
         android=messaging.AndroidConfig(priority="high"),
         token=token,
@@ -356,6 +362,22 @@ async def main():
 
             await session.commit()
             logger.info(f"[Notifications sent] breaking={breaking_sent} daily={daily_sent} (users checked={len(users)})")
+
+            # Followed-story updates are their own opt-in (a follow, not the
+            # breaking/daily toggles above), so they run for everyone with a
+            # follow regardless of those. Isolated so a failure here cannot
+            # undo or mask the sends above.
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                found = await story_updates.detect_developments(session, now)
+                pushed = await story_updates.send_story_updates(session, now, send_fn)
+                ended = await story_updates.expire_quiet_follows(session, now, send_fn)
+                logger.info(f"[Story updates] developments={found} pushed={pushed} follows_ended={ended}")
+            except Exception:
+                logger.exception("Story-update step failed")
+                await session.rollback()
         finally:
             await session.rollback()
             await session.commit()
