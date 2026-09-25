@@ -152,9 +152,18 @@ def _extract_og_image(html: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def absolutize_scheme(url: Optional[str]) -> Optional[str]:
+    """Gives a protocol-relative URL (//host/path) an https scheme. Times Now's RSS
+    enclosures use that form, and a scheme-less URI can't be opened by the app's
+    player — it never learns a duration and shows 0:00."""
+    if url and url.startswith("//"):
+        return "https:" + url
+    return url
+
+
 def _extract_og_video(html: str) -> Optional[str]:
     match = _OG_VIDEO_RE.search(html) or _OG_VIDEO_RE_ALT.search(html)
-    return match.group(1) if match else None
+    return absolutize_scheme(match.group(1)) if match else None
 
 
 def _extract_jwplayer_media_id(html: str) -> Optional[str]:
@@ -365,7 +374,10 @@ async def _fetch_youtube_video_meta(
 
         if is_short is not None:
             match = _YOUTUBE_LENGTH_RE.search(body)
-            result = (is_short, int(match.group(1)) if match else None)
+            # "0" is what a livestream or premiere reports; that's not a runtime,
+            # so it stays unknown (the badge then says "Watch").
+            seconds = int(match.group(1)) if match else None
+            result = (is_short, seconds if seconds else None)
     except Exception as e:
         logger.debug(f"YouTube metadata lookup failed for {video_id}: {e}")
 

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Article
-from app.services.extractor import IMPERSONATE
+from app.services.extractor import IMPERSONATE, absolutize_scheme
 
 if TYPE_CHECKING:
     from curl_cffi.requests import AsyncSession as CurlAsyncSession
@@ -225,13 +225,13 @@ def extract_rss_video(entry: Any) -> Optional[str]:
             if medium == "video" or media_type.startswith("video"):
                 url = item.get("url")
                 if url:
-                    return url
+                    return absolutize_scheme(url)
 
     for link in getattr(entry, "links", None) or []:
         if link.get("rel") == "enclosure" and str(link.get("type", "")).startswith("video"):
             href = link.get("href")
             if href:
-                return href
+                return absolutize_scheme(href)
 
     return None
 
