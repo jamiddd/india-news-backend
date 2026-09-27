@@ -14,9 +14,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.database import AsyncSessionLocal
-from app.models import Explainer
+from app.models import Article, Explainer, StoryCluster
 from app.redis_client import get_redis_client
 from app.services import explainer_script, timeline_audio
 from app.services.job_lease import job_lease
@@ -93,6 +94,86 @@ async def _update(explainer_id: int, **fields) -> None:
         await session.commit()
 
 
+async def add_source(explainer_id: int, cluster_id: int) -> None:
+    """Attach a real StoryCluster as one of this explainer's sources — see
+    the admin source picker (admin_explainers.py). No-op if already attached
+    or the explainer doesn't exist."""
+    async with AsyncSessionLocal() as session:
+        row = (await session.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
+        if row is None:
+            return
+        ids = list(row.source_cluster_ids or [])
+        if cluster_id not in ids:
+            ids.append(cluster_id)
+            row.source_cluster_ids = ids
+            await session.commit()
+
+
+async def remove_source(explainer_id: int, cluster_id: int) -> None:
+    async with AsyncSessionLocal() as session:
+        row = (await session.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
+        if row is None:
+            return
+        row.source_cluster_ids = [i for i in (row.source_cluster_ids or []) if i != cluster_id]
+        await session.commit()
+
+
+async def fetch_source_clusters(cluster_ids: list[int]) -> list[StoryCluster]:
+    """The real StoryCluster rows for `cluster_ids`, articles+sources
+    eager-loaded, in the same order as `cluster_ids` — an id whose cluster
+    has since been deleted is silently dropped rather than failing the
+    whole fetch."""
+    if not cluster_ids:
+        return []
+    async with AsyncSessionLocal() as session:
+        rows = (
+            await session.execute(
+                select(StoryCluster)
+                .where(StoryCluster.id.in_(cluster_ids))
+                .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+            )
+        ).scalars().all()
+    by_id = {c.id: c for c in rows}
+    return [by_id[i] for i in cluster_ids if i in by_id]
+
+
+def _cluster_to_excerpt(cluster: StoryCluster) -> "explainer_script.SourceExcerpt":
+    outlets: list[str] = []
+    seen: set[str] = set()
+    for article in cluster.articles:
+        name = article.source.name if article.source else None
+        if name and name not in seen:
+            seen.add(name)
+            outlets.append(name)
+    return explainer_script.SourceExcerpt(
+        cluster_id=cluster.id,
+        headline=cluster.headline,
+        summary=cluster.summary or "",
+        distinct_source_count=cluster.distinct_source_count or len(outlets),
+        outlets=outlets[:6],
+        article_titles=[a.title for a in cluster.articles[:3]],
+    )
+
+
+def _cluster_to_source(cluster: StoryCluster) -> dict:
+    """The real, verifiable source entry served to the app for this cluster
+    — a representative article's title/outlet/url, never anything Claude
+    said. Prefers the cluster's own representative_article_id (the same
+    article the rest of the app treats as this story's lead)."""
+    article = next(
+        (a for a in cluster.articles if a.id == cluster.representative_article_id),
+        cluster.articles[0] if cluster.articles else None,
+    )
+    if article is None:
+        return {"title": cluster.headline, "outlet": "", "url": None, "cluster_id": cluster.id}
+    return {
+        "title": article.title,
+        "outlet": article.source.name if article.source else "",
+        "url": article.url,
+        "cluster_id": cluster.id,
+    }
+
+
 async def run_build_task(explainer_id: int, *, narrate: bool = False, voice: Optional[str] = None) -> None:
     """build_explainer as a fire-and-forget task (the admin's Generate
     button): whatever happens, status ends as ready_for_review/error, never
@@ -120,14 +201,29 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             await set_status(explainer_id, "error", "explainer not found")
             return False
 
+        source_ids = list(row.source_cluster_ids or [])
+        if not source_ids:
+            await _update(explainer_id, status="draft", error="Attach at least one source before generating")
+            await set_status(explainer_id, "error", "attach at least one source before generating")
+            return False
+
+        clusters = await fetch_source_clusters(source_ids)
+        if not clusters:
+            await _update(explainer_id, status="draft", error="Attached sources no longer exist")
+            await set_status(explainer_id, "error", "attached sources no longer exist")
+            return False
+
         await set_status(explainer_id, "generating", "writing answer")
         await _update(explainer_id, status="generating", error=None)
 
-        answer = await explainer_script.write_explainer(row.question, row.category, row.depth, row.admin_notes)
+        excerpts = [_cluster_to_excerpt(c) for c in clusters]
+        answer = await explainer_script.write_explainer(row.question, row.category, row.depth, row.admin_notes, excerpts)
         if answer is None:
             await _update(explainer_id, status="draft", error="Claude did not return a valid explainer")
             await set_status(explainer_id, "error", "Claude did not return a valid explainer")
             return False
+
+        derived_sources = [_cluster_to_source(c) for c in clusters]
 
         audio_fields: dict = {"audio_url": None, "audio_duration_seconds": None, "voice": None}
         cost = BASE_GENERATION_COST
@@ -154,7 +250,7 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             status="ready_for_review",
             quick_answer=answer["quick_answer"],
             sections=answer["sections"],
-            sources=answer["sources"],
+            sources=derived_sources,
             generation_cost=cost,
             error=None,
             **audio_fields,
@@ -165,14 +261,20 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
 
 async def regenerate_section(explainer_id: int, section_index: int) -> bool:
     """Regenerate one section's body in place, keeping its heading and
-    leaving quick_answer/sources/audio untouched."""
+    leaving quick_answer/sources/audio untouched. Grounded in the same
+    attached sources as the original generation."""
     async with AsyncSessionLocal() as session:
         row = (await session.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
     if row is None or not row.sections or not (0 <= section_index < len(row.sections)):
         return False
 
+    clusters = await fetch_source_clusters(list(row.source_cluster_ids or []))
+    if not clusters:
+        return False
+
     heading = row.sections[section_index]["heading"]
-    body = await explainer_script.write_section(row.question, row.category, heading, row.admin_notes)
+    excerpts = [_cluster_to_excerpt(c) for c in clusters]
+    body = await explainer_script.write_section(row.question, row.category, heading, row.admin_notes, excerpts)
     if body is None:
         return False
 

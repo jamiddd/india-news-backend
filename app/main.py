@@ -148,6 +148,7 @@ from app.admin_daily_brief import router as admin_daily_brief_router
 from app.admin_explainers import router as admin_explainers_router
 from app.services.daily_brief import CACHE_KEY as DAILY_BRIEF_CACHE_KEY
 from app.services.trending import log_search_query
+from app.services.cluster_search import search_clusters
 from app.admin_breaking import router as admin_breaking_router
 from app.admin_topics import router as admin_topics_router
 from app.admin_announcements import router as admin_announcements_router
@@ -1552,26 +1553,7 @@ async def search_story_clusters(
     if cached is not None:
         return Response(content=cached, media_type="application/json")
 
-    pattern = f"%{q}%"
-    query = (
-        select(StoryCluster)
-        .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .where(
-            or_(
-                StoryCluster.headline.ilike(pattern),
-                StoryCluster.summary.ilike(pattern)
-            )
-        )
-        .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
-    )
-    query = apply_feed_gate(query)
-
-    if cursor:
-        query = query.where(StoryCluster.id < cursor)
-
-    query = query.limit(limit + 1)
-    result = await db.execute(query)
-    clusters = result.scalars().all()
+    clusters = await search_clusters(db, q, limit=limit, cursor=cursor, apply_gate=apply_feed_gate)
 
     has_more = len(clusters) > limit
     items = clusters[:limit]

@@ -1,4 +1,10 @@
-from app.services.explainer_script import MAX_SECTIONS, MIN_SECTIONS, finalize_explainer
+from app.services.explainer_script import (
+    MAX_SECTIONS,
+    MIN_SECTIONS,
+    SourceExcerpt,
+    _source_block,
+    finalize_explainer,
+)
 
 
 def _raw(**overrides):
@@ -7,9 +13,6 @@ def _raw(**overrides):
         "sections": [
             {"heading": "What's driving it", "body": "Crude oil prices climbed, so refiners need more dollars."},
             {"heading": "What happens next", "body": "The RBI has intervened twice this month to slow the slide."},
-        ],
-        "sources": [
-            {"title": "RBI's latest forex reserve data", "outlet": "Reserve Bank of India", "url": "https://rbi.org.in"},
         ],
     }
     raw.update(overrides)
@@ -22,7 +25,7 @@ def test_finalize_accepts_a_well_shaped_explainer():
     assert out["quick_answer"].startswith("The rupee is weakening")
     assert len(out["sections"]) == 2
     assert out["sections"][0]["heading"] == "What's driving it"
-    assert out["sources"][0]["outlet"] == "Reserve Bank of India"
+    assert "sources" not in out  # Claude is never asked for sources; explainer.py derives them from the DB
 
 
 def test_finalize_rejects_missing_quick_answer():
@@ -45,18 +48,36 @@ def test_finalize_rejects_a_section_missing_heading_or_body():
     assert finalize_explainer(_raw(sections=bad)) is None
 
 
-def test_finalize_drops_malformed_sources_but_keeps_valid_ones():
-    out = finalize_explainer(_raw(sources=[
-        {"title": "Good source", "outlet": "Reuters", "url": "https://reuters.com"},
-        {"title": "Missing outlet"},
-        "not even a dict",
-    ]))
+def test_finalize_ignores_extra_keys_like_a_stray_sources_list():
+    # Claude occasionally adds an unrequested field despite the prompt; the
+    # validator should just ignore it rather than choke on it.
+    out = finalize_explainer(_raw(sources=[{"title": "invented", "outlet": "invented"}]))
     assert out is not None
-    assert len(out["sources"]) == 1
-    assert out["sources"][0]["outlet"] == "Reuters"
+    assert "sources" not in out
 
 
 def test_finalize_rejects_non_dict_input():
     assert finalize_explainer(None) is None
     assert finalize_explainer("not json") is None
     assert finalize_explainer([1, 2, 3]) is None
+
+
+def _excerpt(**overrides):
+    defaults = dict(
+        cluster_id=501,
+        headline="RBI intervenes to steady the rupee",
+        summary="The central bank sold dollars from reserves twice this month.",
+        distinct_source_count=6,
+        outlets=["Reuters", "Mint", "PIB"],
+        article_titles=["RBI sells dollars to steady rupee", "Rupee hits fresh low amid FPI outflows"],
+    )
+    defaults.update(overrides)
+    return SourceExcerpt(**defaults)
+
+
+def test_source_block_includes_real_excerpt_fields_the_prompt_can_ground_on():
+    block = _source_block([_excerpt()])
+    assert "[Story 501]" in block
+    assert "RBI intervenes to steady the rupee" in block
+    assert "Reuters" in block
+    assert "RBI sells dollars to steady rupee" in block

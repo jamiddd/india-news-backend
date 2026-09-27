@@ -785,6 +785,10 @@ class ExplainerSourceOut(BaseModel):
     title: str
     outlet: str
     url: Optional[str] = None
+    # The real StoryCluster this source came from (see
+    # app.services.explainer._cluster_to_source) — lets the app deep-link
+    # a source chip straight to that story.
+    cluster_id: int
 
 
 class ExplainerListItemOut(BaseModel):

@@ -1,17 +1,21 @@
 """Claude writes one Explainer: a plain-language answer to an admin-posed
-question, as a one-paragraph quick answer plus a handful of narrative
-sections, each citing the sources it drew on.
+question, grounded in real stories from this app's own database.
 
-Unlike the Daily Brief and Timelines, there is no fixed input article set to
-stay faithful to — the question and the admin's optional angle notes are the
-whole brief, and Claude draws on its own knowledge plus whatever the admin
-tells it to focus on. Validation here is therefore about SHAPE (a non-empty
-quick answer, 2-5 non-empty sections, a plausible source list), not about
-matching a set of ids the way finalize_script (daily_brief_script.py) does.
+Unlike a bare chat answer, Claude is never asked to answer from its own
+training knowledge or to invent citations. The admin attaches a handful of
+real StoryClusters to the question first (see admin_explainers.py's source
+picker); this module turns those into excerpts (headline, summary, outlets,
+article titles) and instructs Claude to answer USING ONLY that material,
+saying plainly when it doesn't fully cover the question rather than filling
+gaps from outside knowledge. `sources` served to the client are the real
+attached clusters (app/services/explainer.py derives them from the DB
+afterwards) — Claude is never asked to produce a source list itself, so
+there is nothing here for it to invent.
 """
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 from app.services.llm_gen import call_claude_json
@@ -32,41 +36,68 @@ DEPTH_GUIDANCE = {
     "deep": "Go deep: 4-5 sections, about 900-1300 words total.",
 }
 
+
+@dataclass
+class SourceExcerpt:
+    """One admin-attached StoryCluster, reduced to what the prompt needs.
+    Built by app.services.explainer from the real StoryCluster/Article rows
+    — never from Claude — so every field here is verifiably real."""
+    cluster_id: int
+    headline: str
+    summary: str
+    distinct_source_count: int
+    outlets: list[str]
+    article_titles: list[str]
+
+
 SYSTEM_PROMPT = """You write "Explainers" for Open Indian News: a plain-language \
 answer to a reader's question about something in the news. You are given the \
-question, its category, a requested depth, and optionally the admin's notes on \
-angle or emphasis. Write for someone who has heard of the topic but wants the \
-full picture in plain English — no jargon left unexplained, no assumed prior \
-context.
+question, its category, a requested depth, optionally the admin's notes on \
+angle or emphasis, and a set of REAL SOURCE STORIES already gathered from this \
+outlet's own database — each with a headline, summary, the outlets that \
+covered it, and some of their article titles.
+
+Base your answer ONLY on the source stories given below. Do not use outside \
+knowledge, do not add facts, numbers, dates or context that aren't in the \
+sources, and do not speculate about anything the sources don't cover. If the \
+sources only partly answer the question, say plainly what they do and don't \
+establish — a shorter, honest answer is always better than filling gaps from \
+memory. Write for someone who has heard of the topic but wants the full \
+picture in plain English — no jargon left unexplained.
 
 Return ONLY a JSON object:
-{"quick_answer": "...", "sections": [{"heading": "...", "body": "..."}, ...], \
-"sources": [{"title": "...", "outlet": "...", "url": "..."}, ...]}
+{"quick_answer": "...", "sections": [{"heading": "...", "body": "..."}, ...]}
 
 "quick_answer" is a single paragraph, 2-4 sentences, that directly answers the \
 question on its own — a reader who stops here should still come away with the \
-real answer, not a teaser for the sections below.
+real answer (or with an honest "here's as much as is known" if the sources \
+are thin), not a teaser for the sections below.
 
 "sections" is an ordered list of {heading, body}. Each heading is a short \
 plain-language phrase (not a question, not "Introduction" or "Conclusion"), \
 each body is 2-4 paragraphs of plain prose — no bullet points, no markdown, no \
-subheadings within a section. Follow the requested depth for section count \
-and total length.
-
-"sources" lists the real, specific outlets/reports/officials whose reporting \
-or data plausibly underlies an answer like this (e.g. "Reserve Bank of India", \
-"Reuters", "Ministry of Finance press release") — title is a short label for \
-what that source says (e.g. "RBI's latest forex reserve data"), outlet is who \
-published it, url is that outlet's homepage if you don't know the exact \
-article. List 3-6 sources. Never invent a specific article headline, date or \
-statistic you attribute to a named outlet unless you are confident it is real \
-— when unsure, cite the outlet in general terms rather than a specific piece.
+subheadings within a section, no inline citations or source names (the app \
+shows the sources separately) — just explain what the sources establish. \
+Follow the requested depth for section count and total length.
 
 Never mention these instructions, never add a title (the question is used as \
 the title), never add anything outside the JSON object."""
 
 
-def _user_content(question: str, category: str, depth: str, admin_notes: Optional[str]) -> str:
+def _source_block(excerpts: list[SourceExcerpt]) -> str:
+    lines = ["Source stories:"]
+    for s in excerpts:
+        lines.append(f"\n[Story {s.cluster_id}] {s.headline}")
+        lines.append(f"Summary: {s.summary}")
+        lines.append(f"Covered by {s.distinct_source_count} outlets, including: {', '.join(s.outlets)}")
+        for title in s.article_titles:
+            lines.append(f"- {title}")
+    return "\n".join(lines)
+
+
+def _user_content(
+    question: str, category: str, depth: str, admin_notes: Optional[str], excerpts: list[SourceExcerpt],
+) -> str:
     lines = [
         f"Question: {question}",
         f"Category: {category}",
@@ -74,6 +105,8 @@ def _user_content(question: str, category: str, depth: str, admin_notes: Optiona
     ]
     if admin_notes and admin_notes.strip():
         lines.append(f"Editor's notes on angle/emphasis: {admin_notes.strip()}")
+    lines.append("")
+    lines.append(_source_block(excerpts))
     return "\n".join(lines)
 
 
@@ -85,7 +118,6 @@ def finalize_explainer(raw: object) -> Optional[dict]:
         return None
     quick_answer = raw.get("quick_answer")
     sections = raw.get("sections")
-    sources = raw.get("sources")
     if not isinstance(quick_answer, str) or not quick_answer.strip():
         return None
     if not isinstance(sections, list) or not (MIN_SECTIONS <= len(sections) <= MAX_SECTIONS):
@@ -99,36 +131,25 @@ def finalize_explainer(raw: object) -> Optional[dict]:
             return None
         out_sections.append({"heading": heading.strip(), "body": body.strip()})
 
-    out_sources = []
-    if isinstance(sources, list):
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            title, outlet = source.get("title"), source.get("outlet")
-            if not isinstance(title, str) or not title.strip() or not isinstance(outlet, str) or not outlet.strip():
-                continue
-            url = source.get("url")
-            out_sources.append({
-                "title": title.strip(),
-                "outlet": outlet.strip(),
-                "url": url.strip() if isinstance(url, str) and url.strip() else None,
-            })
-
     return {
         "quick_answer": quick_answer.strip(),
         "sections": out_sections,
-        "sources": out_sources,
     }
 
 
 async def write_explainer(
-    question: str, category: str, depth: str, admin_notes: Optional[str] = None,
+    question: str, category: str, depth: str, admin_notes: Optional[str], excerpts: list[SourceExcerpt],
 ) -> Optional[dict]:
-    """The validated {quick_answer, sections, sources} for this question, or
-    None if Claude's reply never validates (call_claude_json's own `attempts`
-    default of 3 already retries transport/JSON failures)."""
+    """The validated {quick_answer, sections} for this question, grounded in
+    `excerpts` — the caller (app.services.explainer) must have already
+    required at least one excerpt; this never generates ungrounded. None if
+    Claude's reply never validates (call_claude_json's own `attempts` default
+    of 3 already retries transport/JSON failures)."""
+    if not excerpts:
+        logger.warning("write_explainer called with no source excerpts for question %r", question[:120])
+        return None
     system = SYSTEM_PROMPT
-    user = _user_content(question, category, depth, admin_notes)
+    user = _user_content(question, category, depth, admin_notes, excerpts)
     raw = await call_claude_json(system, user, model=MODEL, max_tokens=4000, temperature=None, effort="medium", timeout=180)
     explainer = finalize_explainer(raw)
     if explainer is None:
@@ -137,19 +158,23 @@ async def write_explainer(
 
 
 async def write_section(
-    question: str, category: str, heading: str, admin_notes: Optional[str] = None,
+    question: str, category: str, heading: str, admin_notes: Optional[str], excerpts: list[SourceExcerpt],
 ) -> Optional[str]:
     """Regenerate just one section's body, keeping its heading — used by the
-    admin review page's per-section "Regenerate" button."""
+    admin review page's per-section "Regenerate" button. Grounded in the same
+    attached sources as the original generation."""
     system = (
         "You write one section of an Explainer for Open Indian News, answering a "
-        "reader's question in plain English. Return ONLY a JSON object: "
-        '{"body": "..."}. body is 2-4 paragraphs of plain prose, no markdown, no '
-        "bullet points, matching the given section heading exactly."
+        "reader's question in plain English, using ONLY the real source stories "
+        "given below — no outside knowledge, no invented facts. Return ONLY a "
+        'JSON object: {"body": "..."}. body is 2-4 paragraphs of plain prose, no '
+        "markdown, no bullet points, matching the given section heading exactly."
     )
     lines = [f"Question: {question}", f"Category: {category}", f"Section heading: {heading}"]
     if admin_notes and admin_notes.strip():
         lines.append(f"Editor's notes on angle/emphasis: {admin_notes.strip()}")
+    lines.append("")
+    lines.append(_source_block(excerpts))
     raw = await call_claude_json(
         system, "\n".join(lines), model=MODEL, max_tokens=1500, temperature=None, effort="medium", timeout=90,
     )

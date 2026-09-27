@@ -1252,11 +1252,23 @@ class Explainer(Base):
     # 'quick' | 'standard' | 'deep' — asked-for length/depth, see explainer_script.py.
     depth = Column(String(16), nullable=False, default="standard")
     admin_notes = Column(Text, nullable=True)
+    # StoryCluster ids the admin attached as this explainer's sources —
+    # required (non-empty) before generation. Claude is never asked to
+    # answer from its own knowledge or invent citations; it is given real
+    # excerpts built from exactly these clusters (see explainer_script.py's
+    # SourceExcerpt) and told to answer only from them. Set by the admin
+    # source picker in admin_explainers.py, well before `sources` below
+    # exists.
+    source_cluster_ids = Column(JSON, nullable=True)
     # 'draft' | 'generating' | 'ready_for_review' | 'published' | 'archived'.
     # Only 'published' rows are served publicly.
     status = Column(String(20), nullable=False, default="draft", index=True)
     quick_answer = Column(Text, nullable=True)
     sections = Column(JSON, nullable=True)
+    # Derived server-side from source_cluster_ids' real Article/Source rows
+    # once generation succeeds (app.services.explainer._derive_sources) —
+    # never written by Claude, so every title/outlet/url here is real and
+    # verifiable, unlike a model's self-reported citation list.
     sources = Column(JSON, nullable=True)
     hero_image_url = Column(Text, nullable=True)
     audio_url = Column(Text, nullable=True)

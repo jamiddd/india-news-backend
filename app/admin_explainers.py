@@ -23,8 +23,9 @@ from app.admin_session import (
     verify,
 )
 from app.database import AsyncSessionLocal, get_db
-from app.models import Explainer
+from app.models import Explainer, StoryCluster
 from app.services import explainer as explainer_service
+from app.services.cluster_search import search_clusters
 from app.services.daily_brief_select import CORE_CATEGORIES, FALLBACK_CATEGORIES
 from app.services.timeline_audio import is_configured as audio_is_configured
 from app.services.trending import get_trending_terms
@@ -181,6 +182,32 @@ async def create(request: Request):
     return RedirectResponse(f"/admin/explainers/{new_id}/review", status_code=303)
 
 
+@router.post("/{explainer_id}/sources/add")
+async def add_source(explainer_id: int, request: Request):
+    fields = await form_fields(request)
+    verify(request, fields)
+    try:
+        cluster_id = int(fields.get("cluster_id", ""))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cluster_id")
+    await explainer_service.add_source(explainer_id, cluster_id)
+    q = fields.get("q", "")
+    suffix = f"?q={html.escape(q, quote=True)}" if q else ""
+    return RedirectResponse(f"/admin/explainers/{explainer_id}/review{suffix}", status_code=303)
+
+
+@router.post("/{explainer_id}/sources/remove")
+async def remove_source(explainer_id: int, request: Request):
+    fields = await form_fields(request)
+    verify(request, fields)
+    try:
+        cluster_id = int(fields.get("cluster_id", ""))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid cluster_id")
+    await explainer_service.remove_source(explainer_id, cluster_id)
+    return RedirectResponse(f"/admin/explainers/{explainer_id}/review", status_code=303)
+
+
 def _section_block(explainer_id: int, index: int, section: dict, csrf: str) -> str:
     return (
         f"<div class=task>"
@@ -198,14 +225,61 @@ def _sources_block(sources: list[dict] | None) -> str:
     if not sources:
         return ""
     items = "".join(
-        f"<li>{html.escape(s['title'])} <span class=meta>&middot; {html.escape(s['outlet'])}</span></li>"
+        f"<li><a href='/api/v1/clusters/{s['cluster_id']}' target=_blank>{html.escape(s['title'])}</a> "
+        f"<span class=meta>&middot; {html.escape(s['outlet'])}</span></li>"
         for s in sources
     )
     return f"<h2>Sources used ({len(sources)})</h2><ul>{items}</ul>"
 
 
+def _source_search_form(explainer_id: int, q: str) -> str:
+    return (
+        f"<form method=get action='/admin/explainers/{explainer_id}/review'>"
+        f"<label>Search real stories to attach as sources"
+        f"<input name=q value='{html.escape(q)}' placeholder='e.g. rupee dollar RBI'></label>"
+        "<button type=submit>Search</button>"
+        "</form>"
+    )
+
+
+def _source_search_results(clusters: list[StoryCluster], explainer_id: int, csrf: str, attached_ids: set, q: str) -> str:
+    if not clusters:
+        return "<p class=meta>No matching stories.</p>"
+    q_hidden = f"<input type=hidden name=q value='{html.escape(q)}'>"
+    return "".join(
+        f"<div class=task>"
+        f"<p style='margin:0 0 4px'>{html.escape(c.headline)}</p>"
+        f"<p class=meta style='margin:0 0 8px'>{c.distinct_source_count} outlets &middot; cluster {c.id}</p>"
+        + (
+            "<span class=meta>Already added</span>" if c.id in attached_ids else
+            f"<form method=post action='/admin/explainers/{explainer_id}/sources/add' style='margin:0'>"
+            f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+            f"<input type=hidden name=cluster_id value='{c.id}'>{q_hidden}"
+            f"<button>+ Add as source</button></form>"
+        )
+        + "</div>"
+        for c in clusters
+    )
+
+
+def _attached_sources_block(clusters: list[StoryCluster], explainer_id: int, csrf: str) -> str:
+    if not clusters:
+        return "<p class=meta>No sources attached yet — search above and add at least one before generating.</p>"
+    rows = "".join(
+        f"<div class=task>"
+        f"<p style='margin:0 0 4px'>{html.escape(c.headline)}</p>"
+        f"<p class=meta style='margin:0 0 8px'>{c.distinct_source_count} outlets</p>"
+        f"<form method=post action='/admin/explainers/{explainer_id}/sources/remove' style='margin:0'>"
+        f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+        f"<input type=hidden name=cluster_id value='{c.id}'>"
+        f"<button>Remove</button></form></div>"
+        for c in clusters
+    )
+    return f"<h2>Attached sources ({len(clusters)})</h2>{rows}"
+
+
 @router.get("/{explainer_id}/review", response_class=HTMLResponse)
-async def review(explainer_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+async def review(explainer_id: int, request: Request, q: str = "", db: AsyncSession = Depends(get_db)):
     csrf = session_csrf(request)
     if not csrf:
         return RedirectResponse("/admin/explainers/login", status_code=303)
@@ -223,18 +297,35 @@ async def review(explainer_id: int, request: Request, db: AsyncSession = Depends
     )
 
     if row.status in ("draft", "generating"):
-        control = (
-            "<button disabled>Generating&hellip;</button>" if running else
-            (f"<form method=post action='/admin/explainers/{explainer_id}/generate' "
-             f"onsubmit=\"return confirm('{html.escape(GENERATE_CONFIRM, quote=True)}')\">"
-             f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
-             "<label class=opt><input type=checkbox name=narrate value=1> Also generate audio narration</label>"
-             f"<label>Voice</label>{custom_select('voice', VOICES, selected='shubh')}"
-             + ("" if audio_is_configured() else "<p class=meta>Audio isn't configured on this server; "
-                                                    "narration would be skipped.</p>")
-             + "<button>Generate explainer</button></form>")
+        attached_ids = list(row.source_cluster_ids or [])
+        attached_clusters = await explainer_service.fetch_source_clusters(attached_ids)
+        search_results = await search_clusters(db, q, limit=8) if q.strip() else []
+
+        source_picker = (
+            "<h2>Sources</h2>"
+            "<p class=meta>Explainers answer from this outlet's own reporting, not the model's general "
+            "knowledge — attach at least one real story below before generating.</p>"
+            f"{_source_search_form(explainer_id, q)}"
+            + (_source_search_results(search_results, explainer_id, csrf, set(attached_ids), q) if q.strip() else "")
+            + _attached_sources_block(attached_clusters, explainer_id, csrf)
         )
-        body = header + control + (
+
+        if running:
+            control = "<button disabled>Generating&hellip;</button>"
+        elif not attached_clusters:
+            control = "<p class=meta>Attach at least one source above to enable generation.</p>"
+        else:
+            control = (
+                f"<form method=post action='/admin/explainers/{explainer_id}/generate' "
+                f"onsubmit=\"return confirm('{html.escape(GENERATE_CONFIRM, quote=True)}')\">"
+                f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+                "<label class=opt><input type=checkbox name=narrate value=1> Also generate audio narration</label>"
+                f"<label>Voice</label>{custom_select('voice', VOICES, selected='shubh')}"
+                + ("" if audio_is_configured() else "<p class=meta>Audio isn't configured on this server; "
+                                                        "narration would be skipped.</p>")
+                + "<button>Generate explainer</button></form>"
+            )
+        body = header + source_picker + control + (
             f"<p class=danger>Last attempt failed: {html.escape(row.error)}</p>" if row.error else ""
         ) + refresh
         return layout(TITLE, body, current="/admin/explainers")
