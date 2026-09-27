@@ -79,6 +79,7 @@ from app.services.firebase_auth import _get_firebase_app
 from app.services.feed_gate import notifiable_clauses
 from app.services.job_lease import job_lease
 from app.services import story_updates
+from app.services import topic_updates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -377,6 +378,21 @@ async def main():
                 logger.info(f"[Story updates] developments={found} pushed={pushed} follows_ended={ended}")
             except Exception:
                 logger.exception("Story-update step failed")
+                await session.rollback()
+
+            # Followed-topic updates are isolated the same way, and for the
+            # same reason: a failure here must not undo or mask the sends
+            # above (breaking/daily/story-update).
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                topic_found = await topic_updates.detect_topic_developments(session, now)
+                topic_pushed = await topic_updates.send_topic_updates(session, now, send_fn)
+                await topic_updates.expire_orphaned_topic_state(session)
+                logger.info(f"[Topic updates] developments={topic_found} pushed={topic_pushed}")
+            except Exception:
+                logger.exception("Topic-update step failed")
                 await session.rollback()
         finally:
             await session.rollback()

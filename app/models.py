@@ -37,6 +37,7 @@ class User(Base):
     game_sessions = relationship("GameSession", cascade="all, delete-orphan")
     saved_stories = relationship("SavedStory", cascade="all, delete-orphan")
     story_follows = relationship("StoryFollow", cascade="all, delete-orphan")
+    topic_follows = relationship("TopicFollow", cascade="all, delete-orphan")
 
 
 class DeviceToken(Base):
@@ -246,6 +247,78 @@ class StoryDevelopment(Base):
     headline = Column(Text, nullable=False)
     bullet = Column(Text, nullable=False)
     source_count = Column(Integer, nullable=False, default=0)
+    detected_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class TopicFollow(Base):
+    """A user following a topic (the same free-text ILIKE match used by
+    /search and TagFeedScreen's "Stories related to X") for push
+    notifications on genuine new developments across ANY cluster that
+    matches it (app/services/topic_updates.py). Unlike StoryFollow, one
+    follow can span many clusters — dedup/collapsing to at most one push per
+    spacing window happens in send_topic_updates, not here.
+
+    topic is the display string as the user saw it (e.g. "Elon Musk");
+    topic_key is its normalized (stripped, lowercased) form, used both for
+    the uniqueness constraint and as the shared key into TopicClusterState /
+    TopicDevelopment so two users following "RBI" and "rbi" share detection
+    state and cost.
+
+    last_development_id is the newest TopicDevelopment this follow has
+    already been pushed (or skipped past), so a development is never sent
+    twice; last_notified_at drives the per-topic spacing limit."""
+    __tablename__ = "topic_follows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    topic = Column(String(120), nullable=False)
+    topic_key = Column(String(120), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_notified_at = Column(DateTime(timezone=True), nullable=True)
+    last_development_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("uq_topic_follows_user_topic_key", "user_id", "topic_key", unique=True),
+    )
+
+
+class TopicClusterState(Base):
+    """Per (topic_key, cluster) memory for topic development detection,
+    shared by all of a topic's followers — mirrors ClusterFollowState, but
+    keyed on the pair since the same cluster can independently be "known"
+    or "new" to several different followed topics.
+
+    A missing row for a cluster that currently matches topic_key means the
+    cluster started matching only after the topic was first followed (or
+    just appeared) — that absence IS the "new story" signal in
+    detect_topic_developments; seed_topic_follow_state backfills a baseline
+    row for every already-matching cluster at follow time so an old story
+    already on the topic never fires on the strength of just being seen."""
+    __tablename__ = "topic_cluster_state"
+
+    topic_key = Column(String(120), primary_key=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), primary_key=True)
+    known_bullets = Column(JSON, nullable=False, default=list)
+    last_source_count = Column(Integer, nullable=False, default=0)
+    first_seen_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class TopicDevelopment(Base):
+    """One detected genuine development for a followed topic. Append-only;
+    computed once per (topic_key, cluster) and fanned out to every
+    follower of that topic_key. kind distinguishes a brand-new matching
+    story ("new_story") from a genuinely new bullet on one already known
+    to the topic ("new_bullet"), since the push copy differs."""
+    __tablename__ = "topic_developments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    topic_key = Column(String(120), nullable=False, index=True)
+    cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="CASCADE"), nullable=False)
+    headline = Column(Text, nullable=False)
+    bullet = Column(Text, nullable=False)
+    source_count = Column(Integer, nullable=False, default=0)
+    kind = Column(String(16), nullable=False)  # "new_story" | "new_bullet"
     detected_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

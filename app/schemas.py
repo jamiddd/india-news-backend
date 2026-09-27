@@ -340,6 +340,10 @@ class UserPreferences(BaseModel):
     # Master switch for followed-story pushes (see app/services/story_updates.py).
     # Off pauses the pushes but keeps the follows.
     story_update_notifications_enabled: bool = True
+    # Master switch for followed-topic pushes (see app/services/topic_updates.py).
+    # Independent of the followed-story switch above — a user can mute one
+    # without the other.
+    topic_update_notifications_enabled: bool = True
     # List of "HH:MM" (UTC) — one digest notification per entry, per day. The
     # client converts each local time-of-day pick to UTC before saving (see
     # NewsViewModel's preferred-time setter), so the backend never needs a
@@ -648,6 +652,21 @@ class FollowedStoryOut(BaseModel):
 
 class FollowedStoriesOut(BaseModel):
     items: List[FollowedStoryOut]
+
+
+class FollowTopicRequest(BaseModel):
+    topic: str = Field(..., min_length=2, max_length=80)
+
+
+class FollowedTopicOut(BaseModel):
+    id: int
+    topic: str
+    followed_at: datetime
+    last_notified_at: Optional[datetime] = None
+
+
+class FollowedTopicsOut(BaseModel):
+    items: List[FollowedTopicOut]
 
 
 class TimelinePickRequest(BaseModel):

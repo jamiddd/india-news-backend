@@ -56,7 +56,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, Explainer, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, TopicFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, Explainer, utc_now
 from app.schemas import (
     DailyBriefItemOut,
     DailyBriefOut,
@@ -82,6 +82,7 @@ from app.schemas import (
     VerifyPurchaseRequest, VerifyPurchaseResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     FollowStoryRequest, FollowedStoryOut, FollowedStoriesOut,
+    FollowTopicRequest, FollowedTopicOut, FollowedTopicsOut,
     StarredSourcesOut,
     BlockedSourcesOut,
     ReportStoryRequest,
@@ -109,6 +110,7 @@ from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
 from app.services import user_avatars as avatar_service
 from app.services import story_updates
+from app.services import topic_updates
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
@@ -3578,6 +3580,119 @@ async def list_followed_stories(
                 followed_at=r.created_at,
                 last_notified_at=r.last_notified_at,
                 cluster=_cluster_to_list_out(r.cluster),
+            )
+            for r in rows
+        ]
+    )
+
+
+# Above this many followed topics, one more broad topic (e.g. a country
+# name) matching thousands of clusters would make detect_topic_developments'
+# per-run cost scale with a single user's follow list rather than with the
+# number of distinct topics in the system. Followed stories need no
+# equivalent cap: each is exactly one cluster, so cost is already bounded.
+MAX_TOPIC_FOLLOWS_PER_USER = 30
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/followed-topics", status_code=200)
+@limiter.limit("60/minute")
+async def follow_topic(
+    request: Request,
+    user_id: str,
+    payload: FollowTopicRequest,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Starts push notifications for genuine new developments anywhere under
+    a topic — the same free-text match /search and TagFeedScreen use (see
+    app/services/topic_updates.py). Idempotent on (user_id, topic_key)."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    topic = " ".join(payload.topic.strip().split())
+    topic_key = topic_updates.normalize_topic_key(topic)
+    if not topic_key:
+        raise HTTPException(status_code=400, detail="Topic cannot be empty")
+
+    existing_count = (
+        await db.execute(
+            select(func.count(TopicFollow.id)).where(TopicFollow.user_id == user_id)
+        )
+    ).scalar() or 0
+    if existing_count >= MAX_TOPIC_FOLLOWS_PER_USER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"You can follow at most {MAX_TOPIC_FOLLOWS_PER_USER} topics",
+        )
+
+    await db.execute(
+        pg_insert(TopicFollow)
+        .values(user_id=user_id, topic=topic, topic_key=topic_key)
+        .on_conflict_do_nothing(index_elements=["user_id", "topic_key"])
+    )
+    await topic_updates.seed_topic_follow_state(db, topic_key, utc_now())
+    await db.commit()
+    return {"message": "Following"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/followed-topics/{{follow_id}}", status_code=200)
+@limiter.limit("60/minute")
+async def unfollow_topic(
+    request: Request,
+    user_id: str,
+    follow_id: int,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        sa_delete(TopicFollow).where(TopicFollow.id == follow_id, TopicFollow.user_id == user_id)
+    )
+    await db.commit()
+    await topic_updates.expire_orphaned_topic_state(db)
+    return {"message": "Unfollowed"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/followed-topics", status_code=200)
+@limiter.limit("20/minute")
+async def unfollow_all_topics(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(sa_delete(TopicFollow).where(TopicFollow.user_id == user_id))
+    await db.commit()
+    await topic_updates.expire_orphaned_topic_state(db)
+    return {"message": "Unfollowed all"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/followed-topics", response_model=FollowedTopicsOut)
+@limiter.limit("60/minute")
+async def list_followed_topics(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    rows = (
+        await db.execute(
+            select(TopicFollow)
+            .where(TopicFollow.user_id == user_id)
+            .order_by(desc(TopicFollow.id))
+        )
+    ).scalars().all()
+    return FollowedTopicsOut(
+        items=[
+            FollowedTopicOut(
+                id=r.id,
+                topic=r.topic,
+                followed_at=r.created_at,
+                last_notified_at=r.last_notified_at,
             )
             for r in rows
         ]
