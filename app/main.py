@@ -442,6 +442,10 @@ async def lifespan(app: FastAPI):
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
             await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS used_count INTEGER NOT NULL DEFAULT 0"))
             await conn.execute(text("ALTER TABLE story_timeline_features ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0"))
+            # explainers predates source_cluster_ids (added when Explainers moved to
+            # answering from admin-attached real stories instead of the model's own
+            # knowledge) — see app/services/explainer.py and admin_explainers.py's source picker.
+            await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS source_cluster_ids JSON"))
         finally:
             await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
