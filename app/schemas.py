@@ -270,6 +270,12 @@ class BreakingStoryOut(BaseModel):
     last_beat_at: Optional[datetime] = None
     beat_count: int
     cluster: Optional[StoryClusterListOut] = None
+    # An admin's manual image pick (see BreakingStory.manual_image_url and
+    # app/admin_breaking.py's picker) — overrides `cluster`'s own
+    # auto-selected image when set. None means "no override, use
+    # cluster.imageUrl as before" — a legacy cached response without this
+    # field renders exactly as it did before this override existed.
+    image_url: Optional[str] = None
 
 
 class BreakingStoriesOut(BaseModel):
@@ -315,6 +321,10 @@ class BreakingStoryDetailOut(BaseModel):
     promoted_at: datetime
     last_beat_at: Optional[datetime] = None
     beats: List[BreakingBeatOut]
+    # Same admin manual override as BreakingStoryOut.image_url — None means
+    # "no override, use the client's own first-beat-with-an-image scan" (see
+    # BreakingStory.manual_image_url).
+    image_url: Optional[str] = None
 
 
 class UserPreferences(BaseModel):

@@ -1165,6 +1165,16 @@ class BreakingStory(Base):
 
     updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
+    # An admin's manual pick from among this cluster's own article images
+    # (see app/admin_breaking.py's image picker) — overrides the
+    # auto-selected image (cluster's own imageUrl for the feed card, first
+    # beat-with-an-image for the detail screen's hero) wherever this story's
+    # image is shown. NULL means "no override, keep auto-selecting". Same
+    # convention as StoryTimelineFeature.manual_image_url above, but scoped
+    # to one cluster rather than a chain — a BreakingStory is always exactly
+    # one cluster.
+    manual_image_url = Column(Text, nullable=True)
+
 
 class BreakingRefreshReview(Base):
     """One row per pending/decided refresh review for an already-`active`

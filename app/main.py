@@ -2882,6 +2882,7 @@ async def list_breaking_stories(request: Request, db: AsyncSession = Depends(get
             beat_count=len(row.beats or []),
             cluster=_cluster_to_list_out(clusters_by_id[row.cluster_id])
             if row.cluster_id in clusters_by_id else None,
+            image_url=row.manual_image_url,
         )
         for row in rows
     ]
@@ -2957,6 +2958,7 @@ async def get_breaking_story(request: Request, cluster_id: int, db: AsyncSession
         promoted_at=row.promoted_at,
         last_beat_at=row.last_beat_at,
         beats=beats_out,
+        image_url=row.manual_image_url,
     )
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
