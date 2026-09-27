@@ -774,3 +774,43 @@ class DailyBriefOut(BaseModel):
     # Public Supabase URL (see timeline_audio.py); both None on a text-only brief.
     audio_url: Optional[str] = None
     audio_duration_seconds: Optional[int] = None
+
+
+class ExplainerSectionOut(BaseModel):
+    heading: str
+    body: str
+
+
+class ExplainerSourceOut(BaseModel):
+    title: str
+    outlet: str
+    url: Optional[str] = None
+
+
+class ExplainerListItemOut(BaseModel):
+    """GET /explainers list item — thin, no sections/sources, matching the
+    approved Explainers feed design (question, category, teaser, meta)."""
+    id: int
+    question: str
+    category: str
+    # First ~120 chars of quick_answer, used as the feed card's teaser line.
+    teaser: str
+    updated_at: datetime
+    has_audio: bool = False
+
+
+class ExplainersOut(BaseModel):
+    explainers: List[ExplainerListItemOut]
+
+
+class ExplainerDetailOut(BaseModel):
+    id: int
+    question: str
+    category: str
+    quick_answer: str
+    sections: List[ExplainerSectionOut]
+    sources: List[ExplainerSourceOut] = []
+    hero_image_url: Optional[str] = None
+    audio_url: Optional[str] = None
+    audio_duration_seconds: Optional[int] = None
+    updated_at: datetime

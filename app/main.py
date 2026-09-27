@@ -56,10 +56,11 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, Explainer, utc_now
 from app.schemas import (
     DailyBriefItemOut,
     DailyBriefOut,
+    ExplainersOut, ExplainerListItemOut, ExplainerDetailOut, ExplainerSectionOut, ExplainerSourceOut,
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
@@ -144,7 +145,9 @@ from app.admin_donations import router as admin_donations_router
 from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
 from app.admin_daily_brief import router as admin_daily_brief_router
+from app.admin_explainers import router as admin_explainers_router
 from app.services.daily_brief import CACHE_KEY as DAILY_BRIEF_CACHE_KEY
+from app.services.trending import log_search_query
 from app.admin_breaking import router as admin_breaking_router
 from app.admin_topics import router as admin_topics_router
 from app.admin_announcements import router as admin_announcements_router
@@ -459,6 +462,7 @@ app.include_router(admin_donations_router)
 app.include_router(admin_users_router)
 app.include_router(admin_timelines_router)
 app.include_router(admin_daily_brief_router)
+app.include_router(admin_explainers_router)
 app.include_router(admin_breaking_router)
 app.include_router(admin_topics_router)
 app.include_router(admin_announcements_router)
@@ -1541,6 +1545,7 @@ async def search_story_clusters(
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
     db: AsyncSession = Depends(get_db)
 ):
+    await log_search_query(q)
     gate = gate_cache_marker()
     cache_key = f"cache:search:{gate}:{q}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
@@ -2419,6 +2424,78 @@ async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
         audio_duration_seconds=row.audio_duration_seconds,
     )
     await _cache_set(DAILY_BRIEF_CACHE_KEY, result_out.model_dump_json())
+    return result_out
+
+
+EXPLAINERS_LIST_CACHE_KEY = "explainers:list:v1"
+
+
+def _explainer_teaser(quick_answer: str, limit: int = 120) -> str:
+    text = (quick_answer or "").strip()
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
+@app.get(f"{settings.API_V1_STR}/explainers", response_model=ExplainersOut)
+@limiter.limit("60/minute")
+async def list_explainers(request: Request, db: AsyncSession = Depends(get_db)):
+    """The Explainers feed (3rd page of the Context tab, Premium-gated in the
+    app) — published explainers only, newest first. See
+    app/services/explainer.py for how one is generated and
+    admin_explainers.py for review/publish."""
+    cached = await _cache_get(EXPLAINERS_LIST_CACHE_KEY)
+    if cached is not None:
+        return ExplainersOut.model_validate_json(cached)
+
+    rows = (
+        await db.execute(
+            select(Explainer)
+            .where(Explainer.status == "published")
+            .order_by(desc(Explainer.published_at))
+        )
+    ).scalars().all()
+    result_out = ExplainersOut(explainers=[
+        ExplainerListItemOut(
+            id=row.id,
+            question=row.question,
+            category=row.category,
+            teaser=_explainer_teaser(row.quick_answer or ""),
+            updated_at=row.updated_at,
+            has_audio=bool(row.audio_url),
+        )
+        for row in rows
+    ])
+    await _cache_set(EXPLAINERS_LIST_CACHE_KEY, result_out.model_dump_json())
+    return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/explainers/{{explainer_id}}", response_model=ExplainerDetailOut)
+@limiter.limit("60/minute")
+async def get_explainer(request: Request, explainer_id: int, db: AsyncSession = Depends(get_db)):
+    """One published explainer's full detail. 404 for a draft/generating/
+    archived id or one that never existed — same "not found" either way,
+    since neither should ever be reachable from the app."""
+    cache_key = f"explainer:{explainer_id}:v1"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return ExplainerDetailOut.model_validate_json(cached)
+
+    row = (await db.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
+    if row is None or row.status != "published":
+        raise HTTPException(status_code=404, detail="Explainer not found")
+
+    result_out = ExplainerDetailOut(
+        id=row.id,
+        question=row.question,
+        category=row.category,
+        quick_answer=row.quick_answer or "",
+        sections=[ExplainerSectionOut(**s) for s in (row.sections or [])],
+        sources=[ExplainerSourceOut(**s) for s in (row.sources or [])],
+        hero_image_url=row.hero_image_url,
+        audio_url=row.audio_url,
+        audio_duration_seconds=row.audio_duration_seconds,
+        updated_at=row.updated_at,
+    )
+    await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 
 

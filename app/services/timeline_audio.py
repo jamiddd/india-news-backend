@@ -168,19 +168,26 @@ def _split_for_limit(text: str) -> list[str]:
     return parts
 
 
-async def synthesize(text: str, *, attempts: int = 3, timeout: float = 120) -> Optional[bytes]:
+async def synthesize(
+    text: str, *, speaker: str = TTS_SPEAKER, attempts: int = 3, timeout: float = 120,
+) -> Optional[bytes]:
     """POST one piece of text to Sarvam TTS, return WAV bytes or None once
     all attempts are exhausted. Same retry-then-None contract as
     llm_gen.call_claude_json rather than raising, since one failed chunk is
     not distinguishable from "TTS unavailable" to the caller — both mean
-    "skip audio for this cycle"."""
+    "skip audio for this cycle".
+
+    `speaker` defaults to the fixed voice every other caller (Timelines,
+    Daily Brief) uses; Explainers is the first caller to pass a different
+    one (see app/services/explainer.py), so this stays the module's only
+    voice-selection point rather than each caller reaching into TTS_SPEAKER."""
     if not settings.SARVAM_API_KEY:
         return None
     payload = {
         "text": text,
         "language_code": TTS_LANGUAGE,
         "model": TTS_MODEL,
-        "speaker": TTS_SPEAKER,
+        "speaker": speaker,
         "pace": TTS_PACE,
         "temperature": TTS_TEMPERATURE,
         "speech_sample_rate": PCM_SAMPLE_RATE,
@@ -382,12 +389,14 @@ async def generate_audio(anchor_cluster_id: int, spoken_script: dict) -> Optiona
 
 
 async def render_and_upload(
-    label: str, chunks: list[str], intro_chars: int, object_name: str,
+    label: str, chunks: list[str], intro_chars: int, object_name: str, *, speaker: str = TTS_SPEAKER,
 ) -> Optional[tuple[str, int, list[float]]]:
     """Voice the chunks, stitch them, encode and upload as object_name.
     Returns (public url, duration seconds, per-chunk start offsets in seconds)
-    or None on any failure. Shared by timelines and the Daily Brief; `label`
-    only names the caller in log lines.
+    or None on any failure. Shared by timelines, the Daily Brief and
+    Explainers; `label` only names the caller in log lines. `speaker`
+    defaults to the fixed shubh voice; Explainers passes "simran" when the
+    admin picks it (see app/services/explainer.py).
 
     Synthesized one call at a time, not concurrently: a story is 10-30 short
     calls, about a minute or two of wall-clock, which the nightly cycle can
@@ -395,7 +404,7 @@ async def render_and_upload(
     async def voice(part_text: str, beat: int) -> Optional[bytes]:
         pieces = []
         for part in _split_for_limit(part_text):
-            wav = await synthesize(part)
+            wav = await synthesize(part, speaker=speaker)
             pcm = _wav_to_pcm(wav) if wav is not None else None
             if pcm is None:
                 logger.warning("audio synthesis failed for %s (beat %s), skipping", label, beat)

@@ -1227,3 +1227,44 @@ class DailyBrief(Base):
     generated_at = Column(DateTime(timezone=True), nullable=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class Explainer(Base):
+    """One admin-posed question, answered by Claude as a long-form explainer:
+    a one-paragraph quick_answer plus a handful of narrative sections, with
+    the sources Claude cited and, optionally, Sarvam narration audio. Built
+    by app.services.explainer, reviewed/published from admin_explainers.py,
+    served by GET /explainers (list, published only) and GET /explainers/{id}.
+
+    Point-in-time by design: publishing does not schedule any revision as the
+    underlying story develops (see the Explainers feature memory/plan) — a
+    stale explainer is archived and a fresh question asked instead.
+
+    sections is [{"heading": str, "body": str}]; sources is [{"title": str,
+    "outlet": str, "url": str}] — both JSON, same embed-don't-relate pattern
+    as DailyBrief.items/script, since nothing here needs a join back to
+    Article/StoryCluster."""
+    __tablename__ = "explainers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    question = Column(Text, nullable=False)
+    category = Column(String(32), nullable=False)
+    # 'quick' | 'standard' | 'deep' — asked-for length/depth, see explainer_script.py.
+    depth = Column(String(16), nullable=False, default="standard")
+    admin_notes = Column(Text, nullable=True)
+    # 'draft' | 'generating' | 'ready_for_review' | 'published' | 'archived'.
+    # Only 'published' rows are served publicly.
+    status = Column(String(20), nullable=False, default="draft", index=True)
+    quick_answer = Column(Text, nullable=True)
+    sections = Column(JSON, nullable=True)
+    sources = Column(JSON, nullable=True)
+    hero_image_url = Column(Text, nullable=True)
+    audio_url = Column(Text, nullable=True)
+    audio_duration_seconds = Column(Integer, nullable=True)
+    # 'shubh' | 'simran' — None when narration wasn't requested/produced.
+    voice = Column(String(16), nullable=True)
+    generation_cost = Column(Float, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    published_at = Column(DateTime(timezone=True), nullable=True)
