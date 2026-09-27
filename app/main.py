@@ -1234,6 +1234,13 @@ async def donation_thanks(request: Request):
 # donations-launch-checklist.md).
 ANDROID_APP_SHA256_FINGERPRINT = "81:25:2E:58:1D:98:67:17:9D:DD:98:89:E0:CB:BC:AB:35:77:06:D2:19:17:AA:EC:70:20:A0:9B:1E:95:4D:53"
 
+# The project's debug-news.keystore cert (app/build.gradle.kts) — not a
+# secret, its store/key password is already plaintext in that committed
+# file. Included so a debug-signed test build (the normal Android Studio
+# "Run" install, since the app isn't on Play yet) also passes App Link
+# verification instead of silently falling back to opening links in Chrome.
+ANDROID_APP_DEBUG_SHA256_FINGERPRINT = "92:9E:C2:1B:52:4C:AD:DF:EC:A3:6D:CD:EA:85:AA:45:7A:19:FB:B1:F3:A4:87:FA:70:F2:2C:B7:E0:DF:4F:68"
+
 
 @app.get("/.well-known/assetlinks.json")
 @limiter.limit("60/minute")
@@ -1244,7 +1251,10 @@ async def assetlinks(request: Request):
             "target": {
                 "namespace": "android_app",
                 "package_name": "com.jamid.news",
-                "sha256_cert_fingerprints": [ANDROID_APP_SHA256_FINGERPRINT],
+                "sha256_cert_fingerprints": [
+                    ANDROID_APP_SHA256_FINGERPRINT,
+                    ANDROID_APP_DEBUG_SHA256_FINGERPRINT,
+                ],
             },
         }
     ])
