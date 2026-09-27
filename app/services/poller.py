@@ -311,7 +311,22 @@ async def ingest_source(
         # shares_topic() (dedup.py) see two completely unrelated articles
         # from the same outlet as sharing a topic, since the boilerplate
         # alone supplied enough matching significant tokens.
-        snippet = clean_extracted_text(snippet, title) or snippet
+        #
+        # Falls back to "" on None, NOT to the pre-cleaning `snippet` — this
+        # is the only copy of the text there is, so a None here means
+        # cleaning correctly determined there's nothing but a repeat of the
+        # headline, not that it over-stripped something worth restoring.
+        # Confirmed live 2026-09-27 on a Google-News-proxied Reuters item:
+        # its <description> is exactly `<a href="https://news.google.com/
+        # rss/articles/...">headline text</a>&nbsp;&nbsp;<font>Reuters
+        # </font>` — after stripping tags that's one line matching the
+        # title, so clean_extracted_text drops it and returns None, and the
+        # old `or snippet` fallback resurrected the raw, still-tagged HTML.
+        # That surfaced as "Google" appearing as a story entity: the literal
+        # substring "news.google.com" in the un-stripped href matched
+        # KNOWN_ENTITIES's rule-based org lookup, on a story that has
+        # nothing to do with Google.
+        snippet = clean_extracted_text(snippet, title) or ""
         if snippet and snippet.lower() in ["undefined", "none", "null"]:
             snippet = ""
 
