@@ -298,6 +298,36 @@ def _framing_for_response(cluster: StoryCluster) -> Optional[Any]:
     return framing
 
 
+def _entities_for_response(entities: Optional[Any]) -> Optional[Any]:
+    """Drops backdrop-flagged names out of persons/organizations/locations
+    before they ever reach a client.
+
+    The enrichment prompt asks the model to mark which extracted entities
+    are mere scene-setting (a story's own location dateline, an industry
+    label, a stray outlet name it mentioned in passing) rather than a real
+    subject — see enrichment.py's step 5 and _sanitize_entities. That
+    judgment was being computed and stored in `backdrop` correctly, then
+    never actually used: every consumer (this API, the app's "Related
+    topics" chips, related_stories.py's entity-graph matching) read
+    persons/organizations/locations raw, backdrop names included. Confirmed
+    live 2026-09-27: a Meta security story flagged Apple/Google/Sensor
+    Tower/The Information/Reuters as backdrop while still listing every one
+    of them as an organization; a routine BJP meeting story flagged nearly
+    every one of its own 9 listed locations as backdrop. Filtering here (at
+    the read boundary, not just at write time) fixes every already-stored
+    cluster immediately, not only ones re-enriched after this change.
+    """
+    if not isinstance(entities, dict):
+        return entities
+    backdrop = set(entities.get("backdrop") or [])
+    if not backdrop:
+        return entities
+    filtered = dict(entities)
+    for field_name in ("persons", "organizations", "locations"):
+        filtered[field_name] = [v for v in (entities.get(field_name) or []) if v not in backdrop]
+    return filtered
+
+
 def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
     """Builds a full StoryClusterOut (incl. article content/entities/topics/
     framing_comparison) from an ORM StoryCluster, filling
@@ -338,7 +368,7 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
         article_count=cluster.article_count,
         first_seen_at=cluster.first_seen_at,
         last_updated_at=cluster.last_updated_at,
-        entities=cluster.entities,
+        entities=_entities_for_response(cluster.entities),
         topics=cluster.topics,
         framing_comparison=_framing_for_response(cluster),
         ai_enriched=cluster.ai_enriched,

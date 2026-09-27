@@ -206,14 +206,31 @@ def _sanitize_entities(entities: Dict[str, Any]) -> Dict[str, Any]:
     persons/organizations/locations the model returned in the same response
     — the prompt asks for this but nothing stops a model from naming an
     entity that isn't in those lists (or hallucinating "backdrop" as some
-    other shape entirely)."""
+    other shape entirely) — and then actually removes those backdrop names
+    from persons/organizations/locations.
+
+    That removal is the entire point of asking for backdrop at all: a name
+    the model itself judged as scene-setting (the story's own location
+    dateline, an industry label, a stray outlet name) rather than a real
+    subject was being computed correctly and then ignored by every
+    consumer, since none of them read `backdrop` — main.py served it
+    straight through, and this function only ever trimmed the backdrop
+    list itself, never subtracted it from the lists that actually reach a
+    chip or a related-stories match. Kept here (write time) as the source
+    of truth for newly-enriched clusters; main.py's
+    _entities_for_response applies the same subtraction at the read
+    boundary so already-stored clusters are fixed without a backfill."""
     known = set()
     for field_name in ("persons", "organizations", "locations"):
         known.update(entities.get(field_name) or [])
     backdrop = entities.get("backdrop") or []
     if not isinstance(backdrop, list):
         backdrop = []
-    entities["backdrop"] = [b for b in backdrop if b in known]
+    backdrop = [b for b in backdrop if b in known]
+    entities["backdrop"] = backdrop
+    backdrop_set = set(backdrop)
+    for field_name in ("persons", "organizations", "locations"):
+        entities[field_name] = [v for v in (entities.get(field_name) or []) if v not in backdrop_set]
     return entities
 
 

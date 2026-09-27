@@ -115,6 +115,12 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
     clusters = []
     for row in result:
         entities = row.entities or {}
+        # Backdrop names (a story's own location dateline, a stray outlet
+        # mention) are context the model itself judged as not what the
+        # story is about — see enrichment.py's _sanitize_entities. Two
+        # otherwise-unrelated stories that each merely happened in "Delhi"
+        # would otherwise share that entity key and register as related.
+        backdrop = set(entities.get("backdrop") or [])
         entity_keys: Set[str] = set()
         for entity_type, field_name in (
             ("person", "persons"),
@@ -122,6 +128,8 @@ async def load_clusters(conn, days: int) -> List[Cluster]:
             ("location", "locations"),
         ):
             for raw_name in entities.get(field_name, []) or []:
+                if raw_name in backdrop:
+                    continue
                 key = canonicalize_entity(raw_name, entity_type)
                 if key:
                     entity_keys.add(key)
