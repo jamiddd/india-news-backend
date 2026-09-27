@@ -1,6 +1,7 @@
 import io
 import re
 import logging
+from html import unescape
 from typing import Any, Optional, TYPE_CHECKING
 from urllib.parse import urlparse, unquote
 from PIL import Image
@@ -272,6 +273,9 @@ def extract_rss_image(entry: Any) -> Optional[str]:
     if summary:
         match = _IMG_TAG_RE.search(summary)
         if match:
-            return match.group(1)
+            # Regex over raw HTML, not a parser, so an entity-escaped '&' in
+            # the src attribute (e.g. a query string) reaches here verbatim
+            # — see the same fix in extractor.py's _extract_og_image.
+            return unescape(match.group(1))
 
     return None

@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from html import unescape
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -149,7 +150,11 @@ class ExtractedArticle:
 
 def _extract_og_image(html: str) -> Optional[str]:
     match = _OG_IMAGE_RE.search(html) or _OG_IMAGE_RE_ALT.search(html)
-    return match.group(1) if match else None
+    # The regex pulls the attribute's raw source text, entities and all — a
+    # publisher legitimately HTML-escapes '&' as '&amp;' inside the attribute
+    # (Al Jazeera does this on every resize/quality query string), and without
+    # unescaping, that literal "&amp;" ends up stored as part of the URL.
+    return unescape(match.group(1)) if match else None
 
 
 def absolutize_scheme(url: Optional[str]) -> Optional[str]:
@@ -163,7 +168,7 @@ def absolutize_scheme(url: Optional[str]) -> Optional[str]:
 
 def _extract_og_video(html: str) -> Optional[str]:
     match = _OG_VIDEO_RE.search(html) or _OG_VIDEO_RE_ALT.search(html)
-    return absolutize_scheme(match.group(1)) if match else None
+    return absolutize_scheme(unescape(match.group(1))) if match else None
 
 
 def _extract_jwplayer_media_id(html: str) -> Optional[str]:

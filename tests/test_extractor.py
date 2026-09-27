@@ -1,5 +1,10 @@
 """Pure-logic tests for app/services/extractor.py's URL classifiers."""
-from app.services.extractor import _extract_video_object_media, is_expiring_signed_video_url
+from app.services.extractor import (
+    _extract_og_image,
+    _extract_og_video,
+    _extract_video_object_media,
+    is_expiring_signed_video_url,
+)
 
 
 class TestIsExpiringSignedVideoUrl:
@@ -48,3 +53,39 @@ class TestExtractVideoObjectMedia:
 
     def test_page_without_video_object_returns_none(self):
         assert _extract_video_object_media(self._page('{"@type": "NewsArticle"}')) is None
+
+
+class TestExtractOgImage:
+    def test_html_escaped_ampersand_is_unescaped(self):
+        # Al Jazeera's own pages legitimately HTML-escape '&' as '&amp;' inside
+        # the content attribute (valid HTML) — the regex must not store that
+        # literal escape sequence as part of the URL.
+        html = (
+            '<meta data-rh="true" property="og:image" '
+            'content="https://www.aljazeera.com/wp-content/uploads/2026/09/image.jpg'
+            '?resize=1920%2C1080&amp;quality=80"/>'
+        )
+        assert _extract_og_image(html) == (
+            "https://www.aljazeera.com/wp-content/uploads/2026/09/image.jpg?resize=1920%2C1080&quality=80"
+        )
+
+    def test_content_before_property_is_also_unescaped(self):
+        html = '<meta content="https://example.com/a.jpg?x=1&amp;y=2" property="og:image"/>'
+        assert _extract_og_image(html) == "https://example.com/a.jpg?x=1&y=2"
+
+    def test_plain_url_is_unaffected(self):
+        html = '<meta property="og:image" content="https://example.com/a.jpg"/>'
+        assert _extract_og_image(html) == "https://example.com/a.jpg"
+
+    def test_missing_tag_returns_none(self):
+        assert _extract_og_image("<html><head></head></html>") is None
+
+
+class TestExtractOgVideo:
+    def test_html_escaped_ampersand_is_unescaped(self):
+        html = '<meta property="og:video" content="https://example.com/v.mp4?a=1&amp;b=2"/>'
+        assert _extract_og_video(html) == "https://example.com/v.mp4?a=1&b=2"
+
+    def test_protocol_relative_url_is_absolutized(self):
+        html = '<meta property="og:video" content="//example.com/v.mp4"/>'
+        assert _extract_og_video(html) == "https://example.com/v.mp4"
