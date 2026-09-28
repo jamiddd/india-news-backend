@@ -2515,6 +2515,60 @@ async def list_explainers(request: Request, db: AsyncSession = Depends(get_db)):
     return result_out
 
 
+EXPLAINER_SEARCH_LIMIT = 30
+
+
+@app.get(f"{settings.API_V1_STR}/explainers/search", response_model=ExplainersOut)
+@limiter.limit("60/minute")
+async def search_explainers(
+    request: Request,
+    q: str = Query(..., min_length=2, max_length=100, description="Search text matched against explainer questions and quick answers"),
+    limit: int = Query(EXPLAINER_SEARCH_LIMIT, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search behind the search screen's Explainers tab — same shape as
+    GET /timelines/search. Published explainers only; matches question and
+    quick_answer text, newest first. Registered before
+    /explainers/{explainer_id} so "search" is never parsed as an id."""
+    q = q.strip()
+    if len(q) < 2:
+        return ExplainersOut(explainers=[])
+    cache_key = f"cache:explainers:search:v1:{q.lower()}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
+
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{escaped}%"
+    result = await db.execute(
+        select(Explainer)
+        .where(
+            Explainer.status == "published",
+            or_(
+                Explainer.question.ilike(pattern, escape="\\"),
+                Explainer.quick_answer.ilike(pattern, escape="\\"),
+            ),
+        )
+        .order_by(desc(Explainer.published_at))
+        .limit(limit)
+    )
+    rows = result.scalars().all()
+    result_out = ExplainersOut(explainers=[
+        ExplainerListItemOut(
+            id=row.id,
+            question=row.question,
+            category=row.category,
+            teaser=_explainer_teaser(row.quick_answer or ""),
+            updated_at=row.updated_at,
+            has_audio=bool(row.audio_url),
+            image_url=row.hero_image_url,
+        )
+        for row in rows
+    ])
+    await _cache_set(cache_key, result_out.model_dump_json())
+    return result_out
+
+
 @app.get(f"{settings.API_V1_STR}/explainers/{{explainer_id}}", response_model=ExplainerDetailOut)
 @limiter.limit("60/minute")
 async def get_explainer(request: Request, explainer_id: int, db: AsyncSession = Depends(get_db)):
