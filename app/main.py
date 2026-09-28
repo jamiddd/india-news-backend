@@ -2489,6 +2489,7 @@ async def list_explainers(request: Request, db: AsyncSession = Depends(get_db)):
             teaser=_explainer_teaser(row.quick_answer or ""),
             updated_at=row.updated_at,
             has_audio=bool(row.audio_url),
+            image_url=row.hero_image_url,
         )
         for row in rows
     ])

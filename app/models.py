@@ -1353,6 +1353,11 @@ class Explainer(Base):
     # never written by Claude, so every title/outlet/url here is real and
     # verifiable, unlike a model's self-reported citation list.
     sources = Column(JSON, nullable=True)
+    # Derived at generation time from the trigger source cluster's own
+    # representative article image (explainer.py's derive_hero_image) —
+    # not admin-settable, recomputed fresh on every regenerate. Serves both
+    # the app's feed card (GET /explainers) and detail screen (GET
+    # /explainers/{id}); None when none of the attached sources have one.
     hero_image_url = Column(Text, nullable=True)
     audio_url = Column(Text, nullable=True)
     audio_duration_seconds = Column(Integer, nullable=True)

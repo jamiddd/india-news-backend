@@ -155,6 +155,23 @@ def _cluster_to_excerpt(cluster: StoryCluster) -> "explainer_script.SourceExcerp
     )
 
 
+def derive_hero_image(clusters: list[StoryCluster]) -> Optional[str]:
+    """The feed/detail hero photo for this explainer — the same
+    representative-article image its trigger cluster's own feed card would
+    show, tried cluster by cluster (in `clusters`' order, so the trigger
+    story wins) until one has an image. None if none of the attached
+    clusters have one; there is no admin override for this yet, so
+    regenerating always recomputes it fresh from the current sources."""
+    for cluster in clusters:
+        article = next(
+            (a for a in cluster.articles if a.id == cluster.representative_article_id),
+            cluster.articles[0] if cluster.articles else None,
+        )
+        if article and article.image_url:
+            return article.image_url
+    return None
+
+
 def _cluster_to_source(cluster: StoryCluster) -> dict:
     """The real, verifiable source entry served to the app for this cluster
     — a representative article's title/outlet/url, never anything Claude
@@ -224,6 +241,7 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             return False
 
         derived_sources = [_cluster_to_source(c) for c in clusters]
+        derived_hero_image = derive_hero_image(clusters)
 
         audio_fields: dict = {"audio_url": None, "audio_duration_seconds": None, "voice": None}
         cost = BASE_GENERATION_COST
@@ -251,6 +269,7 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             quick_answer=answer["quick_answer"],
             sections=answer["sections"],
             sources=derived_sources,
+            hero_image_url=derived_hero_image,
             generation_cost=cost,
             error=None,
             **audio_fields,
