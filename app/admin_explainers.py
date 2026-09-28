@@ -25,6 +25,7 @@ from app.admin_session import (
 from app.database import AsyncSessionLocal, get_db
 from app.models import Explainer, StoryCluster
 from app.services import explainer as explainer_service
+from app.services import explainer_sourcing
 from app.services.cluster_search import search_clusters
 from app.services.daily_brief_select import CORE_CATEGORIES, FALLBACK_CATEGORIES
 from app.services.timeline_audio import is_configured as audio_is_configured
@@ -36,6 +37,14 @@ TITLE = "Explainers"
 CATEGORIES = CORE_CATEGORIES + FALLBACK_CATEGORIES
 DEPTHS = [("quick", "Quick (~2m)"), ("standard", "Standard (~5m)"), ("deep", "Deep dive (~9m)")]
 VOICES = [("shubh", "Shubh (male)"), ("simran", "Simran (female)")]
+
+# How many candidate top stories the "from a top story" picker shows — a
+# corroboration floor (not just top headline_score) so a thin, single-outlet
+# blip never becomes a whole explainer; explainer_sourcing.suggest_background_clusters
+# needs real background to work from regardless, but this keeps the picker's
+# list itself meaningful.
+FROM_STORY_MIN_SOURCES = 3
+FROM_STORY_LIMIT = 15
 
 STATUS_LABELS = {
     "draft": "Draft",
@@ -133,11 +142,108 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     body = (
         "<h1>Explainers</h1>"
         "<p class=meta>Questions the newsroom has asked, and what the AI generated for them.</p>"
-        f"<p><a href='/admin/explainers/new'><button>+ New question</button></a></p>"
+        "<p><a href='/admin/explainers/new'><button>+ New question</button></a> "
+        "<a href='/admin/explainers/from-story'><button>+ From a top story</button></a></p>"
         f"{_suggestions_strip(terms)}"
         f"{_dashboard_table(rows)}"
     )
     return layout(TITLE, body, current="/admin/explainers")
+
+
+@router.get("/from-story", response_class=HTMLResponse)
+async def from_story_list(request: Request, db: AsyncSession = Depends(get_db)):
+    csrf = session_csrf(request)
+    if not csrf:
+        return RedirectResponse("/admin/explainers/login", status_code=303)
+    clusters = (
+        await db.execute(
+            select(StoryCluster)
+            .where(StoryCluster.distinct_source_count >= FROM_STORY_MIN_SOURCES)
+            .order_by(desc(StoryCluster.headline_score))
+            .limit(FROM_STORY_LIMIT)
+        )
+    ).scalars().all()
+    cards = "".join(
+        f"<div class=task>"
+        f"<p style='margin:0 0 4px'>{html.escape(c.headline)}</p>"
+        f"<p class=meta style='margin:0 0 8px'>{c.distinct_source_count} outlets &middot; cluster {c.id}</p>"
+        f"<a href='/admin/explainers/from-story/{c.id}/new'><button>Use this story &rarr;</button></a></div>"
+        for c in clusters
+    )
+    body = (
+        "<h1>New explainer from a top story</h1>"
+        "<p class=meta>Pick a story, then write the question yourself — background stories already "
+        "in our own database get found and pre-attached as sources on the next screen.</p>"
+        + (cards or "<p class=meta>No eligible stories right now.</p>")
+    )
+    return layout(TITLE, body, current="/admin/explainers")
+
+
+@router.get("/from-story/{cluster_id}/new", response_class=HTMLResponse)
+async def from_story_new_question_form(cluster_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    csrf = session_csrf(request)
+    if not csrf:
+        return RedirectResponse("/admin/explainers/login", status_code=303)
+    trigger = (await db.execute(select(StoryCluster).where(StoryCluster.id == cluster_id))).scalar_one_or_none()
+    if trigger is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    suggested_category = await explainer_sourcing.suggest_category(db, trigger)
+    category_options = custom_select("category", [(c, c.title()) for c in CATEGORIES], selected=suggested_category)
+    depth_options = custom_select("depth", DEPTHS, selected="standard")
+    story_context = (
+        f"<div class=task><p style='margin:0 0 4px'><strong>{html.escape(trigger.headline)}</strong></p>"
+        + (f"<p class=meta style='margin:0'>{html.escape(trigger.summary)}</p>" if trigger.summary else "")
+        + f"<p class=meta style='margin:8px 0 0'>{trigger.distinct_source_count} outlets &middot; "
+        f"cluster {trigger.id}</p></div>"
+    )
+    body = (
+        "<h1>New explainer from a top story</h1>"
+        f"{story_context}"
+        f"<form method=post action='/admin/explainers/from-story/{cluster_id}'>"
+        f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
+        "<label>Question<input name=question required "
+        "placeholder='e.g. Why did the Supreme Court order this exemption?'></label>"
+        f"<label>Category</label>{category_options}"
+        f"<label>Depth</label>{depth_options}"
+        "<label>Angle or notes for the writer AI (optional)"
+        "<textarea name=admin_notes rows=3 placeholder="
+        "\"e.g. focus on impact for importers, avoid jargon, mention RBI's likely response\"></textarea></label>"
+        "<button>Save as draft</button>"
+        "</form>"
+    )
+    return layout(TITLE, body, current="/admin/explainers")
+
+
+@router.post("/from-story/{cluster_id}")
+async def from_story_create(cluster_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    fields = await form_fields(request)
+    verify(request, fields)
+    trigger = (await db.execute(select(StoryCluster).where(StoryCluster.id == cluster_id))).scalar_one_or_none()
+    if trigger is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    question = (fields.get("question") or "").strip()
+    if not question:
+        return RedirectResponse(f"/admin/explainers/from-story/{cluster_id}/new", status_code=303)
+    category = fields.get("category") or CATEGORIES[0]
+    depth = fields.get("depth") or "standard"
+    admin_notes = (fields.get("admin_notes") or "").strip() or None
+
+    background = await explainer_sourcing.suggest_background_clusters(db, trigger, question=question)
+    # The trigger story itself always leads the source list, then whatever
+    # background suggest_background_clusters found, oldest first.
+    source_cluster_ids = [trigger.id] + [c.id for c in background]
+
+    row = Explainer(
+        question=question, category=category, depth=depth, admin_notes=admin_notes,
+        source_cluster_ids=source_cluster_ids,
+    )
+    async with AsyncSessionLocal() as session:
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        new_id = row.id
+    return RedirectResponse(f"/admin/explainers/{new_id}/review", status_code=303)
 
 
 @router.get("/new", response_class=HTMLResponse)
