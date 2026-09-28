@@ -84,6 +84,26 @@ async def invalidate_list_cache() -> None:
         pass
 
 
+# Matches main.py's get_explainer()'s own `cache_key` construction exactly —
+# duplicated here (not imported) since main.py doesn't expose it as a
+# reusable name; keep both in sync if that format ever changes.
+def _detail_cache_key(explainer_id: int) -> str:
+    return f"explainer:{explainer_id}:v1"
+
+
+async def invalidate_detail_cache(explainer_id: int) -> None:
+    """Was missing (2026-09-28 bug, caught backfilling source attribution):
+    invalidate_list_cache() only ever busted the feed LIST cache, never a
+    single explainer's own GET /explainers/{id} cache — so publish/archive/
+    restore, and any backfill script that edits a row directly, could leave
+    a stale detail response serving for up to CACHE_TTL_SECONDS after the
+    row actually changed."""
+    try:
+        await get_redis_client().delete(_detail_cache_key(explainer_id))
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _update(explainer_id: int, **fields) -> None:
     async with AsyncSessionLocal() as session:
         row = (await session.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
@@ -303,6 +323,11 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             error=None,
             **audio_fields,
         )
+        # A "Regenerate all" on an already-PUBLISHED explainer would
+        # otherwise leave its stale pre-regeneration content serving from
+        # cache for up to CACHE_TTL_SECONDS — see invalidate_detail_cache's
+        # own docstring for the rest of this bug class.
+        await invalidate_detail_cache(explainer_id)
         await set_status(explainer_id, "done", "ready for review")
         return True
 
@@ -329,17 +354,20 @@ async def regenerate_section(explainer_id: int, section_index: int) -> bool:
     sections = list(row.sections)
     sections[section_index] = {"heading": heading, "body": body}
     await _update(explainer_id, sections=sections)
+    await invalidate_detail_cache(explainer_id)
     return True
 
 
 async def publish(explainer_id: int) -> None:
     await _update(explainer_id, status="published", published_at=datetime.now(timezone.utc))
     await invalidate_list_cache()
+    await invalidate_detail_cache(explainer_id)
 
 
 async def archive(explainer_id: int) -> None:
     await _update(explainer_id, status="archived")
     await invalidate_list_cache()
+    await invalidate_detail_cache(explainer_id)
 
 
 async def restore(explainer_id: int) -> None:
@@ -348,3 +376,4 @@ async def restore(explainer_id: int) -> None:
     the dashboard (see the approved Explainers design mockup)."""
     await _update(explainer_id, status="published")
     await invalidate_list_cache()
+    await invalidate_detail_cache(explainer_id)

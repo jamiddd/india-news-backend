@@ -27,7 +27,7 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models import Explainer
-from app.services.explainer import derive_hero_image, fetch_source_clusters, invalidate_list_cache
+from app.services.explainer import derive_hero_image, fetch_source_clusters, invalidate_detail_cache, invalidate_list_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ async def main():
         ).scalars().all()
         logger.info(f"Found {len(rows)} explainer(s) with no hero_image_url.")
 
-        updated = 0
+        updated_ids: list[int] = []
         for row in rows:
             source_ids = list(row.source_cluster_ids or [])
             if not source_ids:
@@ -57,15 +57,21 @@ async def main():
             logger.info(f"  id={row.id}: {image_url}")
             if not dry_run:
                 row.hero_image_url = image_url
-                updated += 1
+                updated_ids.append(row.id)
 
         if dry_run:
             logger.info("Dry run — no rows changed.")
         else:
             await session.commit()
-            if updated:
+            for explainer_id in updated_ids:
+                # A published explainer's own GET /explainers/{id} response
+                # is cached separately from the feed list — invalidate_list_cache()
+                # alone can leave the stale pre-backfill hero_image_url
+                # serving until CACHE_TTL_SECONDS expires.
+                await invalidate_detail_cache(explainer_id)
+            if updated_ids:
                 await invalidate_list_cache()
-            logger.info(f"Done. Backfilled hero_image_url on {updated} explainer row(s).")
+            logger.info(f"Done. Backfilled hero_image_url on {len(updated_ids)} explainer row(s).")
 
 
 if __name__ == "__main__":

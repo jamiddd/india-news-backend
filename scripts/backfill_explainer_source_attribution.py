@@ -31,7 +31,7 @@ from sqlalchemy import select
 
 from app.database import AsyncSessionLocal
 from app.models import Explainer
-from app.services.explainer import cluster_to_source, fetch_source_clusters, invalidate_list_cache
+from app.services.explainer import cluster_to_source, fetch_source_clusters, invalidate_detail_cache, invalidate_list_cache
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ async def main():
         ).scalars().all()
         logger.info(f"Found {len(rows)} explainer(s) with source_cluster_ids.")
 
-        updated = 0
+        updated_ids: list[int] = []
         for row in rows:
             source_ids = list(row.source_cluster_ids or [])
             if not source_ids or not row.sources:
@@ -60,15 +60,22 @@ async def main():
             logger.info(f"  id={row.id}: {[s['source_count'] for s in new_sources]} outlets per source")
             if not dry_run:
                 row.sources = new_sources
-                updated += 1
+                updated_ids.append(row.id)
 
         if dry_run:
             logger.info("Dry run — no rows changed.")
         else:
             await session.commit()
-            if updated:
+            for explainer_id in updated_ids:
+                # A published explainer's own GET /explainers/{id} response
+                # is cached separately from the feed list — invalidate_list_cache()
+                # alone leaves the stale pre-backfill sources serving until
+                # CACHE_TTL_SECONDS expires (the bug that motivated adding
+                # invalidate_detail_cache() at all, caught running this script).
+                await invalidate_detail_cache(explainer_id)
+            if updated_ids:
                 await invalidate_list_cache()
-            logger.info(f"Done. Backfilled sources on {updated} explainer row(s).")
+            logger.info(f"Done. Backfilled sources on {len(updated_ids)} explainer row(s).")
 
 
 if __name__ == "__main__":
