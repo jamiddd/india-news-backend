@@ -349,6 +349,35 @@ class UserSourceBlock(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
+class SourceFollow(Base):
+    """A user subscribing to a Source for push notifications whenever it
+    publishes a new article — see app/services/source_updates.py. Distinct
+    from UserSourceFollow (the "star", ranking-boost only, no
+    notifications): this is a standing alert request, spaced/capped the
+    same way StoryFollow and TopicFollow are.
+
+    Needs no shared per-source state table the way StoryFollow
+    (ClusterFollowState) and TopicFollow (TopicClusterState) do — "genuine
+    development" there requires a bullet-overlap heuristic to filter out
+    paraphrased rewrites, but "this source published a new article" is
+    unambiguous. last_article_id is simply the newest Article.id from this
+    source already pushed (or skipped past); Article.id is assigned in
+    scrape order, so `Article.id > last_article_id` is the whole detection
+    step, computed directly against the articles table each run."""
+    __tablename__ = "source_follows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(Integer, ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    last_notified_at = Column(DateTime(timezone=True), nullable=True)
+    last_article_id = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("uq_source_follows_user_source", "user_id", "source_id", unique=True),
+    )
+
+
 class DailyCrossword(Base):
     """One validated, shared crossword for an Asia/Kolkata calendar date."""
     __tablename__ = "daily_crosswords"

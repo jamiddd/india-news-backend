@@ -80,6 +80,7 @@ from app.services.feed_gate import notifiable_clauses
 from app.services.job_lease import job_lease
 from app.services import story_updates
 from app.services import topic_updates
+from app.services import source_updates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -393,6 +394,20 @@ async def main():
                 logger.info(f"[Topic updates] developments={topic_found} pushed={topic_pushed}")
             except Exception:
                 logger.exception("Topic-update step failed")
+                await session.rollback()
+
+            # Followed-source updates, isolated the same way as story/topic
+            # updates above. No detect step — send_source_updates reads new
+            # Article rows for followed sources directly (see
+            # app/services/source_updates.py's module docstring).
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                source_pushed = await source_updates.send_source_updates(session, now, send_fn)
+                logger.info(f"[Source updates] pushed={source_pushed}")
+            except Exception:
+                logger.exception("Source-update step failed")
                 await session.rollback()
         finally:
             await session.rollback()

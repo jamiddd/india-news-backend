@@ -702,6 +702,17 @@ class BlockedSourcesOut(BaseModel):
     items: List[SourceOut]
 
 
+class FollowedSourceOut(BaseModel):
+    id: int
+    source: SourceOut
+    followed_at: datetime
+    last_notified_at: Optional[datetime] = None
+
+
+class FollowedSourcesOut(BaseModel):
+    items: List[FollowedSourceOut]
+
+
 class GameStatsOut(BaseModel):
     total_played: int
     total_completed: int

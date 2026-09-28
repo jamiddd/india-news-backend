@@ -56,7 +56,7 @@ else:
 from app.database import engine, Base, get_db
 from app.redis_client import get_redis_client
 from app.admin_session import admin_public_path, admin_url, session_csrf
-from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, TopicFollow, UserSourceFollow, UserSourceBlock, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, Explainer, utc_now
+from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCrossword, DailyPoll, PollOption, PollVote, GameSession, ReadEvent, SavedStory, StoryFollow, TopicFollow, UserSourceFollow, UserSourceBlock, SourceFollow, StoryReport, Donation, Feedback, StoryTimelineFeature, TimelineView, BreakingStory, AdminTopic, Announcement, DailyBrief, Explainer, utc_now
 from app.schemas import (
     DailyBriefItemOut,
     DailyBriefOut,
@@ -85,6 +85,7 @@ from app.schemas import (
     FollowTopicRequest, FollowedTopicOut, FollowedTopicsOut,
     StarredSourcesOut,
     BlockedSourcesOut,
+    FollowedSourceOut, FollowedSourcesOut,
     ReportStoryRequest,
     FeedbackRequest, FeedbackResponse,
     HeroStoriesOut, HeroStoryOut, HeroFramingOut,
@@ -111,6 +112,7 @@ from app.services.editorial_backgrounds import project_base_url
 from app.services import user_avatars as avatar_service
 from app.services import story_updates
 from app.services import topic_updates
+from app.services import source_updates
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
@@ -1590,16 +1592,17 @@ async def search_story_clusters(
     q: str = Query(..., min_length=2, description="Search query string across headlines and summaries"),
     limit: int = Query(20, ge=1, le=50),
     cursor: Optional[int] = Query(None, description="Cursor for pagination"),
+    source_id: Optional[int] = Query(None, description="Restrict results to this source's stories"),
     db: AsyncSession = Depends(get_db)
 ):
     await log_search_query(q)
     gate = gate_cache_marker()
-    cache_key = f"cache:search:{gate}:{q}:{limit}:{cursor or ''}"
+    cache_key = f"cache:search:{gate}:{q}:{limit}:{cursor or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return Response(content=cached, media_type="application/json")
 
-    clusters = await search_clusters(db, q, limit=limit, cursor=cursor, apply_gate=apply_feed_gate)
+    clusters = await search_clusters(db, q, limit=limit, cursor=cursor, apply_gate=apply_feed_gate, source_id=source_id)
 
     has_more = len(clusters) > limit
     items = clusters[:limit]
@@ -3852,3 +3855,87 @@ async def list_blocked_sources(
     )
     sources = result.scalars().all()
     return BlockedSourcesOut(items=[SourceOut.model_validate(s) for s in sources])
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/subscribe", status_code=200)
+@limiter.limit("60/minute")
+async def subscribe_to_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Starts push notifications whenever source_id publishes a new article
+    (see app/services/source_updates.py). Distinct from star_source (ranking
+    boost only, never notifies). Idempotent on (user_id, source_id); the
+    baseline last_article_id is the source's current newest article, so
+    subscribing never pushes for one that already existed."""
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    source_result = await db.execute(select(Source).where(Source.id == source_id))
+    if source_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    baseline = await source_updates.latest_article_id(db, source_id)
+    statement = pg_insert(SourceFollow).values(
+        user_id=user_id, source_id=source_id, last_article_id=baseline,
+    ).on_conflict_do_nothing(index_elements=["user_id", "source_id"])
+    await db.execute(statement)
+    await db.commit()
+    return {"message": "Subscribed"}
+
+
+@app.delete(f"{settings.API_V1_STR}/users/{{user_id}}/sources/{{source_id}}/subscribe", status_code=200)
+@limiter.limit("60/minute")
+async def unsubscribe_from_source(
+    request: Request,
+    user_id: str,
+    source_id: int,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(SourceFollow).where(
+            SourceFollow.user_id == user_id, SourceFollow.source_id == source_id,
+        )
+    )
+    follow = result.scalar_one_or_none()
+    if follow is not None:
+        await db.delete(follow)
+        await db.commit()
+    return {"message": "Unsubscribed"}
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/sources/subscribed", response_model=FollowedSourcesOut)
+@limiter.limit("60/minute")
+async def list_subscribed_sources(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    result = await db.execute(
+        select(SourceFollow, Source)
+        .join(Source, Source.id == SourceFollow.source_id)
+        .where(SourceFollow.user_id == user_id)
+        .order_by(Source.name)
+    )
+    rows = result.all()
+    return FollowedSourcesOut(
+        items=[
+            FollowedSourceOut(
+                id=follow.id,
+                source=SourceOut.model_validate(source),
+                followed_at=follow.created_at,
+                last_notified_at=follow.last_notified_at,
+            )
+            for follow, source in rows
+        ]
+    )
