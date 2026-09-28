@@ -172,7 +172,7 @@ def derive_hero_image(clusters: list[StoryCluster]) -> Optional[str]:
     return None
 
 
-def _cluster_to_source(cluster: StoryCluster) -> dict:
+def cluster_to_source(cluster: StoryCluster) -> dict:
     """The real, verifiable source entry served to the app for this cluster
     — a representative article's title/outlet/url, never anything Claude
     said. Prefers the cluster's own representative_article_id (the same
@@ -269,7 +269,7 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
             await set_status(explainer_id, "error", "Claude did not return a valid explainer")
             return False
 
-        derived_sources = [_cluster_to_source(c) for c in clusters]
+        derived_sources = [cluster_to_source(c) for c in clusters]
         derived_hero_image = derive_hero_image(clusters)
 
         audio_fields: dict = {"audio_url": None, "audio_duration_seconds": None, "voice": None}
