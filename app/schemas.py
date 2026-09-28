@@ -344,6 +344,10 @@ class UserPreferences(BaseModel):
     # Independent of the followed-story switch above — a user can mute one
     # without the other.
     topic_update_notifications_enabled: bool = True
+    # Master switch for subscribed-source pushes (see app/services/source_updates.py).
+    # Independent of the two switches above — a user can mute one without
+    # the others.
+    source_update_notifications_enabled: bool = True
     # List of "HH:MM" (UTC) — one digest notification per entry, per day. The
     # client converts each local time-of-day pick to UTC before saving (see
     # NewsViewModel's preferred-time setter), so the backend never needs a

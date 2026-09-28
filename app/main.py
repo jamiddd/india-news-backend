@@ -1908,8 +1908,23 @@ async def list_story_clusters(
                 except (ValueError, TypeError):
                     pass
             else:
+                # Both is_source_filter and the plain category/region branch
+                # above order by (last_updated_at DESC, id DESC), not id
+                # alone — last_updated_at isn't monotonic with id (a cluster
+                # gaining new corroborating coverage bumps it back to the top
+                # regardless of its id), so a bare id cursor can silently
+                # duplicate or skip rows across pages once that happens
+                # mid-scroll. Compound "<iso_datetime>:<id>" cursor instead,
+                # same shape as is_all's above. Malformed/stale cursors
+                # (e.g. the old bare-int format, from a client mid-scroll
+                # across this deploy) are treated as "start over" rather
+                # than a 500, same as is_all's handling.
                 try:
-                    query = query.where(StoryCluster.id < int(cursor))
+                    ts_str, id_str = cursor.rsplit(":", 1)
+                    cursor_dt = datetime.fromisoformat(ts_str)
+                    query = query.where(
+                        tuple_(StoryCluster.last_updated_at, StoryCluster.id) < (cursor_dt, int(id_str))
+                    )
                 except (ValueError, TypeError):
                     pass
 
@@ -1931,7 +1946,7 @@ async def list_story_clusters(
                 last_explore_boost = EXPLORE_PROMOTED_BOOST if last.explore_status == "promoted" else 1.0
                 next_cursor = f"{last.headline_score * last_boost * last_explore_boost}:{last.id}"
             else:
-                next_cursor = str(last.id)
+                next_cursor = f"{last.last_updated_at.isoformat()}:{last.id}"
         else:
             next_cursor = None
 
