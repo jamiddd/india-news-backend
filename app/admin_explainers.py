@@ -65,6 +65,11 @@ GENERATE_CONFIRM = (
     "Generate this explainer? This calls Claude (roughly Rs 7) — add narration and it also calls "
     "Sarvam (roughly Rs 3 more) — and takes a couple of minutes."
 )
+REGENERATE_AUDIO_CONFIRM = (
+    "Regenerate audio narration for this explainer? This re-voices the current answer (roughly Rs 3, "
+    "Claude + Sarvam) without touching the written content, and replaces the existing narration for "
+    "everyone who has already listened to or cached it."
+)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -396,6 +401,7 @@ async def review(explainer_id: int, request: Request, q: str = "", db: AsyncSess
     status = await explainer_service.get_status(explainer_id)
     running = status.get("state") == "generating" or await explainer_service.in_progress(explainer_id)
     refresh = "<script>setTimeout(function(){location.reload()},8000)</script>" if running else ""
+    csrf_input = f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
 
     header = (
         f"<h1>{html.escape(row.question)}</h1>"
@@ -443,6 +449,18 @@ async def review(explainer_id: int, request: Request, q: str = "", db: AsyncSess
         f"&middot; {html.escape(row.voice or '')}</p>"
         if row.audio_url else ""
     )
+    if not audio_is_configured():
+        regenerate_audio_block = ""
+    elif running:
+        regenerate_audio_block = "<button disabled>Generating&hellip;</button>"
+    else:
+        regenerate_audio_block = (
+            f"<form method=post action='/admin/explainers/{explainer_id}/regenerate-audio' style='display:inline' "
+            f"onsubmit=\"return confirm('{html.escape(REGENERATE_AUDIO_CONFIRM, quote=True)}')\">"
+            f"{csrf_input}"
+            f"<label>Voice</label>{custom_select('voice', VOICES, selected=row.voice or 'shubh')}"
+            f"<button>{'Regenerate audio' if row.audio_url else 'Generate audio'}</button></form>"
+        )
     quick_answer_block = (
         f"<div class=task><h2>Quick answer</h2><p>{html.escape(row.quick_answer or '')}</p></div>"
     )
@@ -452,7 +470,6 @@ async def review(explainer_id: int, request: Request, q: str = "", db: AsyncSess
     sources_block = _sources_block(row.sources)
 
     actions = []
-    csrf_input = f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
     if row.status == "ready_for_review":
         actions.append(
             f"<form method=post action='/admin/explainers/{explainer_id}/generate' style='display:inline' "
@@ -474,7 +491,10 @@ async def review(explainer_id: int, request: Request, q: str = "", db: AsyncSess
             f"{csrf_input}<button>Restore &amp; republish</button></form>"
         )
 
-    body = header + audio_block + quick_answer_block + sections_block + sources_block + "".join(actions)
+    body = (
+        header + audio_block + regenerate_audio_block + quick_answer_block + sections_block
+        + sources_block + "".join(actions) + refresh
+    )
     return layout(TITLE, body, current="/admin/explainers")
 
 
@@ -502,6 +522,18 @@ async def status_json(explainer_id: int, request: Request):
         "state": "generating" if running else status.get("state", "idle"),
         "message": status.get("message", ""),
     })
+
+
+@router.post("/{explainer_id}/regenerate-audio")
+async def regenerate_audio(explainer_id: int, request: Request, background_tasks: BackgroundTasks):
+    fields = await form_fields(request)
+    verify(request, fields)
+    if await explainer_service.in_progress(explainer_id):
+        return RedirectResponse(f"/admin/explainers/{explainer_id}/review", status_code=303)
+    voice = fields.get("voice") or "shubh"
+    await explainer_service.set_status(explainer_id, "generating", "starting")
+    background_tasks.add_task(explainer_service.run_regenerate_audio_task, explainer_id, voice=voice)
+    return RedirectResponse(f"/admin/explainers/{explainer_id}/review", status_code=303)
 
 
 @router.post("/{explainer_id}/regenerate-section")

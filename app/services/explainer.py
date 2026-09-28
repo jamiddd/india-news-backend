@@ -368,6 +368,79 @@ async def regenerate_section(explainer_id: int, section_index: int) -> bool:
     return True
 
 
+async def run_regenerate_audio_task(explainer_id: int, *, voice: Optional[str] = None) -> None:
+    """regenerate_audio as a fire-and-forget task (the admin review page's
+    "Regenerate audio" button): whatever happens, status ends as done/error,
+    never stuck on "generating"."""
+    try:
+        await regenerate_audio(explainer_id, voice=voice)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("explainer %s audio regeneration crashed", explainer_id)
+        await set_status(explainer_id, "error", str(exc))
+
+
+async def regenerate_audio(explainer_id: int, *, voice: Optional[str] = None) -> bool:
+    """Re-voice an already-generated explainer's EXISTING quick_answer/
+    sections through the current narration pipeline, without touching the
+    written content or row.status. Lets the admin add/replace narration
+    (e.g. to pick up explainer_narration.py's spoken-script step for a row
+    narrated before it existed, or to switch voice) on an already-published
+    explainer without re-running, and re-paying for, the Claude answer
+    generation. Shares build_explainer's job lease so the two can never run
+    concurrently on the same row."""
+    async with job_lease(_lease_job(explainer_id), LEASE_TTL_SECONDS) as held:
+        if not held:
+            await set_status(explainer_id, "error", "another generation is already running")
+            return False
+
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
+        if row is None:
+            await set_status(explainer_id, "error", "explainer not found")
+            return False
+        if not row.quick_answer or not row.sections:
+            await set_status(explainer_id, "error", "generate the explainer before narrating it")
+            return False
+        if not timeline_audio.is_configured():
+            await set_status(explainer_id, "error", "audio is not configured on this server")
+            return False
+
+        await set_status(explainer_id, "generating", "voicing")
+        speaker = voice or row.voice or "shubh"
+        spoken_script = await explainer_narration.write_explainer_spoken_script(
+            row.question, row.quick_answer, row.sections
+        )
+        if spoken_script is not None:
+            chunks, intro_chars = timeline_audio.build_chunks(spoken_script)
+        else:
+            logger.warning(
+                "explainer %s: spoken script generation failed; narrating the written text verbatim", explainer_id
+            )
+            chunks = [row.quick_answer] + [s["body"] for s in row.sections]
+            intro_chars = 0
+        rendered = await timeline_audio.render_and_upload(
+            f"explainer {explainer_id}", chunks, intro_chars,
+            f"explainers/{explainer_id}.{timeline_audio.AUDIO_FILE_EXTENSION}",
+            speaker=speaker,
+        )
+        if rendered is None:
+            await set_status(explainer_id, "error", "voicing failed")
+            return False
+
+        url, duration_seconds, _offsets = rendered
+        await _update(
+            explainer_id,
+            audio_url=url,
+            audio_duration_seconds=duration_seconds,
+            voice=speaker,
+            generation_cost=(row.generation_cost or 0.0) + NARRATION_COST,
+        )
+        await invalidate_list_cache()
+        await invalidate_detail_cache(explainer_id)
+        await set_status(explainer_id, "done", "audio regenerated")
+        return True
+
+
 async def publish(explainer_id: int) -> None:
     await _update(explainer_id, status="published", published_at=datetime.now(timezone.utc))
     await invalidate_list_cache()
