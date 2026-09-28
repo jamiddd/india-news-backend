@@ -8,6 +8,7 @@ daily selection.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -35,6 +36,21 @@ RUNNING_TTL_SECONDS = 10 * 60
 # Brief admin page's "roughly Rs 8" framing rather than an exact ledger.
 BASE_GENERATION_COST = 7.0
 NARRATION_COST = 3.0
+
+
+def _audio_object_name(explainer_id: int, chunks: list[str]) -> str:
+    """Object name for this narration's audio, with a short content hash of
+    `chunks` baked in so a regeneration always mints a brand-new URL (like
+    timeline_audio.generate_audio's own anchor-cluster + hash naming).
+    Without this, a fixed `explainers/{id}.m4a` name is server-overwritten on
+    regeneration but the client's on-device narration cache
+    (NarrationAudioCache.kt, a raw byte cache keyed by URL that never
+    consults Cache-Control) and any CDN edge cache keep serving the
+    pre-regeneration bytes for that same URL — the admin's "Regenerate
+    audio" button appeared to do nothing (2026-09-28)."""
+    canonical = json.dumps(chunks, sort_keys=True)
+    content_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return f"explainers/{explainer_id}-{content_hash}.{timeline_audio.AUDIO_FILE_EXTENSION}"
 
 
 def _lease_job(explainer_id: int) -> str:
@@ -310,7 +326,7 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
                 intro_chars = 0
             rendered = await timeline_audio.render_and_upload(
                 f"explainer {explainer_id}", chunks, intro_chars,
-                f"explainers/{explainer_id}.{timeline_audio.AUDIO_FILE_EXTENSION}",
+                _audio_object_name(explainer_id, chunks),
                 speaker=speaker,
             )
             if rendered is not None:
@@ -420,7 +436,7 @@ async def regenerate_audio(explainer_id: int, *, voice: Optional[str] = None) ->
             intro_chars = 0
         rendered = await timeline_audio.render_and_upload(
             f"explainer {explainer_id}", chunks, intro_chars,
-            f"explainers/{explainer_id}.{timeline_audio.AUDIO_FILE_EXTENSION}",
+            _audio_object_name(explainer_id, chunks),
             speaker=speaker,
         )
         if rendered is None:
