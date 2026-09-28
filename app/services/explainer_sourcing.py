@@ -60,16 +60,32 @@ def _significant_words(text: str) -> list[str]:
     return [w for w in _WORD_RE.findall(text) if len(w) >= 4 and w.lower() not in STOPWORDS]
 
 
-def _is_distinctive(word: str) -> bool:
+def _is_distinctive(word: str, *, is_first_word: bool) -> bool:
     """A word likely to recur verbatim across independently-written outlets'
     headlines about the same story: hyphenated (compound/technical terms
     like "third-language") or containing an uppercase letter (proper nouns
-    and acronyms like "CBSE", "Bhandari"). This corpus's headlines use
-    ordinary sentence case, not headline title-case (confirmed against real
-    feed data during the 2026-09-28 test run), so capitalisation here
-    reliably flags a name rather than just "first word of a title-cased
-    headline"."""
-    return "-" in word or any(ch.isupper() for ch in word)
+    and acronyms like "CBSE", "Bhandari") — UNLESS `word` is the first word
+    of its text, where a capital letter proves nothing: English capitalises
+    the first word of any sentence whether or not it's a proper noun.
+
+    Confirmed as a real bug in production, 2026-09-28: the first published
+    explainer's question was "Why did the protests erupt in Ujjain?", grounded
+    in a cluster headlined "Protests erupt in Ujjain over partial demolition
+    of Shahi Masjid...". "Protests" — capitalised only because it opened the
+    headline — got tried before "Ujjain", "Shahi", or "Masjid" (the actual
+    proper nouns, a few words later), and being an extremely common news
+    word, its ILIKE search alone returned enough unrelated "protest" stories
+    (a Congress protest in Jharkhand, an LPU campus story, ...) to fill the
+    whole background-cluster budget before any real anchor term got a turn.
+    A sentence-initial word still counts as distinctive if it's hyphenated or
+    a true acronym (ALL-CAPS, e.g. a headline that happens to start with
+    "CBSE") — only a merely-capitalised first letter in first position is
+    untrustworthy."""
+    if "-" in word:
+        return True
+    if is_first_word:
+        return word.isupper()
+    return any(ch.isupper() for ch in word)
 
 
 def candidate_phrases(*texts: str, max_phrases: int = MAX_CANDIDATE_PHRASES) -> list[str]:
@@ -102,8 +118,8 @@ def candidate_phrases(*texts: str, max_phrases: int = MAX_CANDIDATE_PHRASES) -> 
     phrases: list[str] = []
 
     for words in per_text_words:
-        for w in words:
-            if _is_distinctive(w) and w not in phrases:
+        for i, w in enumerate(words):
+            if _is_distinctive(w, is_first_word=(i == 0)) and w not in phrases:
                 phrases.append(w)
 
     for n in (2, 3, 4):

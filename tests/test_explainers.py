@@ -138,3 +138,29 @@ def test_candidate_phrases_deduplicates_and_respects_max_phrases():
     phrases = candidate_phrases("test test test test test", max_phrases=3)
     assert len(phrases) <= 3
     assert len(phrases) == len(set(phrases))
+
+
+def test_candidate_phrases_does_not_prioritize_a_merely_sentence_initial_capital():
+    # Regression case: the first published explainer ("Why did the protests
+    # erupt in Ujjain?") was grounded in 6 unrelated "protest" stories
+    # because "Protests" — capitalised only for opening the headline, not
+    # because it's a proper noun — was tried before any of the headline's
+    # real proper nouns (Ujjain, Shahi, Masjid), and alone returned enough
+    # generic hits to fill the whole background budget.
+    headline = "Protests erupt in Ujjain over partial demolition of Shahi Masjid for road widening"
+    phrases = candidate_phrases(headline)
+    distinctive_unigrams = [
+        p for p in phrases
+        if " " not in p and p in ("Protests", "Ujjain", "Shahi", "Masjid")
+    ]
+    assert "Protests" not in distinctive_unigrams
+    assert {"Ujjain", "Shahi", "Masjid"} <= set(distinctive_unigrams)
+
+
+def test_candidate_phrases_still_allows_a_sentence_initial_acronym_or_hyphenated_word():
+    # The first-word exemption should only defeat a bare capital letter, not
+    # a genuine acronym or hyphenated compound that happens to open a text.
+    phrases = candidate_phrases("CBSE issues fresh guidance")
+    assert "CBSE" in phrases
+    phrases = candidate_phrases("Third-language rule eased for Class VI")
+    assert "Third-language" in phrases
