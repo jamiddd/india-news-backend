@@ -176,18 +176,47 @@ def _cluster_to_source(cluster: StoryCluster) -> dict:
     """The real, verifiable source entry served to the app for this cluster
     — a representative article's title/outlet/url, never anything Claude
     said. Prefers the cluster's own representative_article_id (the same
-    article the rest of the app treats as this story's lead)."""
+    article the rest of the app treats as this story's lead).
+
+    Also carries `source_count`/`outlet_names`/`outlet_urls` (2026-09-28,
+    added after the app's first citation-list design turned out misleading):
+    tapping a source deep-links to the full StoryCluster (openExplainerSource
+    -> selectCluster), the same multi-outlet aggregated story page any feed
+    card opens to — never a single publisher's own article page. A UI built
+    from just `outlet`/`url` alone (one favicon, one name) implied the
+    opposite. These extra fields let the app show the same "{Source1},
+    {Source2} and N others" + stacked-favicon treatment FeedNewsItemProduction
+    already uses for the identical fact (a story is corroborated by multiple
+    outlets), instead of inventing a different-looking pattern for the same
+    underlying reality."""
     article = next(
         (a for a in cluster.articles if a.id == cluster.representative_article_id),
         cluster.articles[0] if cluster.articles else None,
     )
+    outlet_names: list[str] = []
+    outlet_urls: list[str] = []
+    seen_source_ids: set[int] = set()
+    for a in cluster.articles:
+        if a.source_id in seen_source_ids or not a.source:
+            continue
+        seen_source_ids.add(a.source_id)
+        outlet_names.append(a.source.name)
+        outlet_urls.append(a.url)
+        if len(outlet_names) == 2:
+            break
     if article is None:
-        return {"title": cluster.headline, "outlet": "", "url": None, "cluster_id": cluster.id}
+        return {
+            "title": cluster.headline, "outlet": "", "url": None, "cluster_id": cluster.id,
+            "source_count": cluster.distinct_source_count or 0, "outlet_names": outlet_names, "outlet_urls": outlet_urls,
+        }
     return {
         "title": article.title,
         "outlet": article.source.name if article.source else "",
         "url": article.url,
         "cluster_id": cluster.id,
+        "source_count": cluster.distinct_source_count or len(seen_source_ids),
+        "outlet_names": outlet_names,
+        "outlet_urls": outlet_urls,
     }
 
 

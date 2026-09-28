@@ -816,8 +816,15 @@ class ExplainerSourceOut(BaseModel):
     url: Optional[str] = None
     # The real StoryCluster this source came from (see
     # app.services.explainer._cluster_to_source) — lets the app deep-link
-    # a source chip straight to that story.
+    # a source chip straight to that story. That story page aggregates
+    # every outlet that covered it, not just `outlet` above — source_count/
+    # outlet_names/outlet_urls (2026-09-28) exist so the app can show that
+    # plainly ("Outlet A, Outlet B and N others" + stacked favicons) rather
+    # than implying this is one publisher's own article.
     cluster_id: int
+    source_count: int = 1
+    outlet_names: List[str] = []
+    outlet_urls: List[str] = []
 
 
 class ExplainerListItemOut(BaseModel):
