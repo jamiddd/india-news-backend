@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.database import AsyncSessionLocal
 from app.models import Article, Explainer, StoryCluster
 from app.redis_client import get_redis_client
-from app.services import explainer_script, timeline_audio
+from app.services import explainer_narration, explainer_script, timeline_audio
 from app.services.job_lease import job_lease
 
 logger = logging.getLogger(__name__)
@@ -297,9 +297,19 @@ async def build_explainer(explainer_id: int, *, narrate: bool = False, voice: Op
         if narrate and timeline_audio.is_configured():
             await set_status(explainer_id, "generating", "voicing")
             speaker = voice or "shubh"
-            chunks = [answer["quick_answer"]] + [s["body"] for s in answer["sections"]]
+            spoken_script = await explainer_narration.write_explainer_spoken_script(
+                row.question, answer["quick_answer"], answer["sections"]
+            )
+            if spoken_script is not None:
+                chunks, intro_chars = timeline_audio.build_chunks(spoken_script)
+            else:
+                logger.warning(
+                    "explainer %s: spoken script generation failed; narrating the written text verbatim", explainer_id
+                )
+                chunks = [answer["quick_answer"]] + [s["body"] for s in answer["sections"]]
+                intro_chars = 0
             rendered = await timeline_audio.render_and_upload(
-                f"explainer {explainer_id}", chunks, 0,
+                f"explainer {explainer_id}", chunks, intro_chars,
                 f"explainers/{explainer_id}.{timeline_audio.AUDIO_FILE_EXTENSION}",
                 speaker=speaker,
             )
