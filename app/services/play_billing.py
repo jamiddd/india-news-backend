@@ -17,6 +17,7 @@ more — it does not persist an entitlement ledger.
 """
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -29,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
 _API_BASE = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications"
+
+# A purchase just completed on-device can briefly 404 against the Play
+# Developer API before Play's own backend has finished propagating it —
+# without a retry here, verify-purchase called right after a purchase (the
+# only time it's ever called) intermittently rejects a real, paid-for
+# purchase. Total worst case ~7s added to one verify-purchase call.
+_LOOKUP_RETRY_DELAYS_SECS = (1.0, 2.0, 4.0)
 
 _session: Optional[AuthorizedSession] = None
 
@@ -58,10 +66,23 @@ class PurchaseVerification:
     reason: str  # human-readable, safe to log; never shown to the end user
 
 
+def _get_with_retry(session: AuthorizedSession, url: str):
+    """GETs url, retrying on 404 only — see _LOOKUP_RETRY_DELAYS_SECS. Any
+    other status (200, 403, 500, ...) is returned immediately; those aren't
+    propagation lag and retrying them wouldn't help."""
+    resp = session.get(url, timeout=10)
+    for delay in _LOOKUP_RETRY_DELAYS_SECS:
+        if resp.status_code != 404:
+            break
+        time.sleep(delay)
+        resp = session.get(url, timeout=10)
+    return resp
+
+
 def _verify_subscription_sync(package_name: str, purchase_token: str) -> PurchaseVerification:
     session = _get_session()
     url = f"{_API_BASE}/{package_name}/purchases/subscriptionsv2/tokens/{purchase_token}"
-    resp = session.get(url, timeout=10)
+    resp = _get_with_retry(session, url)
     if resp.status_code != 200:
         return PurchaseVerification(False, f"subscriptionsv2 lookup failed: {resp.status_code} {resp.text[:200]}")
     state = resp.json().get("subscriptionState")
@@ -76,7 +97,7 @@ def _verify_subscription_sync(package_name: str, purchase_token: str) -> Purchas
 def _verify_product_sync(package_name: str, product_id: str, purchase_token: str) -> PurchaseVerification:
     session = _get_session()
     url = f"{_API_BASE}/{package_name}/purchases/products/{product_id}/tokens/{purchase_token}"
-    resp = session.get(url, timeout=10)
+    resp = _get_with_retry(session, url)
     if resp.status_code != 200:
         return PurchaseVerification(False, f"products lookup failed: {resp.status_code} {resp.text[:200]}")
     # purchaseState: 0 = purchased, 1 = cancelled, 2 = pending.
