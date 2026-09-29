@@ -353,6 +353,12 @@ class UserPreferences(BaseModel):
     # NewsViewModel's preferred-time setter), so the backend never needs a
     # timezone field or per-user tz math. Empty list = no daily digests.
     daily_notification_times_utc: List[str] = Field(default_factory=list)
+    # Master switch for the once-daily "today's Daily Brief is ready" push,
+    # fixed at ~06:30 IST rather than user-configurable like
+    # daily_notification_times_utc above (see
+    # app/services/morning_brief_notify.py). Independent of every other
+    # toggle here.
+    morning_brief_notifications_enabled: bool = False
     # Source.id (as a string key, since JSON object keys are always strings)
     # -> boost multiplier applied to headline_score in the "All Stories" feed
     # only (see GET /clusters's source_weights query param). A source absent

@@ -81,6 +81,7 @@ from app.services.job_lease import job_lease
 from app.services import story_updates
 from app.services import topic_updates
 from app.services import source_updates
+from app.services import morning_brief_notify
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -408,6 +409,19 @@ async def main():
                 logger.info(f"[Source updates] pushed={source_pushed}")
             except Exception:
                 logger.exception("Source-update step failed")
+                await session.rollback()
+
+            # Morning Brief readiness push, isolated the same way as the
+            # three follow-driven steps above — own opt-in, own dedup, must
+            # not be undone or masked by a failure elsewhere in this run.
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                brief_pushed = await morning_brief_notify.send_morning_brief_notifications(session, now, send_fn)
+                logger.info(f"[Morning Brief] pushed={brief_pushed}")
+            except Exception:
+                logger.exception("Morning-Brief step failed")
                 await session.rollback()
         finally:
             await session.rollback()
