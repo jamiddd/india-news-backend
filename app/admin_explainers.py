@@ -38,13 +38,8 @@ CATEGORIES = CORE_CATEGORIES + FALLBACK_CATEGORIES
 DEPTHS = [("quick", "Quick (~2m)"), ("standard", "Standard (~5m)"), ("deep", "Deep dive (~9m)")]
 VOICES = [("shubh", "Shubh (male)"), ("simran", "Simran (female)")]
 
-# How many candidate top stories the "from a top story" picker shows — a
-# corroboration floor (not just top headline_score) so a thin, single-outlet
-# blip never becomes a whole explainer; explainer_sourcing.suggest_background_clusters
-# needs real background to work from regardless, but this keeps the picker's
-# list itself meaningful.
-FROM_STORY_MIN_SOURCES = 3
-FROM_STORY_LIMIT = 15
+# How many matches the "from a top story" search shows at once.
+FROM_STORY_SEARCH_LIMIT = 20
 
 STATUS_LABELS = {
     "draft": "Draft",
@@ -155,31 +150,40 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     return layout(TITLE, body, current="/admin/explainers")
 
 
-@router.get("/from-story", response_class=HTMLResponse)
-async def from_story_list(request: Request, db: AsyncSession = Depends(get_db)):
-    csrf = session_csrf(request)
-    if not csrf:
-        return RedirectResponse("/admin/explainers/login", status_code=303)
-    clusters = (
-        await db.execute(
-            select(StoryCluster)
-            .where(StoryCluster.distinct_source_count >= FROM_STORY_MIN_SOURCES)
-            .order_by(desc(StoryCluster.headline_score))
-            .limit(FROM_STORY_LIMIT)
-        )
-    ).scalars().all()
-    cards = "".join(
+def _from_story_search_form(q: str) -> str:
+    return (
+        "<form method=get action='/admin/explainers/from-story'>"
+        "<label>Search stories"
+        f"<input name=q value='{html.escape(q)}' placeholder='e.g. rupee dollar RBI'></label>"
+        "<button type=submit>Search</button>"
+        "</form>"
+    )
+
+
+def _from_story_cards(clusters: list[StoryCluster]) -> str:
+    if not clusters:
+        return "<p class=meta>No matching stories.</p>"
+    return "".join(
         f"<div class=task>"
         f"<p style='margin:0 0 4px'>{html.escape(c.headline)}</p>"
         f"<p class=meta style='margin:0 0 8px'>{c.distinct_source_count} outlets &middot; cluster {c.id}</p>"
         f"<a href='/admin/explainers/from-story/{c.id}/new'><button>Use this story &rarr;</button></a></div>"
         for c in clusters
     )
+
+
+@router.get("/from-story", response_class=HTMLResponse)
+async def from_story_list(request: Request, q: str = "", db: AsyncSession = Depends(get_db)):
+    csrf = session_csrf(request)
+    if not csrf:
+        return RedirectResponse("/admin/explainers/login", status_code=303)
+    clusters = await search_clusters(db, q, limit=FROM_STORY_SEARCH_LIMIT) if q.strip() else []
     body = (
         "<h1>New explainer from a top story</h1>"
-        "<p class=meta>Pick a story, then write the question yourself — background stories already "
+        "<p class=meta>Search for a story, then write the question yourself — background stories already "
         "in our own database get found and pre-attached as sources on the next screen.</p>"
-        + (cards or "<p class=meta>No eligible stories right now.</p>")
+        + _from_story_search_form(q)
+        + (_from_story_cards(clusters) if q.strip() else "")
     )
     return layout(TITLE, body, current="/admin/explainers")
 
