@@ -21,7 +21,7 @@ from app.services.timeline_audio import SCRIPT_VERSION, SIGN_OFF
 logger = logging.getLogger(__name__)
 
 MODEL = "claude-sonnet-5"
-ATTEMPTS = 2
+ATTEMPTS = 3
 # About one "uhm"/"uh" per 650 characters, same as the timeline scripts.
 TARGET_CHARS = 2700
 
@@ -84,7 +84,9 @@ words per story, two or three sentences. Rules:
   "Meanwhile,", "In business,", "On the sports front,", "And in tech,"). The \
   first story needs no transition beyond the intro.
 - Write EVERY number, amount and percentage in words ("twelve thousand", "two \
-  lakh crore rupees"), with no digits at all. Indian units for rupees.
+  lakh crore rupees"), with no digits at all. Indian units for rupees. This \
+  includes a numeral inside a title or a name: write it the way it is said \
+  ("Drishyam three", "iPhone seventeen", "Article three seventy").
 - Letter-by-letter acronyms are written with spaces ("B J P", "R B I", "A I", \
   "I P O"). Acronyms said as words (ISRO, NASA, OPEC) stay as words. Write \
   model and brand names the way they sound.
@@ -120,12 +122,15 @@ def _user_content(stories: list[BriefStory], kind: str = "brief") -> str:
 _SPOKEN_FORBIDDEN = re.compile(r"[\d\[\]()*#;:]|\.\.|—")
 
 
-def finalize_script(raw: object, stories: list[BriefStory]) -> Optional[dict]:
+def finalize_script(
+    raw: object, stories: list[BriefStory], problems: Optional[list[str]] = None
+) -> Optional[dict]:
     """Validate Claude's JSON against the stories we sent and stamp it with
     the version timeline_audio's voicing expects. None on any mismatch: the
     audio depends on cluster ids lining up one-to-one with the offsets the app
     highlights, and on the spoken text being free of digits/markup the voice
-    would read badly."""
+    would read badly. problems, when given, collects the offending spoken text
+    so write_script can tell the next attempt what to repair."""
     if not isinstance(raw, dict):
         return None
     intro, closing, items = raw.get("intro"), raw.get("closing"), raw.get("items")
@@ -144,30 +149,59 @@ def finalize_script(raw: object, stories: list[BriefStory]) -> Optional[dict]:
         out_items.append({"cluster_id": story.cluster_id, "summary": summary.strip(), "spoken": spoken.strip()})
 
     script = {"version": SCRIPT_VERSION, "intro": intro.strip(), "items": out_items, "closing": closing.strip()}
-    for text in [script["intro"], script["closing"]] + [i["spoken"] for i in out_items]:
-        if _SPOKEN_FORBIDDEN.search(text):
+    spoken_texts = [script["intro"], script["closing"]] + [i["spoken"] for i in out_items]
+    bad = [text for text in spoken_texts if _SPOKEN_FORBIDDEN.search(text)]
+    if bad:
+        for text in bad:
             logger.warning("daily brief script rejected: spoken text has digits/markup: %r", text[:120])
-            return None
+        if problems is not None:
+            problems.extend(text.strip() for text in bad)
+        return None
     return script
+
+
+def _retry_note(problems: list[str]) -> str:
+    """Appended to the user message after a rejected attempt: the exact text
+    that failed, so the next attempt repairs it instead of writing the same
+    thing again. A numeral inside a film or product name is the usual cause,
+    and without this note the retry sees an identical prompt."""
+    if not problems:
+        return (
+            "\n\nYour last attempt was rejected: it did not match the JSON shape, the "
+            "cluster ids and their order, or the length rules above. Follow them exactly."
+        )
+    quoted = "\n".join(f'- "{p[:200]}"' for p in problems[:4])
+    return (
+        "\n\nYour last attempt was rejected. This spoken text contains a digit or "
+        f"punctuation the voice cannot read:\n{quoted}\n"
+        "Write it again with every numeral spelled out in words, including a numeral "
+        'that is part of a title or a name ("Drishyam three", "iPhone seventeen"), and '
+        "with no brackets, parentheses, asterisks, hashes, semicolons, colons, double "
+        "dots or em dashes. Keep the rest of the script as it was."
+    )
 
 
 async def write_script(stories: list[BriefStory], kind: str = "brief") -> Optional[dict]:
     """The validated script for these stories, or None once attempts run out.
-    kind picks the wording (see _KIND_WORDING): 'brief' or 'wrapup'."""
+    kind picks the wording (see _KIND_WORDING): 'brief' or 'wrapup'. Each retry
+    is told what the last attempt got wrong (see _retry_note)."""
     if not stories:
         return None
     fillers = max(2, round(TARGET_CHARS / 650))
     system = _system_prompt(kind).replace("<<FILLERS>>", str(fillers))
     user = _user_content(stories, kind)
+    note = ""
     for attempt in range(ATTEMPTS):
         raw = await call_claude_json(
-            system, user,
+            system, user + note,
             model=MODEL, max_tokens=6000, temperature=None, effort="medium", timeout=180,
         )
-        script = finalize_script(raw, stories)
+        problems: list[str] = []
+        script = finalize_script(raw, stories, problems)
         if script is not None:
             return script
         logger.warning("daily brief script attempt %s invalid", attempt + 1)
+        note = _retry_note(problems)
     return None
 
 
