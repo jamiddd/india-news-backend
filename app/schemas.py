@@ -359,6 +359,13 @@ class UserPreferences(BaseModel):
     # app/services/morning_brief_notify.py). Independent of every other
     # toggle here.
     morning_brief_notifications_enabled: bool = False
+    # Master switch for the once-nightly "tonight's Late-Night Wrap-up is
+    # ready" push, fixed at ~20:00 IST (the Wrap-up builds at 19:30, and
+    # 20:00 is when the app's Brief page starts calling itself the Wrap-up).
+    # Sibling of morning_brief_notifications_enabled above and independent of
+    # it — a reader can take the morning push and skip the night one. See
+    # app/services/morning_brief_notify.py.
+    late_night_wrapup_notifications_enabled: bool = False
     # Source.id (as a string key, since JSON object keys are always strings)
     # -> boost multiplier applied to headline_score in the "All Stories" feed
     # only (see GET /clusters's source_weights query param). A source absent

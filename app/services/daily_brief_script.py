@@ -196,6 +196,13 @@ async def write_script(stories: list[BriefStory], kind: str = "brief") -> Option
             system, user + note,
             model=MODEL, max_tokens=6000, temperature=None, effort="medium", timeout=180,
         )
+        if raw is None:
+            # No reply at all: call_claude_json exhausted its own HTTP attempts
+            # (an API outage, a timeout). There is nothing to critique, so say
+            # so and keep any note an earlier attempt earned, rather than
+            # telling Claude its JSON shape was wrong when we never saw it.
+            logger.warning("daily brief script attempt %s got no response", attempt + 1)
+            continue
         problems: list[str] = []
         script = finalize_script(raw, stories, problems)
         if script is not None:

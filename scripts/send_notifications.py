@@ -423,6 +423,20 @@ async def main():
             except Exception:
                 logger.exception("Morning-Brief step failed")
                 await session.rollback()
+
+            # Late-Night Wrap-up readiness push — the Morning Brief's sibling
+            # (own opt-in, own dedup mode, own channel, 20:00 IST cutoff), and
+            # isolated separately so a failure in one kind still leaves the
+            # other's send intact.
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                wrapup_pushed = await morning_brief_notify.send_wrapup_notifications(session, now, send_fn)
+                logger.info(f"[Late-Night Wrap-up] pushed={wrapup_pushed}")
+            except Exception:
+                logger.exception("Late-Night-Wrap-up step failed")
+                await session.rollback()
         finally:
             await session.rollback()
             await session.commit()
