@@ -1315,9 +1315,12 @@ class BreakingRefreshReview(Base):
 
 
 class DailyBrief(Base):
-    """One row per calendar day: the "Daily Brief" for that morning, covering
-    the stories of the day BEFORE brief_date (Asia/Kolkata). Built at 05:00 IST
-    by app.services.daily_brief; served by GET /daily-brief.
+    """One row per (calendar day, kind): the "Daily Brief" ('brief', covering
+    the stories of the day BEFORE brief_date, built at 05:00 IST) or the
+    "Late-Night Wrap-up" ('wrapup', covering brief_date's own stories up to
+    19:00 IST, built at 19:30 IST). Same shape either way. Built by
+    app.services.daily_brief; served by GET /daily-brief, which picks the
+    kind to serve from the time of day (see main.py's get_daily_brief).
 
     items is the ordered story list the app renders (cluster_id, headline,
     summary, category, source_count, image_url, audio_offset seconds); script
@@ -1326,9 +1329,12 @@ class DailyBrief(Base):
     audio_* columns are all NULL for a text-only brief (audio failed or was
     not configured), which the app renders without a player."""
     __tablename__ = "daily_briefs"
+    __table_args__ = (UniqueConstraint("brief_date", "kind", name="ix_daily_briefs_brief_date_kind"),)
 
     id = Column(Integer, primary_key=True, index=True)
-    brief_date = Column(Date, nullable=False, unique=True, index=True)
+    brief_date = Column(Date, nullable=False, index=True)
+    # 'brief' (morning) | 'wrapup' (Late-Night Wrap-up).
+    kind = Column(String(16), nullable=False, default="brief")
     # 'building' | 'ready' | 'failed'. Only 'ready' rows are served.
     status = Column(String(16), nullable=False, default="building")
     items = Column(JSON, nullable=True)

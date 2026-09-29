@@ -150,7 +150,7 @@ from app.admin_users import router as admin_users_router
 from app.admin_timelines import router as admin_timelines_router
 from app.admin_daily_brief import router as admin_daily_brief_router
 from app.admin_explainers import router as admin_explainers_router
-from app.services.daily_brief import CACHE_KEY as DAILY_BRIEF_CACHE_KEY
+from app.services.daily_brief import CACHE_KEYS as DAILY_BRIEF_CACHE_KEYS, served_kind as daily_brief_served_kind
 from app.services.trending import log_search_query
 from app.services.cluster_search import search_clusters
 from app.admin_breaking import router as admin_breaking_router
@@ -2420,26 +2420,43 @@ async def _hero_clusters_for_timeline_rows(
     return hero_by_row_id
 
 
-@app.get(f"{settings.API_V1_STR}/daily-brief", response_model=DailyBriefOut)
-@limiter.limit("60/minute")
-async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
-    """The latest ready Daily Brief: yesterday's top stories, each with a
-    one-line summary, plus the narration audio when it was produced (see
-    app/services/daily_brief.py). Built at 05:00 IST, so before then this is
-    still the previous morning's brief. 404 when none has ever been built —
-    the app shows its "not ready yet" state."""
-    cached = await _cache_get(DAILY_BRIEF_CACHE_KEY)
-    if cached:
-        return DailyBriefOut.model_validate_json(cached)
-
-    row = (
+async def _latest_ready_brief(db: AsyncSession, kind: str) -> Optional[DailyBrief]:
+    return (
         await db.execute(
             select(DailyBrief)
-            .where(DailyBrief.status == "ready")
+            .where(DailyBrief.status == "ready", DailyBrief.kind == kind)
             .order_by(desc(DailyBrief.brief_date))
             .limit(1)
         )
     ).scalar_one_or_none()
+
+
+@app.get(f"{settings.API_V1_STR}/daily-brief", response_model=DailyBriefOut)
+@limiter.limit("60/minute")
+async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
+    """The latest ready Daily Brief or Late-Night Wrap-up, each with a
+    one-line summary per story plus the narration audio when it was
+    produced (see app/services/daily_brief.py). From 20:00 to 05:00 IST this
+    prefers the Wrap-up (today's stories up to 7 PM), falling back to the
+    morning Brief if tonight's Wrap-up isn't ready yet; the rest of the day it
+    serves the Brief. Built at 05:00 / 19:30 IST, so right after either time
+    this is still the previous build. 404 when neither kind has ever been
+    built — the app shows its "not ready yet" state."""
+    kind = daily_brief_served_kind()
+    cache_key = DAILY_BRIEF_CACHE_KEYS[kind]
+    cached = await _cache_get(cache_key)
+    if cached:
+        return DailyBriefOut.model_validate_json(cached)
+
+    row = await _latest_ready_brief(db, kind)
+    fallback_kind = "brief" if kind == "wrapup" else "wrapup"
+    if row is None or not row.items or not row.script:
+        kind = fallback_kind
+        cache_key = DAILY_BRIEF_CACHE_KEYS[kind]
+        cached = await _cache_get(cache_key)
+        if cached:
+            return DailyBriefOut.model_validate_json(cached)
+        row = await _latest_ready_brief(db, kind)
     if row is None or not row.items or not row.script:
         raise HTTPException(status_code=404, detail="No daily brief yet")
 
@@ -2457,6 +2474,7 @@ async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
     }
     result_out = DailyBriefOut(
         brief_date=row.brief_date,
+        kind=row.kind,
         generated_at=row.generated_at,
         intro=row.script.get("intro", ""),
         items=[
@@ -2469,7 +2487,7 @@ async def get_daily_brief(request: Request, db: AsyncSession = Depends(get_db)):
         audio_url=row.audio_url,
         audio_duration_seconds=row.audio_duration_seconds,
     )
-    await _cache_set(DAILY_BRIEF_CACHE_KEY, result_out.model_dump_json())
+    await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
 
 

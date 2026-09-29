@@ -72,8 +72,19 @@ class BriefStory:
     slot_kind: str = "category"  # "most_covered" | "category"
 
 
-def brief_window(brief_date: date) -> tuple[datetime, datetime]:
-    """[start, end) of the calendar day BEFORE brief_date, in IST."""
+WRAPUP_CUTOFF = time(19, 0)
+
+
+def brief_window(brief_date: date, kind: str = "brief") -> tuple[datetime, datetime]:
+    """[start, end) of the stories this build covers, in IST.
+
+    'brief': the calendar day BEFORE brief_date, in full.
+    'wrapup': brief_date's OWN calendar day, from midnight up to
+    WRAPUP_CUTOFF (the Late-Night Wrap-up only covers up to 7 PM so the
+    stories are actually done developing by the time it's read)."""
+    if kind == "wrapup":
+        start = datetime.combine(brief_date, time.min, tzinfo=IST)
+        return start, datetime.combine(brief_date, WRAPUP_CUTOFF, tzinfo=IST)
     day = brief_date - timedelta(days=1)
     start = datetime.combine(day, time.min, tzinfo=IST)
     return start, start + timedelta(days=1)
@@ -111,10 +122,12 @@ def _same_event(a: set[str], b: set[str]) -> bool:
     return len(a & b) / min(len(a), len(b)) >= ENTITY_OVERLAP_DUPLICATE
 
 
-async def select_stories(session: AsyncSession, brief_date: date) -> list[BriefStory]:
+async def select_stories(session: AsyncSession, brief_date: date, kind: str = "brief") -> list[BriefStory]:
     """The brief's stories for brief_date, most-covered first, then one per
-    category. May return fewer than MAX_SLOTS on a thin news day."""
-    start, end = brief_window(brief_date)
+    category. May return fewer than MAX_SLOTS on a thin news day. kind picks
+    the window (see brief_window): 'brief' for yesterday, 'wrapup' for today
+    up to WRAPUP_CUTOFF."""
+    start, end = brief_window(brief_date, kind)
     in_window = (Article.published_at >= start) & (Article.published_at < end) & Article.cluster_id.isnot(None)
 
     n_sources = func.count(func.distinct(Article.source_id))

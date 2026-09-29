@@ -1,8 +1,12 @@
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
-from app.services.daily_brief_script import build_chunks, finalize_script
+from app.services.daily_brief import served_kind
+from app.services.daily_brief_script import NIGHT_SIGN_OFF, _system_prompt, _user_content, build_chunks, finalize_script
 from app.services.daily_brief_select import BriefStory, _entity_set, _same_event, brief_window, is_runaway_cluster
 from app.services.timeline_audio import SCRIPT_VERSION, SIGN_OFF
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def _stories(n=3):
@@ -29,6 +33,42 @@ def test_window_is_the_previous_ist_day():
     start, end = brief_window(date(2026, 9, 25))
     assert start.isoformat() == "2026-09-24T00:00:00+05:30"
     assert end.isoformat() == "2026-09-25T00:00:00+05:30"
+
+
+def test_wrapup_window_is_todays_own_day_up_to_the_cutoff():
+    start, end = brief_window(date(2026, 9, 25), "wrapup")
+    assert start.isoformat() == "2026-09-25T00:00:00+05:30"
+    assert end.isoformat() == "2026-09-25T19:00:00+05:30"
+
+
+def test_wrapup_prompt_and_user_content_say_today_not_yesterday():
+    brief_prompt = _system_prompt("brief")
+    wrapup_prompt = _system_prompt("wrapup")
+    assert "yesterday" in brief_prompt and "Daily Brief" in brief_prompt
+    assert "today" in wrapup_prompt and "Late-Night Wrap-up" in wrapup_prompt
+    assert "yesterday" not in wrapup_prompt
+
+    stories = _stories(1)
+    assert _user_content(stories, "brief").startswith("Yesterday's stories")
+    assert _user_content(stories, "wrapup").startswith("Today's stories")
+
+
+def test_wrapup_chunks_end_with_the_night_sign_off():
+    stories = _stories()
+    script = finalize_script(_script(stories), stories)
+    chunks, _ = build_chunks(script, "wrapup")
+    assert chunks[-1].endswith(NIGHT_SIGN_OFF)
+    assert SIGN_OFF not in chunks[-1]
+
+
+def test_served_kind_switches_at_night_boundaries():
+    tz = lambda h, m=0: datetime(2026, 9, 25, h, m, tzinfo=IST)
+    assert served_kind(tz(4, 59)) == "wrapup"
+    assert served_kind(tz(5, 0)) == "brief"
+    assert served_kind(tz(19, 59)) == "brief"
+    assert served_kind(tz(20, 0)) == "wrapup"
+    assert served_kind(tz(23, 59)) == "wrapup"
+    assert served_kind(tz(0, 0)) == "wrapup"
 
 
 def test_same_event_uses_entity_overlap():

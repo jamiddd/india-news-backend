@@ -812,6 +812,9 @@ class DailyBriefItemOut(BaseModel):
 
 class DailyBriefOut(BaseModel):
     brief_date: date
+    # 'brief' (the morning Daily Brief) or 'wrapup' (the Late-Night Wrap-up) —
+    # see app/services/daily_brief.served_kind. Drives the app's copy/title.
+    kind: str = "brief"
     generated_at: Optional[datetime] = None
     intro: str
     items: List[DailyBriefItemOut]

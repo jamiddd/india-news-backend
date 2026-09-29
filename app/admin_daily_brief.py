@@ -1,5 +1,6 @@
-"""Admin page for the Daily Brief: see the latest brief (stories, summaries,
-audio) and rebuild one. Same session/CSRF/nav pattern as admin_timelines.py.
+"""Admin page for the Daily Brief and the Late-Night Wrap-up: see the latest
+of each kind (stories, summaries, audio) and rebuild either. Same
+session/CSRF/nav pattern as admin_timelines.py.
 """
 from __future__ import annotations
 
@@ -30,15 +31,24 @@ router = APIRouter(prefix="/admin/daily-brief")
 TITLE = "Daily Brief"
 IST = ZoneInfo("Asia/Kolkata")
 
-REBUILD_CONFIRM = (
-    "Rebuild this morning's Daily Brief? This calls Claude and Sarvam (roughly Rs 8), takes a few "
-    "minutes, and replaces the live brief only if the rebuild succeeds."
-)
+KINDS = {"brief": "Daily Brief", "wrapup": "Late-Night Wrap-up"}
+
+REBUILD_CONFIRM = {
+    "brief": "Rebuild this morning's Daily Brief? This calls Claude and Sarvam (roughly Rs 8), takes a few "
+             "minutes, and replaces the live brief only if the rebuild succeeds.",
+    "wrapup": "Rebuild tonight's Late-Night Wrap-up? This calls Claude and Sarvam (roughly Rs 8), takes a few "
+              "minutes, and replaces the live wrap-up only if the rebuild succeeds.",
+}
 NOTICES = {
-    "already-running": "A brief build is already running.",
+    "already-running": "A build of this kind is already running.",
     "not-configured": "Audio isn't configured on this server (SARVAM_API_KEY / Supabase storage); "
                       "a rebuild would publish text-only.",
 }
+
+
+def _kind(request: Request) -> str:
+    kind = request.query_params.get("kind", "brief")
+    return kind if kind in KINDS else "brief"
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -89,10 +99,18 @@ def _brief_block(row: DailyBrief) -> str:
         for n, item in enumerate(row.items or [], start=1))
     when = f"{row.generated_at:%Y-%m-%d %H:%M} UTC" if row.generated_at else "an unknown time"
     return (
-        f"<h2>Brief for {row.brief_date:%A %d %B %Y} <span class=meta>({row.status})</span></h2>"
+        f"<h2>{KINDS[row.kind]} for {row.brief_date:%A %d %B %Y} <span class=meta>({row.status})</span></h2>"
         f"<p class=meta>Generated {when}</p>{audio}"
         f"<p><b>Intro:</b> {html.escape(script.get('intro', ''))}</p>{stories}"
         f"<p><b>Closing:</b> {html.escape(script.get('closing', ''))}</p>")
+
+
+def _kind_tabs(active: str) -> str:
+    return "".join(
+        f"<a href='/admin/daily-brief?kind={k}' style='margin-right:12px'>"
+        f"{'<b>' if k == active else ''}{label}{'</b>' if k == active else ''}</a>"
+        for k, label in KINDS.items()
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -101,27 +119,34 @@ async def dashboard(request: Request, notice: str = "", db: AsyncSession = Depen
     if not csrf:
         return RedirectResponse("/admin/daily-brief/login", status_code=303)
 
+    kind = _kind(request)
     today = datetime.now(IST).date()
-    status = await daily_brief.get_status(today)
+    status = await daily_brief.get_status(today, kind)
     running = status.get("state") == "running"
-    row = (await db.execute(select(DailyBrief).order_by(desc(DailyBrief.brief_date)).limit(1))).scalar_one_or_none()
+    row = (
+        await db.execute(
+            select(DailyBrief).where(DailyBrief.kind == kind).order_by(desc(DailyBrief.brief_date)).limit(1)
+        )
+    ).scalar_one_or_none()
 
     if running:
         control = "<button disabled>Building&hellip;</button>"
     else:
         control = (
             f"<form method=post action='/admin/daily-brief/rebuild' "
-            f"onsubmit=\"return confirm('{html.escape(REBUILD_CONFIRM, quote=True)}')\">"
+            f"onsubmit=\"return confirm('{html.escape(REBUILD_CONFIRM[kind], quote=True)}')\">"
             f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
-            f"<button>{'Rebuild' if row and row.brief_date == today else 'Build'} today's brief</button></form>")
+            f"<input type=hidden name=kind value='{kind}'>"
+            f"<button>{'Rebuild' if row and row.brief_date == today else 'Build'} {KINDS[kind].lower()}</button></form>")
     run = _run_summary(status)
-    refresh = "<script>setTimeout(function(){location.reload()},10000)</script>" if running else ""
+    refresh = f"<script>setTimeout(function(){{location.reload()}},10000)</script>" if running else ""
     notice_html = f"<p class=danger>{html.escape(NOTICES[notice])}</p>" if notice in NOTICES else ""
-    body = _brief_block(row) if row and row.items else "<p class=meta>No brief has been built yet.</p>"
+    body = _brief_block(row) if row and row.items else f"<p class=meta>No {KINDS[kind].lower()} has been built yet.</p>"
 
     return layout(TITLE, (
-        f"{notice_html}<h1>Daily Brief</h1>"
-        f"<p class=meta>Built automatically at 05:00 IST from yesterday's stories. Today (IST) is {today}.</p>"
+        f"{notice_html}<h1>Daily Brief</h1>{_kind_tabs(kind)}"
+        f"<p class=meta>Daily Brief built automatically at 05:00 IST from yesterday's stories; "
+        f"Late-Night Wrap-up at 19:30 IST from today's stories up to 7 PM. Today (IST) is {today}.</p>"
         + (f"<p class=meta>{run}</p>" if run else "")
         + f"{control}{body}{refresh}"), current="/admin/daily-brief")
 
@@ -130,16 +155,18 @@ async def dashboard(request: Request, notice: str = "", db: AsyncSession = Depen
 async def rebuild(request: Request, background_tasks: BackgroundTasks):
     fields = await form_fields(request)
     verify(request, fields)
-    if await daily_brief.in_progress():
-        return RedirectResponse("/admin/daily-brief?notice=already-running", status_code=303)
+    kind = fields.get("kind", "brief")
+    kind = kind if kind in KINDS else "brief"
+    if await daily_brief.in_progress(kind):
+        return RedirectResponse(f"/admin/daily-brief?kind={kind}&notice=already-running", status_code=303)
     if not is_configured():
-        return RedirectResponse("/admin/daily-brief?notice=not-configured", status_code=303)
+        return RedirectResponse(f"/admin/daily-brief?kind={kind}&notice=not-configured", status_code=303)
     today = datetime.now(IST).date()
     # Marked running before the response so the redirected page already shows
     # it; the task itself takes the lease that makes a second click a no-op.
-    await daily_brief.set_status(today, "running", "starting")
-    background_tasks.add_task(daily_brief.run_build_task, today, force=True)
-    return RedirectResponse("/admin/daily-brief", status_code=303)
+    await daily_brief.set_status(today, kind, "running", "starting")
+    background_tasks.add_task(daily_brief.run_build_task, today, kind, force=True)
+    return RedirectResponse(f"/admin/daily-brief?kind={kind}", status_code=303)
 
 
 @router.get("/status")
@@ -147,11 +174,13 @@ async def status_json(request: Request):
     """JSON status of today's build, for polling."""
     if not session_csrf(request):
         raise HTTPException(status_code=401, detail="Not signed in")
+    kind = _kind(request)
     today = datetime.now(IST).date()
-    status = await daily_brief.get_status(today)
-    running = await daily_brief.in_progress() or status.get("state") == "running"
+    status = await daily_brief.get_status(today, kind)
+    running = await daily_brief.in_progress(kind) or status.get("state") == "running"
     return JSONResponse({
         "brief_date": today.isoformat(),
+        "kind": kind,
         "state": "running" if running else status.get("state", "idle"),
         "message": status.get("message", ""),
     })

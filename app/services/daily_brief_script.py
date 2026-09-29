@@ -25,14 +25,46 @@ ATTEMPTS = 2
 # About one "uhm"/"uh" per 650 characters, same as the timeline scripts.
 TARGET_CHARS = 2700
 
-SYSTEM_PROMPT = """You write "Your Daily Brief", the morning news rundown of a \
-podcast called "Open Indian Voice". You are given yesterday's top stories, each \
+# Night sign-off for the Wrap-up, spoken last in place of SIGN_OFF ("have a
+# nice day", wrong once it's actually night) — see build_chunks.
+NIGHT_SIGN_OFF = "Thank you and good night."
+
+# The parts of SYSTEM_PROMPT that differ between the morning Daily Brief and
+# the Late-Night Wrap-up. Everything else (JSON shape, spoken-style rules,
+# filler/number/acronym rules) is identical — same host, same voice, same
+# podcast — so only these fill-ins change per kind.
+_KIND_WORDING = {
+    "brief": dict(
+        title='"Your Daily Brief", the morning news rundown',
+        source_desc="yesterday's top stories",
+        time_word="yesterday",
+        intro_example='"Good morning, and welcome to your Daily Brief on Open Indian '
+                      'Voice!", then one sentence saying what is coming ("Here\'s what mattered yesterday.")',
+        closing_example='"That\'s your brief for today, from all of us at Open Indian Voice."',
+        user_header="Yesterday's stories, in order:",
+    ),
+    "wrapup": dict(
+        title='"Your Late-Night Wrap-up", the evening news rundown',
+        source_desc="today's top stories so far",
+        time_word="today",
+        intro_example='"Good evening, and welcome to your Late-Night Wrap-up on Open Indian '
+                      'Voice!", then one sentence saying what is coming ("Here\'s what happened today.")',
+        closing_example='"That\'s your wrap-up for tonight, from all of us at Open Indian Voice."',
+        user_header="Today's stories so far, in order:",
+    ),
+}
+
+
+def _system_prompt(kind: str) -> str:
+    w = _KIND_WORDING[kind]
+    return f"""You write {w['title']} of a \
+podcast called "Open Indian Voice". You are given {w['source_desc']}, each \
 with a headline and the titles of some articles about it. That is ALL you know: \
 never add a fact, name, number, cause, reaction or year that is not in the \
 headlines or titles. When the headlines are thin, say less, do not fill in.
 
 Return ONLY a JSON object:
-{"intro": "...", "items": [{"cluster_id": <int>, "summary": "...", "spoken": "..."}, ...], "closing": "..."}
+{{"intro": "...", "items": [{{"cluster_id": <int>, "summary": "...", "spoken": "..."}}, ...], "closing": "..."}}
 "items" must contain EVERY story you were given, in the SAME order, with its \
 cluster_id copied exactly.
 
@@ -43,7 +75,7 @@ than twenty-five, past tense, neutral, no markdown. Ordinary digits are fine.
 voice that reads EXACTLY the words you write. About thirty-five to forty-five \
 words per story, two or three sentences. Rules:
 - Casual, warm host in the present tense ("Parliament passes...", "the R B I \
-  holds rates..."). Say "yesterday" if a time is needed; never name a date or a \
+  holds rates..."). Say "{w['time_word']}" if a time is needed; never name a date or a \
   year. Contractions and plain words. No interjections ("Wow", "Oh my God"), \
   never "phew", no all-caps words.
 - Each sentence has at most two parts. Commas only at natural hinge points. No \
@@ -64,20 +96,17 @@ words per story, two or three sentences. Rules:
 - Never write trailing dots, stage directions or bracketed cues.
 
 "intro": a warm greeting that names the podcast and this being the brief for \
-the day, like "Good morning, and welcome to your Daily Brief on Open Indian \
-Voice!", then one sentence saying what is coming ("Here's what mattered \
-yesterday."). At most about 220 characters.
+the day, like {w['intro_example']}. At most about 220 characters.
 
 "closing": one short sentence wrapping up that names Open Indian Voice, like \
-"That's your brief for today, from all of us at Open Indian Voice." At most \
-about 120 characters.
+{w['closing_example']} At most about 120 characters.
 
 Aim for a whole script of about 2,700 characters (intro, all spoken items and \
 closing together)."""
 
 
-def _user_content(stories: list[BriefStory]) -> str:
-    lines = ["Yesterday's stories, in order:"]
+def _user_content(stories: list[BriefStory], kind: str = "brief") -> str:
+    lines = [_KIND_WORDING[kind]["user_header"]]
     for s in stories:
         lines.append(f"\ncluster_id: {s.cluster_id}")
         lines.append(f"category: {s.category}; outlets covering it yesterday: {s.source_count}")
@@ -122,13 +151,14 @@ def finalize_script(raw: object, stories: list[BriefStory]) -> Optional[dict]:
     return script
 
 
-async def write_script(stories: list[BriefStory]) -> Optional[dict]:
-    """The validated script for these stories, or None once attempts run out."""
+async def write_script(stories: list[BriefStory], kind: str = "brief") -> Optional[dict]:
+    """The validated script for these stories, or None once attempts run out.
+    kind picks the wording (see _KIND_WORDING): 'brief' or 'wrapup'."""
     if not stories:
         return None
     fillers = max(2, round(TARGET_CHARS / 650))
-    system = SYSTEM_PROMPT.replace("<<FILLERS>>", str(fillers))
-    user = _user_content(stories)
+    system = _system_prompt(kind).replace("<<FILLERS>>", str(fillers))
+    user = _user_content(stories, kind)
     for attempt in range(ATTEMPTS):
         raw = await call_claude_json(
             system, user,
@@ -141,13 +171,15 @@ async def write_script(stories: list[BriefStory]) -> Optional[dict]:
     return None
 
 
-def build_chunks(script: dict) -> tuple[list[str], int]:
+def build_chunks(script: dict, kind: str = "brief") -> tuple[list[str], int]:
     """(chunks, intro_chars) for timeline_audio.render_and_upload: one chunk
     per story, the intro spoken with the first and the closing plus sign-off
     with the last — the same shape as timeline_audio.build_chunks, so the
-    voice and silences behave identically."""
+    voice and silences behave identically. kind picks the sign-off: SIGN_OFF
+    ("have a nice day") for the morning Brief, NIGHT_SIGN_OFF for the Wrap-up."""
     intro = script["intro"].strip()
     chunks = [i["spoken"].strip() for i in script["items"]]
     chunks[0] = f"{intro} {chunks[0]}"
-    chunks[-1] = " ".join(part for part in (chunks[-1], script["closing"].strip(), SIGN_OFF) if part)
+    sign_off = NIGHT_SIGN_OFF if kind == "wrapup" else SIGN_OFF
+    chunks[-1] = " ".join(part for part in (chunks[-1], script["closing"].strip(), sign_off) if part)
     return chunks, len(intro) + 1
