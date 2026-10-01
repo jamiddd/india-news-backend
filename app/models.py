@@ -565,6 +565,22 @@ class DailyHoroscope(Base):
     __table_args__ = (Index("uq_daily_horoscope_date_sign", "forecast_date", "sign", unique=True),)
 
 
+class HoroscopeNotification(Base):
+    """One row per user per India-calendar-date the morning horoscope push
+    was sent for — see app/services/horoscope_notifications.py. A dedicated
+    table rather than reusing NotificationLog: that table's cluster_id is
+    NOT NULL + a StoryCluster FK, and this push isn't about a cluster."""
+    __tablename__ = "horoscope_notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    forecast_date = Column(Date, nullable=False)
+    sent_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        Index("uq_horoscope_notif_user_date", "user_id", "forecast_date", unique=True),
+    )
+
+
 class DailyPoll(Base):
     __tablename__ = "daily_polls"
     id = Column(Integer, primary_key=True)

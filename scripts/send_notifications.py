@@ -82,6 +82,7 @@ from app.services import story_updates
 from app.services import topic_updates
 from app.services import source_updates
 from app.services import morning_brief_notify
+from app.services import horoscope_notifications
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -436,6 +437,19 @@ async def main():
                 logger.info(f"[Late-Night Wrap-up] pushed={wrapup_pushed}")
             except Exception:
                 logger.exception("Late-Night-Wrap-up step failed")
+                await session.rollback()
+
+            # Morning horoscope push, isolated the same way as the steps
+            # above — own opt-in, own dedup (HoroscopeNotification), must not
+            # be undone or masked by a failure elsewhere in this run.
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                horoscope_pushed = await horoscope_notifications.send_horoscope_notifications(session, now, send_fn)
+                logger.info(f"[Horoscope] pushed={horoscope_pushed}")
+            except Exception:
+                logger.exception("Horoscope step failed")
                 await session.rollback()
         finally:
             await session.rollback()

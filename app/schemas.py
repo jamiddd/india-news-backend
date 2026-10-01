@@ -376,6 +376,13 @@ class UserPreferences(BaseModel):
     # None = the user never chose one (older clients / pre-existing rows), so
     # a login must not overwrite whatever the device already has.
     zodiac_sign: Optional[str] = None
+    # Master switch for the ~07:00 IST morning horoscope push (see
+    # app/services/horoscope_notifications.py). Defaults off, like
+    # morning_brief_notifications_enabled — the client always sends *some*
+    # zodiac_sign once any settings sync happens (it has no "unset" state,
+    # defaulting to "aries"), so an opt-out default would fire for users who
+    # never actually chose a sign.
+    horoscope_notifications_enabled: bool = False
 
 
 class DeviceTokenRegisterRequest(BaseModel):
