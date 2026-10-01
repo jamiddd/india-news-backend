@@ -1341,6 +1341,129 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
     )
 
 
+def _deep_link_not_found_page(title: str, message: str) -> HTMLResponse:
+    """Shared 404 body for the /timelines/{id} and /explainers/{id} web
+    fallbacks below — same shape as story_deep_link's inline 404 above."""
+    return HTMLResponse(
+        status_code=404,
+        content=(
+            "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
+            f"<title>{title} — Open Indian News</title>"
+            "<link rel=\"stylesheet\" href=\"/static/site.css?v=8\"></head><body>"
+            "<main class=\"wrap doc\" style=\"text-align:center; padding-top:4rem;\">"
+            f"<h1>{title}</h1>"
+            f"<p class=\"updated\">{message}</p>"
+            "<p style=\"margin:28px 0\"><a class=\"btn btn-primary\" href=\"/\">Open Indian News</a></p>"
+            "</main></body></html>"
+        ),
+    )
+
+
+def _deep_link_page(*, title: str, description: str, page_url: str, image_url: Optional[str], cta_label: str) -> str:
+    """Shared og:*-tagged HTML shell for the /timelines/{id} and
+    /explainers/{id} web fallbacks — same shape as story_deep_link's own
+    inline template above, factored out since both new routes need it too."""
+    image_tag = f'<meta property="og:image" content="{html_escape(image_url)}">' if image_url else ""
+    return (
+        "<!DOCTYPE html>\n"
+        '<html lang="en">\n<head>\n'
+        '<meta charset="UTF-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        f"<title>{title} — Open Indian News</title>\n"
+        f'<meta name="description" content="{description}">\n'
+        '<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">\n'
+        '<meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">\n'
+        f'<meta property="og:type" content="article">\n'
+        f'<meta property="og:title" content="{title}">\n'
+        f'<meta property="og:description" content="{description}">\n'
+        f'<meta property="og:url" content="{html_escape(page_url)}">\n'
+        f"{image_tag}\n"
+        '<link rel="stylesheet" href="/static/site.css?v=8">\n'
+        "<link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>\">\n"
+        "</head>\n<body>\n"
+        '<main class="wrap doc" style="text-align:center; padding-top:4rem;">\n'
+        f"<h1>{title}</h1>\n"
+        f'<p class="updated">{description}</p>\n'
+        '<p style="margin:28px 0">'
+        f'<a class="btn btn-primary" href="/download">{cta_label}</a>'
+        "</p>\n"
+        "</main>\n</body>\n</html>"
+    )
+
+
+@app.get("/timelines/{timeline_id}", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def timeline_deep_link(request: Request, timeline_id: int, db: AsyncSession = Depends(get_db)):
+    """Web fallback for a Timeline/Context tab trail's deep link (see
+    TimelineFeatureListItem/TimelineFeatureDetail.deepLinkUrl in the app,
+    and AndroidManifest.xml's matching App Link intent-filter).
+
+    An installed app never lets this render for a human tap — the
+    pathPrefix="/timelines/" App Link hands the URL straight to
+    MainActivity.handleTimelineDeepLinkIntent instead. This HTML is reached
+    only by a browser without the app, a link-preview crawler (hence the
+    og:* tags), or before App Link verification has propagated to a given
+    device. Registered as a plain path, distinct from the
+    {API_V1_STR}/timelines/{{id}} JSON endpoint above.
+    """
+    row = (await db.execute(select(StoryTimelineFeature).where(StoryTimelineFeature.id == timeline_id))).scalar_one_or_none()
+    if row is None or not row.title or not row.beats:
+        return _deep_link_not_found_page("Timeline not found", "This story trail may have aged out or been removed.")
+
+    hero_by_row_id = await _hero_clusters_for_timeline_rows(db, [row])
+    hero_cluster = hero_by_row_id.get(row.id)
+    image_url = row.manual_image_url or (
+        next((a.image_url for a in hero_cluster.articles if a.image_url), None) if hero_cluster else None
+    )
+
+    title = html_escape(row.title)
+    description = html_escape((row.context or "").strip()[:280] or "Follow this story's full timeline on Open Indian News.")
+    page_url = f"{project_base_url() or 'https://openindiannews.com'}/timelines/{row.id}"
+
+    return _deep_link_page(
+        title=title,
+        description=description,
+        page_url=page_url,
+        image_url=image_url,
+        cta_label="Get the app to follow the full timeline",
+    )
+
+
+@app.get("/explainers/{explainer_id}", response_class=HTMLResponse)
+@limiter.limit("60/minute")
+async def explainer_deep_link(request: Request, explainer_id: int, db: AsyncSession = Depends(get_db)):
+    """Web fallback for an Explainer article's deep link (see
+    ExplainerDetail.deepLinkUrl in the app, and AndroidManifest.xml's
+    matching App Link intent-filter).
+
+    An installed app never lets this render for a human tap — the
+    pathPrefix="/explainers/" App Link hands the URL straight to
+    MainActivity.handleExplainerDeepLinkIntent instead. This HTML is reached
+    only by a browser without the app, a link-preview crawler (hence the
+    og:* tags), or before App Link verification has propagated to a given
+    device. Registered as a plain path, distinct from the
+    {API_V1_STR}/explainers/{{id}} JSON endpoint above. Same "not found"
+    treatment for a draft/generating/archived id as the JSON endpoint, since
+    neither should ever be reachable from a real share link.
+    """
+    row = (await db.execute(select(Explainer).where(Explainer.id == explainer_id))).scalar_one_or_none()
+    if row is None or row.status != "published":
+        return _deep_link_not_found_page("Explainer not found", "This explainer may have been removed.")
+
+    title = html_escape(row.question)
+    description = html_escape((row.quick_answer or "").strip()[:280] or "Read the full explainer on Open Indian News.")
+    page_url = f"{project_base_url() or 'https://openindiannews.com'}/explainers/{row.id}"
+
+    return _deep_link_page(
+        title=title,
+        description=description,
+        page_url=page_url,
+        image_url=row.hero_image_url,
+        cta_label="Get the app to read the full explainer",
+    )
+
+
 @app.get("/download", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def download_page(request: Request):
