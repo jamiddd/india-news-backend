@@ -29,7 +29,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.database import admin_engine
-from app.models import Article
+from app.models import Article, Source
 from app.services.extractor import absolutize_scheme
 
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +42,8 @@ async def main(dry_run: bool):
     try:
         async with session_factory() as session:
             result = await session.execute(
-                select(Article.id, Article.source_name, Article.video_url)
+                select(Article.id, Source.name.label("source_name"), Article.video_url)
+                .join(Source, Source.id == Article.source_id)
                 .where(Article.video_url.like("//%"))
             )
             rows = result.all()
