@@ -480,6 +480,12 @@ async def lifespan(app: FastAPI):
             # answering from admin-attached real stories instead of the model's own
             # knowledge) — see app/services/explainer.py and admin_explainers.py's source picker.
             await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS source_cluster_ids JSON"))
+            # story_reports predates Timeline/Explainer reporting — cluster_id
+            # was the only target column until these were added.
+            await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS timeline_feature_id INTEGER REFERENCES story_timeline_features(id) ON DELETE SET NULL"))
+            await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS explainer_id INTEGER REFERENCES explainers(id) ON DELETE SET NULL"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_timeline_feature_id ON story_reports (timeline_feature_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_explainer_id ON story_reports (explainer_id)"))
         finally:
             await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
     yield
@@ -3552,6 +3558,52 @@ async def report_story(
         raise HTTPException(status_code=404, detail="Cluster not found")
 
     db.add(StoryReport(cluster_id=cluster_id, user_id=user_id, reason=payload.reason, note=payload.note))
+    await db.commit()
+    return {"message": "Reported"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/timelines/{{timeline_id}}/report", status_code=201)
+@limiter.limit("20/minute")
+async def report_timeline_feature(
+    request: Request,
+    user_id: str,
+    timeline_id: int,
+    payload: ReportStoryRequest,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    timeline_result = await db.execute(select(StoryTimelineFeature).where(StoryTimelineFeature.id == timeline_id))
+    if timeline_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Timeline not found")
+
+    db.add(StoryReport(timeline_feature_id=timeline_id, user_id=user_id, reason=payload.reason, note=payload.note))
+    await db.commit()
+    return {"message": "Reported"}
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/explainers/{{explainer_id}}/report", status_code=201)
+@limiter.limit("20/minute")
+async def report_explainer(
+    request: Request,
+    user_id: str,
+    explainer_id: int,
+    payload: ReportStoryRequest,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    if user_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    explainer_result = await db.execute(select(Explainer).where(Explainer.id == explainer_id))
+    if explainer_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Explainer not found")
+
+    db.add(StoryReport(explainer_id=explainer_id, user_id=user_id, reason=payload.reason, note=payload.note))
     await db.commit()
     return {"message": "Reported"}
 

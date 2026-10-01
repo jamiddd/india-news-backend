@@ -602,9 +602,15 @@ class PollVote(Base):
 
 
 class StoryReport(Base):
+    """A user-submitted flag on a piece of content. Originally story-only
+    (cluster_id); timeline_feature_id/explainer_id were added later so the
+    same table/admin review flow covers Timeline and Explainer reports too —
+    exactly one of the three id columns is set per row."""
     __tablename__ = "story_reports"
     id = Column(Integer, primary_key=True)
     cluster_id = Column(Integer, ForeignKey("story_clusters.id", ondelete="SET NULL"), nullable=True, index=True)
+    timeline_feature_id = Column(Integer, ForeignKey("story_timeline_features.id", ondelete="SET NULL"), nullable=True, index=True)
+    explainer_id = Column(Integer, ForeignKey("explainers.id", ondelete="SET NULL"), nullable=True, index=True)
     user_id = Column(String, nullable=False, index=True)
     reason = Column(String(30), nullable=False)
     note = Column(Text, nullable=True)

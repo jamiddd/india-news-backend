@@ -73,10 +73,14 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     for report in reports:
         reason_text = html.escape(REASON_LABELS.get(report.reason, report.reason))
         note_text = f"<p>{html.escape(report.note)}</p>" if report.note else ""
-        source = (
-            f"<a target=_blank href='/api/v1/clusters/{report.cluster_id}'>cluster {report.cluster_id}</a>"
-            if report.cluster_id else "cluster deleted"
-        )
+        if report.cluster_id:
+            source = f"<a target=_blank href='/api/v1/clusters/{report.cluster_id}'>cluster {report.cluster_id}</a>"
+        elif report.timeline_feature_id:
+            source = f"<a target=_blank href='/api/v1/timelines/{report.timeline_feature_id}'>timeline {report.timeline_feature_id}</a>"
+        elif report.explainer_id:
+            source = f"<a target=_blank href='/api/v1/explainers/{report.explainer_id}'>explainer {report.explainer_id}</a>"
+        else:
+            source = "content deleted"
         rows.append(
             f"<div class=report><p class=meta>{report.created_at} · reported by {html.escape(report.user_id)} · {source}</p>"
             f"<p><b>{reason_text}</b></p>{note_text}"
