@@ -54,6 +54,15 @@ class TestExtractVideoObjectMedia:
     def test_page_without_video_object_returns_none(self):
         assert _extract_video_object_media(self._page('{"@type": "NewsArticle"}')) is None
 
+    def test_protocol_relative_content_url_is_given_an_https_scheme(self):
+        # Times Now's VideoObject contentUrl is scheme-less
+        # (//sw-a.akamaized.net/...) — the app's player can't open it as-is
+        # and reports a 0:00 duration, so this must come back absolutized.
+        html = self._page(
+            '{"@type": "VideoObject", "contentUrl": "//sw-a.akamaized.net/amd/x/1b671dd1_F40_360p_800.mp4"}'
+        )
+        assert _extract_video_object_media(html) == "https://sw-a.akamaized.net/amd/x/1b671dd1_F40_360p_800.mp4"
+
 
 class TestExtractOgImage:
     def test_html_escaped_ampersand_is_unescaped(self):

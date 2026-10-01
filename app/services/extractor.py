@@ -266,10 +266,15 @@ def _extract_video_object_media(html: str) -> Optional[str]:
     with no og:video, player widget or <video> tag. Must read only the
     VideoObject block — News18's page also embeds the URLs of several
     related videos, so a page-wide .mp4/.m3u8 search would grab the wrong one.
+
+    Times Now's VideoObject contentUrl is protocol-relative
+    (//sw-a.akamaized.net/...) — absolutize_scheme() here mirrors the fix
+    already applied to _extract_og_video, otherwise the app's player can't
+    open the URI at all and shows a 0:00 duration.
     """
     for url in _ld_json_video_object_urls(_ld_json_entries(html)):
         if url and _MEDIA_FILE_RE.search(url):
-            return url
+            return absolutize_scheme(url)
     return None
 
 
