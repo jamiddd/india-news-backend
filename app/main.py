@@ -1311,7 +1311,7 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
     summary_bullets = [b.strip() for b in (cluster.summary or "").split("\n•") if b.strip()]
     description = html_escape(" ".join(summary_bullets)[:280] or "Read the full multi-outlet coverage on Open Indian News.")
     image_url = next((a.image_url for a in cluster.articles if a.image_url), None)
-    page_url = f"{project_base_url() or 'https://openindiannews.com'}/story/{cluster.id}"
+    page_url = f"https://openindiannews.com/story/{cluster.id}"
     image_tag = f'<meta property="og:image" content="{html_escape(image_url)}">' if image_url else ""
 
     return (
@@ -1419,7 +1419,7 @@ async def timeline_deep_link(request: Request, timeline_id: int, db: AsyncSessio
 
     title = html_escape(row.title)
     description = html_escape((row.context or "").strip()[:280] or "Follow this story's full timeline on Open Indian News.")
-    page_url = f"{project_base_url() or 'https://openindiannews.com'}/timelines/{row.id}"
+    page_url = f"https://openindiannews.com/timelines/{row.id}"
 
     return _deep_link_page(
         title=title,
@@ -1453,7 +1453,7 @@ async def explainer_deep_link(request: Request, explainer_id: int, db: AsyncSess
 
     title = html_escape(row.question)
     description = html_escape((row.quick_answer or "").strip()[:280] or "Read the full explainer on Open Indian News.")
-    page_url = f"{project_base_url() or 'https://openindiannews.com'}/explainers/{row.id}"
+    page_url = f"https://openindiannews.com/explainers/{row.id}"
 
     return _deep_link_page(
         title=title,
