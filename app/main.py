@@ -3560,6 +3560,10 @@ async def verify_play_purchase(request: Request, payload: VerifyPurchaseRequest)
         raise HTTPException(status_code=503, detail="Purchase verification is not configured")
     if not result.valid:
         logger.info("Rejected purchase verification: %s", result.reason)
+        if result.transient:
+            # Google was unreachable or erroring; that is not a verdict on the
+            # token. 503 lets the client treat it as "unknown, retry later".
+            raise HTTPException(status_code=503, detail="Purchase verification temporarily unavailable")
     return VerifyPurchaseResponse(valid=result.valid)
 
 

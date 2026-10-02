@@ -64,6 +64,18 @@ def _get_session() -> AuthorizedSession:
 class PurchaseVerification:
     valid: bool
     reason: str  # human-readable, safe to log; never shown to the end user
+    # True when Google (or our link to it) failed in a way that says nothing
+    # about the token itself: HTTP 429/5xx, a timeout, a dropped connection.
+    # The endpoint answers 503 for these instead of {"valid": false}, so the
+    # client can tell "couldn't check, try again" from "checked, not valid".
+    # A permission/config failure (401/403) or a bad token (400/404) is NOT
+    # transient: those stay a definite {"valid": false}, because the old
+    # client fails open on anything that is not a definite answer.
+    transient: bool = False
+
+
+def _is_transient_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
 
 
 def _get_with_retry(session: AuthorizedSession, url: str):
@@ -84,7 +96,9 @@ def _verify_subscription_sync(package_name: str, purchase_token: str) -> Purchas
     url = f"{_API_BASE}/{package_name}/purchases/subscriptionsv2/tokens/{purchase_token}"
     resp = _get_with_retry(session, url)
     if resp.status_code != 200:
-        return PurchaseVerification(False, f"subscriptionsv2 lookup failed: {resp.status_code} {resp.text[:200]}")
+        return PurchaseVerification(
+            False, f"subscriptionsv2 lookup failed: {resp.status_code} {resp.text[:200]}",
+            transient=_is_transient_status(resp.status_code))
     state = resp.json().get("subscriptionState")
     # ACTIVE and IN_GRACE_PERIOD are the only states where the subscriber is
     # actually entitled right now — cancelled/expired/on-hold/paused/pending
@@ -99,7 +113,9 @@ def _verify_product_sync(package_name: str, product_id: str, purchase_token: str
     url = f"{_API_BASE}/{package_name}/purchases/products/{product_id}/tokens/{purchase_token}"
     resp = _get_with_retry(session, url)
     if resp.status_code != 200:
-        return PurchaseVerification(False, f"products lookup failed: {resp.status_code} {resp.text[:200]}")
+        return PurchaseVerification(
+            False, f"products lookup failed: {resp.status_code} {resp.text[:200]}",
+            transient=_is_transient_status(resp.status_code))
     # purchaseState: 0 = purchased, 1 = cancelled, 2 = pending.
     purchase_state = resp.json().get("purchaseState")
     if purchase_state == 0:
@@ -121,5 +137,7 @@ async def verify_purchase(product_id: str, purchase_token: str, product_type: st
     except PlayBillingNotConfigured:
         raise
     except Exception as e:
+        # Timeouts, connection errors and unexpected failures say nothing
+        # about the token, so they are reported as transient (HTTP 503).
         logger.exception("Play purchase verification failed")
-        return PurchaseVerification(False, f"verification error: {e}")
+        return PurchaseVerification(False, f"verification error: {e}", transient=True)
