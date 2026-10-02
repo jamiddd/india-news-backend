@@ -53,7 +53,7 @@
 
 <main class="wrap doc">
 <h1>Credits</h1>
-<p class="updated">Open Indian News · Last updated: 7 September 2026</p>
+<p class="updated">Open Indian News · Last updated: 2 October 2026</p>
 
 <p>
   Open Indian News aggregates other people&rsquo;s work. None of the reporting is ours, and much of
@@ -66,20 +66,36 @@
 <ul>
   <li>
     <strong>Indian news publishers.</strong> Every story in the feed is reported, written and owned
-    by the outlet it links to. We cluster and summarise; we do not report. Headlines and extracts
-    are shown under fair dealing, each linking back to the publisher.
+    by the outlet it links to. We cluster and summarise; we do not report. Headlines, short snippets
+    and images are shown with each story linking back to the publisher; the app does not display
+    full article text.
   </li>
   <li>
     <strong>Wikipedia</strong> &mdash; Wikimedia Foundation and its contributors. On This Day
     historical events, under
     <a href="https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License" rel="noopener">CC BY-SA 4.0</a>.
   </li>
+  <li>
+    <strong><a href="https://commons.wikimedia.org/" rel="noopener">Wikimedia Commons</a></strong>
+    &mdash; photographers and contributors, credited on each card. Photos on On This Day cards; each
+    shows its author and licence (public domain, CC BY or CC BY-SA).
+  </li>
   <li><strong><a href="https://apiverve.com" rel="noopener">APIVerve</a></strong> &mdash; daily quotations and crossword grids.</li>
   <li><strong><a href="https://astrojson.com" rel="noopener">AstroJSON</a></strong> &mdash; daily horoscopes.</li>
   <li>
     <strong><a href="https://www.anthropic.com" rel="noopener">Claude</a></strong>, by Anthropic &mdash;
-    story summaries, framing analysis, the daily poll and the daily quiz, all reviewed by a human
+    story summaries and framing analysis, which are generated automatically without per-story human
+    review; and the Context tab (Daily Brief, timelines and explainers), which is reviewed by a human
     before publication.
+  </li>
+  <li>
+    <strong><a href="https://www.sarvam.ai" rel="noopener">Sarvam AI</a></strong> &mdash; Bulbul
+    text-to-speech, which voices the Daily Brief, timelines and explainers.
+  </li>
+  <li>
+    <strong><a href="https://www.youtube.com/t/terms" rel="noopener">YouTube</a></strong>, by Google
+    &mdash; the embedded player for publishers&rsquo; YouTube video reports. YouTube&rsquo;s Terms of
+    Service apply to videos played through it.
   </li>
 </ul>
 
@@ -96,13 +112,18 @@
 
 <h2>Typefaces</h2>
 <p>
-  All five ship under the SIL Open Font License 1.1, which asks that their notices travel with them.
+  Nine of the ten ship under the SIL Open Font License 1.1, which asks that their notices travel
+  with them. Roboto Mono ships under the Apache License 2.0.
 </p>
 <ul>
   <li><strong><a href="https://www.brailleinstitute.org/freefont/" rel="noopener">Atkinson Hyperlegible Next</a></strong> &mdash; Braille Institute of America.</li>
   <li><strong><a href="https://production.type.land/fonts/newsreader" rel="noopener">Newsreader</a></strong> &mdash; Production Type.</li>
   <li><strong><a href="https://github.com/impallari/Libre-Caslon" rel="noopener">Libre Caslon</a></strong> &mdash; Pablo Impallari and Rodrigo Fuenzalida.</li>
   <li><strong><a href="https://www.paratype.com/fonts/pt/pt-serif" rel="noopener">PT Serif</a></strong> &mdash; ParaType.</li>
+  <li><strong><a href="https://github.com/googlefonts/robotomono" rel="noopener">Roboto Mono</a></strong> &mdash; The Roboto Mono Project Authors (Apache License 2.0).</li>
+  <li><strong><a href="https://github.com/JetBrains/JetBrainsMono" rel="noopener">JetBrains Mono</a></strong> &mdash; JetBrains.</li>
+  <li><strong><a href="https://github.com/IBM/plex" rel="noopener">IBM Plex Mono and IBM Plex Sans</a></strong> &mdash; IBM Corp.</li>
+  <li><strong><a href="https://github.com/undercasetype/Fraunces" rel="noopener">Fraunces</a></strong> &mdash; Undercase Type.</li>
   <li><strong><a href="https://github.com/adobe-fonts/source-serif" rel="noopener">Source Serif 4</a></strong> &mdash; Adobe.</li>
 </ul>
 <p>
@@ -200,8 +221,10 @@
   <li><strong>Coil</strong> &mdash; Coil Contributors (Apache 2.0). Image loading and caching.</li>
   <li><strong>Lottie for Android</strong> &mdash; Airbnb (Apache 2.0). Plays the animated artwork.</li>
   <li><strong>Media3 / ExoPlayer</strong> &mdash; The Android Open Source Project (Apache 2.0).</li>
-  <li><strong>Android YouTube Player</strong> &mdash; Pierfrancesco Soffritti (MIT).</li>
+  <li><strong>Haze</strong> &mdash; Chris Banes (Apache 2.0). The frosted-glass blur effects.</li>
+  <li><strong>Firebase and Google Play services</strong> &mdash; Google. Sign-in (Authentication), push notifications (Cloud Messaging), crash reports (Crashlytics), Google sign-in (Credentials / Identity) and Premium purchases (Play Billing), under Google&rsquo;s terms; client libraries are Apache 2.0 where open source.</li>
   <li><strong>FastAPI, SQLAlchemy, httpx, PostgreSQL and Redis</strong> &mdash; MIT, BSD and PostgreSQL licences. The backend that reads the feeds, clusters the stories and serves this site.</li>
+  <li><strong>Pillow, trafilatura, feedparser, curl_cffi, firebase-admin, slowapi, simhash and sentry-sdk</strong> &mdash; open source (MIT, BSD, Apache 2.0 and HPND licences). Backend libraries for reading image sizes, extracting article pages and feeds, verifying sign-in, rate limiting, grouping near-duplicate stories and error tracking.</li>
 </ul>
 
 <h2>Something missing?</h2>
@@ -229,7 +252,7 @@
   </div>
 </footer>
 
-<script src="/static/site.js?v=10" defer></script>
+<script src="/static/site.js?v=11" defer></script>
 
 </body>
 </html>

@@ -1054,8 +1054,9 @@ class Donation(Base):
     entitlement table anywhere, and that absence is load-bearing: donations
     are collected through an external UPI/Razorpay payment page rather than
     Play Billing, which is only permissible while the payment unlocks no app
-    functionality. Keep this table read-only from the app's perspective —
-    nothing in the client may branch on it.
+    functionality. (Premium is a separate product sold through Play Billing and
+    is not recorded here.) Keep this table read-only from the app's perspective
+    — nothing in the client may branch on it.
 
     user_id is nullable and SET NULL on delete: a donor may pay without being
     signed in, and deleting an account must not erase the revenue record.

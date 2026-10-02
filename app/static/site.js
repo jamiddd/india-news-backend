@@ -434,8 +434,8 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var rupees = chosenRupees();
-    if (!isFinite(rupees) || Math.floor(rupees) !== rupees || rupees < 1 || rupees > 100000) {
-      say("Enter a whole amount between \u20b91 and \u20b91,00,000.", true);
+    if (!isFinite(rupees) || Math.floor(rupees) !== rupees || rupees < 1 || rupees > 10000) {
+      say("Enter a whole amount between \u20b91 and \u20b910,000.", true);
       return;
     }
 
