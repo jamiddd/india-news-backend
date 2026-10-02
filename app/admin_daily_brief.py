@@ -5,6 +5,7 @@ session/CSRF/nav pattern as admin_timelines.py.
 from __future__ import annotations
 
 import html
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -33,16 +34,23 @@ IST = ZoneInfo("Asia/Kolkata")
 
 KINDS = {"brief": "Daily Brief", "wrapup": "Late-Night Wrap-up"}
 
+# Rendered through json.dumps() into the onsubmit handler (see the form below),
+# so any quote character is safe. It used to be html.escape()d into a single-
+# quoted JS string, where the apostrophes in "morning's"/"tonight's" ended the
+# string early: the handler was a syntax error, the confirm never appeared, and
+# the form submitted (a ~Rs 8 rebuild) on a single click.
 REBUILD_CONFIRM = {
-    "brief": "Rebuild this morning's Daily Brief? This calls Claude and Sarvam (roughly Rs 8), takes a few "
-             "minutes, and replaces the live brief only if the rebuild succeeds.",
-    "wrapup": "Rebuild tonight's Late-Night Wrap-up? This calls Claude and Sarvam (roughly Rs 8), takes a few "
-              "minutes, and replaces the live wrap-up only if the rebuild succeeds.",
+    "brief": "Rebuild the morning Daily Brief? This calls Claude and Sarvam (roughly Rs 8) and takes a few "
+             "minutes. When it finishes it replaces the live brief; if voicing fails it publishes text-only "
+             "and the live brief loses its audio.",
+    "wrapup": "Rebuild the Late-Night Wrap-up? This calls Claude and Sarvam (roughly Rs 8) and takes a few "
+              "minutes. When it finishes it replaces the live wrap-up; if voicing fails it publishes "
+              "text-only and the live wrap-up loses its audio.",
 }
 NOTICES = {
     "already-running": "A build of this kind is already running.",
     "not-configured": "Audio isn't configured on this server (SARVAM_API_KEY / Supabase storage); "
-                      "a rebuild would publish text-only.",
+                      "rebuilding is disabled until it is configured.",
 }
 
 
@@ -134,7 +142,7 @@ async def dashboard(request: Request, notice: str = "", db: AsyncSession = Depen
     else:
         control = (
             f"<form method=post action='/admin/daily-brief/rebuild' "
-            f"onsubmit=\"return confirm('{html.escape(REBUILD_CONFIRM[kind], quote=True)}')\">"
+            f"onsubmit=\"return confirm({html.escape(json.dumps(REBUILD_CONFIRM[kind]), quote=True)})\">"
             f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
             f"<input type=hidden name=kind value='{kind}'>"
             f"<button>{'Rebuild' if row and row.brief_date == today else 'Build'} {KINDS[kind].lower()}</button></form>")

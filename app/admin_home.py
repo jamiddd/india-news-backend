@@ -65,7 +65,9 @@ def _task_card(name: str, task: dict) -> str:
     elif not task["exists"]:
         state = "<b class=danger>Missing</b>"
     elif task["status"] == "rejected":
-        state = "<span class=meta>Rejected — serving the fallback</span>"
+        state = ("<span class=meta>Rejected — a fallback poll goes live at 09:00 IST</span>"
+                 if name == "Poll"
+                 else "<span class=meta>Rejected — serving the curated set</span>")
     else:
         state = "<b class=done>Done</b>"
     return (
@@ -99,8 +101,11 @@ async def home(request: Request, db: AsyncSession = Depends(get_db)):
     today = datetime.now(IST).date()
     tasks = await pending_reviews(db, today)
     waiting = sum(1 for task in tasks.values() if task["waiting"])
-    heading = ("Nothing waiting on you" if not waiting
-               else f"{waiting} item{'s' if waiting > 1 else ''} to review")
+    # Counts only the poll and quiz drafts (pending_reviews). Story reports,
+    # Breaking candidates and Explainers awaiting review are NOT counted here;
+    # find them under their own pages in the sidebar.
+    heading = ("No poll or quiz drafts waiting" if not waiting
+               else f"{waiting} poll/quiz draft{'s' if waiting > 1 else ''} to review")
     # Feedback is not part of pending_reviews(): that dict drives the morning
     # push, which is about the two drafts that expire if nobody acts on them
     # today. Unread feedback is not urgent in the same way and must not make

@@ -1,7 +1,7 @@
 """A searchable list of accounts, for support ("does this email have an
 account") and abuse triage. Read-only: there is nothing here to edit, only to
 look up. Deleting an account stays a user-initiated action through the app
-(see DELETE /users/{user_id} in app/main.py), not something to expose here.
+(POST /api/v1/account/delete in app/main.py), not something to expose here.
 """
 from __future__ import annotations
 

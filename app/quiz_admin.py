@@ -104,8 +104,11 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
                     "<button name=action value=regenerate>Regenerate</button>"
                     "<button name=action value=reject>Reject and use curated set</button>")
     else:
+        live_warning = (
+            " onclick=\"return confirm('Regenerating takes the live quiz offline: readers get the curated "
+            "set until you approve the new draft. Continue?')\"") if quiz.status == "approved" else ""
         controls = ("<p>This quiz is no longer a draft. "
-                    "<button name=action value=regenerate>Regenerate a new draft</button></p>")
+                    f"<button name=action value=regenerate{live_warning}>Regenerate a new draft</button></p>")
     served = "" if quiz.status == "approved" else (
         "<p class=meta>Readers are currently being served the curated fallback set, "
         "not this draft.</p>")

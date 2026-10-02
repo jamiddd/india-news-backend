@@ -28,6 +28,10 @@ from app.admin_session import (
 from app.database import get_db
 from app.models import StoryReport
 
+_NOTE = ("<p class=meta>Only open reports are listed. Marking one reviewed or dismissed removes it "
+         "from this page, and there is no way to reopen it here. \u201cReported by\u201d is the "
+         "reporter's account id.</p>")
+
 router = APIRouter(prefix="/admin/reports")
 TITLE = "Story Reports"
 
@@ -67,7 +71,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
 
     if not reports:
-        return layout(TITLE, f"<h1>Story Reports</h1><p>No open reports.</p>", current="/admin/reports")
+        return layout(TITLE, f"<h1>Story Reports</h1><p>No open reports.</p>{_NOTE}", current="/admin/reports")
 
     rows = []
     for report in reports:
@@ -89,7 +93,7 @@ async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
             f"<button name=action value=reviewed>Mark reviewed</button>"
             f"<button name=action value=dismissed>Dismiss</button></form></div>"
         )
-    return layout(TITLE, f"<h1>Story Reports</h1>{''.join(rows)}", current="/admin/reports")
+    return layout(TITLE, f"<h1>Story Reports</h1>{_NOTE}{''.join(rows)}", current="/admin/reports")
 
 
 @router.post("/update")

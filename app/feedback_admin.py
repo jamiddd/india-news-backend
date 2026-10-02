@@ -1,9 +1,9 @@
-"""Reading and triaging what people send through the website's /feedback form.
+"""Reading and triaging what people send through the /feedback endpoint: the
+website's form and the Android app's feedback/support screens (`source` says
+which). It is also the only support inbox: there is no separate ticket table.
 
 Reuses app.admin_session rather than minting its own cookie, so this shares the
-one sign-in with /admin and /admin/quiz. (app/story_reports_admin.py predates
-that module and still carries its own copy of the same plumbing under the older
-`poll_admin` cookie — it is the odd one out, not the pattern to follow.)
+one sign-in with the rest of /admin.
 
 The list is paged and filtered by status rather than showing everything: unlike
 the poll and quiz reviews, which are empty most of the time by construction,
@@ -74,11 +74,18 @@ def _entry(item: Feedback, csrf: str) -> str:
         who = f"<a href='mailto:{html.escape(item.email)}'>{html.escape(item.name or item.email)}</a>"
         if item.name:
             who += f" &lt;{html.escape(item.email)}&gt;"
-        who += " · <b>wants a reply</b>"
+        # The Android app pre-fills the email from the signed-in account when
+        # the person leaves the field blank, so for source=android an email
+        # does not mean they asked for a reply.
+        who += (" · email from account" if item.source == "android" else " · <b>wants a reply</b>")
     elif item.name:
         who = f"{html.escape(item.name)} · no email, cannot reply"
+    elif item.user_id:
+        who = "no name or email"
     else:
         who = "anonymous"
+    if item.user_id:
+        who += f" · signed-in user {html.escape(item.user_id)}"
 
     # white-space:pre-wrap: people write in paragraphs, and collapsing them
     # turns a readable report into a wall.

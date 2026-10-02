@@ -126,6 +126,16 @@ class TestListing:
         assert "wants a reply" in r.text
         assert "mailto:asha@example.com" in r.text
 
+    async def test_does_not_claim_an_app_sender_wants_a_reply(self, client):
+        """The Android app fills email from the signed-in account, so an email
+        on a source=android row is not a request for a reply."""
+        await seed(client, source="android", email="asha@example.com", user_id="u-123")
+        await sign_in(client)
+        r = await client.get("/admin/feedback")
+        assert "wants a reply" not in r.text
+        assert "email from account" in r.text
+        assert "signed-in user u-123" in r.text
+
     async def test_escapes_html_in_a_message(self, client):
         """The message is attacker-controlled text on a page holding a session."""
         await seed(client, message="<script>alert('xss')</script> and more text")

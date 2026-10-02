@@ -145,7 +145,7 @@ async def dashboard(
             f"<form method=post action='/admin/poll-bank/{p.id}/toggle' style='display:inline'>"
             f"<input type=hidden name=csrf value='{csrf}'><button>{toggle_label}</button></form> "
             f"<form method=post action='/admin/poll-bank/{p.id}/delete' style='display:inline' "
-            f"onsubmit='return confirm(\"Delete this poll?\")'>"
+            f"onsubmit='return confirm(\"Delete this poll? If the bank ends up empty, the built-in polls are re-added the next time this page loads.\")'>"
             f"<input type=hidden name=csrf value='{csrf}'><button class=danger>Delete</button></form>"
             f"</td></tr>")
 

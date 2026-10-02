@@ -317,9 +317,11 @@ MARK_SVG = (
     "</g></svg>"
 )
 
-# Grouped for the sidebar: "Review" is the daily in-and-out (drafts that
-# expire if nobody acts today), "Manage" is everything else, looked at less
-# often. Matches pending_reviews()/admin_notify.py's notion of what's urgent.
+# Grouped for the sidebar: "Review" is the daily in-and-out: the poll and quiz
+# drafts that expire if nobody acts today (what pending_reviews() and
+# admin_notify.py treat as urgent), plus their banks, feedback and story
+# reports, which do not expire. "Manage" is everything else, looked at less
+# often. Breaking review sits under Manage but is also a review queue.
 NAV_GROUPS = [
     ("Review", [
         ("/admin", "Daily review"),

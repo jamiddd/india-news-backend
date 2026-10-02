@@ -1,5 +1,7 @@
-"""A browsable donations page, wrapping the JSON totals already exposed at
-GET /admin/donations (app/main.py) plus a raw list of recent captures.
+"""A browsable donations page: captured-payment totals plus a raw list of
+recent captures. (There is no GET /admin/donations JSON route in app/main.py;
+the only JSON admin route there is /admin/engagement, which this nav does not
+link to.)
 
 Read-only by design, same as the Donation model itself (see its docstring):
 this page exists to answer "is the demand signal moving", not to let anyone

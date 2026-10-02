@@ -75,7 +75,7 @@ def _candidate_card(row: BreakingStory, cluster: StoryCluster, articles: list[di
         f"<div class=task><h2>{html.escape(cluster.headline)}</h2>"
         f"<p class=meta>cluster {row.cluster_id} &middot; "
         f"{row.sources_at_promotion} sources &middot; "
-        f"crossed the threshold {row.hours_to_threshold}h ago</p>"
+        f"took {row.hours_to_threshold}h to cross the multi-source threshold</p>"
         f"{_article_lines(articles)}"
         f"<form method=post action='/admin/breaking/candidate/{row.cluster_id}/decide'>"
         f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"

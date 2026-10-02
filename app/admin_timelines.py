@@ -1,12 +1,10 @@
 """Browsable UI for the Timeline/Context tab's editorial picks.
 
-Until now this human-intervention step (see StoryTimelineFeature's docstring)
-only existed as bare JSON endpoints in main.py — GET /admin/timelines/picks,
-POST /admin/timelines/pick, POST /admin/timelines/unpick — cookie-gated but
-with no page to click through and no cluster search, so picking a story
-meant already knowing its cluster_id and hand-rolling a curl/Postman call.
-This wraps those endpoints in the same session/CSRF/nav pattern as the rest
-of the admin, plus a headline search to find a cluster_id in the first place.
+This page handles the human-intervention step (see StoryTimelineFeature's
+docstring) in the same session/CSRF/nav pattern as the rest of the admin, plus
+a headline search to find a cluster_id. (It once wrapped bare JSON endpoints
+in main.py — /admin/timelines/picks, /pick, /unpick — which have since been
+removed; see the note near main.py's timeline admin section.)
 """
 from __future__ import annotations
 
@@ -143,7 +141,7 @@ def _pick_row(row: StoryTimelineFeature, csrf: str, status: dict | None = None, 
         f"<p class=meta>{' · '.join(flags)}</p>"
         f"<p class=meta>anchor cluster "
         f"<a target=_blank href='/api/v1/clusters/{row.anchor_cluster_id}'>{row.anchor_cluster_id}</a>"
-        f" · picked {row.picked_at:%Y-%m-%d %H:%M} UTC</p>"
+        f" · added {row.picked_at:%Y-%m-%d %H:%M} UTC</p>"
         f"<p class=meta>{image_status} &middot; "
         f"<a href='/admin/timelines/image/{row.id}'>Choose image&hellip;</a></p>"
         f"<form method=post action='/admin/timelines/update'>"
