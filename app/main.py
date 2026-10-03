@@ -3559,7 +3559,11 @@ async def verify_play_purchase(request: Request, payload: VerifyPurchaseRequest)
     except PlayBillingNotConfigured:
         raise HTTPException(status_code=503, detail="Purchase verification is not configured")
     if not result.valid:
-        logger.info("Rejected purchase verification: %s", result.reason)
+        # error, not info, when transient: a broken Play grant fails open for
+        # every buyer, so it must not hide among routine rejections.
+        logger.log(
+            logging.ERROR if result.transient else logging.INFO,
+            "Rejected purchase verification: %s", result.reason)
         if result.transient:
             # Google was unreachable or erroring; that is not a verdict on the
             # token. 503 lets the client treat it as "unknown, retry later".

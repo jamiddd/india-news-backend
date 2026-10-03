@@ -68,14 +68,15 @@ class PurchaseVerification:
     # about the token itself: HTTP 429/5xx, a timeout, a dropped connection.
     # The endpoint answers 503 for these instead of {"valid": false}, so the
     # client can tell "couldn't check, try again" from "checked, not valid".
-    # A permission/config failure (401/403) or a bad token (400/404) is NOT
-    # transient: those stay a definite {"valid": false}, because the old
-    # client fails open on anything that is not a definite answer.
+    # 401/403 are transient too: Google refusing OUR service account is a
+    # config problem on our side (Play Console grant), not a verdict on the
+    # buyer's token, so a paying user must not be told their purchase is
+    # fake. A bad token (400/404) stays a definite {"valid": false}.
     transient: bool = False
 
 
 def _is_transient_status(status_code: int) -> bool:
-    return status_code == 429 or status_code >= 500
+    return status_code in (401, 403, 429) or status_code >= 500
 
 
 def _get_with_retry(session: AuthorizedSession, url: str):

@@ -49,8 +49,14 @@ class TestVerifyPurchase:
         result = await verify_purchase("premium_x", "tok", product_type)
         assert not result.valid and result.transient
 
-    @pytest.mark.parametrize("status", [400, 401, 403, 404])
-    async def test_token_or_permission_errors_stay_a_definite_rejection(self, monkeypatch, product_type, status):
+    @pytest.mark.parametrize("status", [401, 403])
+    async def test_our_permission_errors_are_transient(self, monkeypatch, product_type, status):
+        _patch_google(monkeypatch, _Resp(status, text="insufficient permissions"))
+        result = await verify_purchase("premium_x", "tok", product_type)
+        assert not result.valid and result.transient
+
+    @pytest.mark.parametrize("status", [400, 404])
+    async def test_bad_token_errors_stay_a_definite_rejection(self, monkeypatch, product_type, status):
         _patch_google(monkeypatch, _Resp(status, text="nope"))
         result = await verify_purchase("premium_x", "tok", product_type)
         assert not result.valid and not result.transient
