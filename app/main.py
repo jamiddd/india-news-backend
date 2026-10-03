@@ -460,36 +460,50 @@ def _cluster_to_list_out(cluster: StoryCluster, *, image_priority_sort: bool = F
 # community-post tables hit a UniqueViolation on Postgres's own pg_type
 # catalog when two workers' CREATE TABLE calls landed at the same moment.
 # Distinct from poller.py's POLL_LOCK_KEY (different purpose, same pattern).
+#
+# Transaction-level (pg_advisory_xact_lock), not session-level: the database
+# sits behind Supavisor in transaction-pooling mode, where a "session" is a
+# pooled server connection shared by many clients. A session lock taken by a
+# worker that died mid-startup stayed on that pooled connection and was never
+# released, so every later worker blocked on it until the statement timeout
+# and exited — the 2026-10-03 deploy outage. A transaction lock is released by
+# Postgres when the transaction ends, however it ends, and a transaction is
+# exactly what the pooler pins to one connection.
 SCHEMA_LOCK_KEY = 918273645
+# How long startup waits for the schema lock, or for a table lock behind one of
+# the ALTERs below, before failing and letting the service restart retry. The
+# whole block normally takes well under a second per worker; this only stops a
+# stuck lock from hanging startup until the server's statement timeout.
+SCHEMA_LOCK_TIMEOUT = "30s"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
-        await conn.execute(text(f"SELECT pg_advisory_lock({SCHEMA_LOCK_KEY})"))
-        try:
-            await conn.run_sync(Base.metadata.create_all)
-            # create_all only adds missing *tables*, not columns on tables
-            # that already exist — daily_editorial_features predates
-            # background_image, so add it here idempotently on every startup.
-            await conn.execute(text("ALTER TABLE daily_editorial_features ADD COLUMN IF NOT EXISTS background_image JSON"))
-            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url VARCHAR(1024)"))
-            # Same story for the poll bank columns on poll_fallbacks.
-            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS category VARCHAR(50)"))
-            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
-            await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS used_count INTEGER NOT NULL DEFAULT 0"))
-            await conn.execute(text("ALTER TABLE story_timeline_features ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0"))
-            # explainers predates source_cluster_ids (added when Explainers moved to
-            # answering from admin-attached real stories instead of the model's own
-            # knowledge) — see app/services/explainer.py and admin_explainers.py's source picker.
-            await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS source_cluster_ids JSON"))
-            # story_reports predates Timeline/Explainer reporting — cluster_id
-            # was the only target column until these were added.
-            await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS timeline_feature_id INTEGER REFERENCES story_timeline_features(id) ON DELETE SET NULL"))
-            await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS explainer_id INTEGER REFERENCES explainers(id) ON DELETE SET NULL"))
-            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_timeline_feature_id ON story_reports (timeline_feature_id)"))
-            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_explainer_id ON story_reports (explainer_id)"))
-        finally:
-            await conn.execute(text(f"SELECT pg_advisory_unlock({SCHEMA_LOCK_KEY})"))
+        # Both are scoped to this transaction, so nothing leaks onto the pooled
+        # connection afterwards; the lock is released on commit or rollback.
+        await conn.execute(text(f"SET LOCAL lock_timeout = '{SCHEMA_LOCK_TIMEOUT}'"))
+        await conn.execute(text(f"SELECT pg_advisory_xact_lock({SCHEMA_LOCK_KEY})"))
+        await conn.run_sync(Base.metadata.create_all)
+        # create_all only adds missing *tables*, not columns on tables
+        # that already exist — daily_editorial_features predates
+        # background_image, so add it here idempotently on every startup.
+        await conn.execute(text("ALTER TABLE daily_editorial_features ADD COLUMN IF NOT EXISTS background_image JSON"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url VARCHAR(1024)"))
+        # Same story for the poll bank columns on poll_fallbacks.
+        await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS category VARCHAR(50)"))
+        await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"))
+        await conn.execute(text("ALTER TABLE poll_fallbacks ADD COLUMN IF NOT EXISTS used_count INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE story_timeline_features ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0"))
+        # explainers predates source_cluster_ids (added when Explainers moved to
+        # answering from admin-attached real stories instead of the model's own
+        # knowledge) — see app/services/explainer.py and admin_explainers.py's source picker.
+        await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS source_cluster_ids JSON"))
+        # story_reports predates Timeline/Explainer reporting — cluster_id
+        # was the only target column until these were added.
+        await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS timeline_feature_id INTEGER REFERENCES story_timeline_features(id) ON DELETE SET NULL"))
+        await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS explainer_id INTEGER REFERENCES explainers(id) ON DELETE SET NULL"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_timeline_feature_id ON story_reports (timeline_feature_id)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_explainer_id ON story_reports (explainer_id)"))
     yield
 
 app = FastAPI(

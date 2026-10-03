@@ -82,12 +82,13 @@ async def puzzle_loop():
 
 
 async def main():
+    # Same schema lock as app/main.py's lifespan, and transaction-scoped for the
+    # same reason: behind the Supavisor transaction pooler a session lock can be
+    # left on a pooled connection by a process that dies holding it.
     async with engine.begin() as connection:
-        await connection.execute(text("SELECT pg_advisory_lock(918273645)"))
-        try:
-            await connection.run_sync(Base.metadata.create_all)
-        finally:
-            await connection.execute(text("SELECT pg_advisory_unlock(918273645)"))
+        await connection.execute(text("SET LOCAL lock_timeout = '30s'"))
+        await connection.execute(text("SELECT pg_advisory_xact_lock(918273645)"))
+        await connection.run_sync(Base.metadata.create_all)
     today = datetime.now(IST).date()
     await ensure(today)
     # Startup catch-up: a container that comes up after 06:00 IST would
