@@ -79,7 +79,7 @@ from app.schemas import (
     GameSessionRequest, GameStatsOut, GameTypeStatsOut, VALID_GAME_TYPES,
     ReadEventRequest,
     DonationLinkRequest, DonationLinkResponse,
-    VerifyPurchaseRequest, VerifyPurchaseResponse,
+    VerifyPurchaseRequest, VerifyPurchaseResponse, TrialResponse,
     SaveStoryRequest, SavedStoryOut, SavedStoriesOut,
     FollowStoryRequest, FollowedStoryOut, FollowedStoriesOut,
     FollowTopicRequest, FollowedTopicOut, FollowedTopicsOut,
@@ -116,6 +116,7 @@ from app.services import source_updates
 from app.services.request_auth import CallerIdentity, require_user, optional_user_id, invalidate_token_cache_for_user
 from app.services.donations import signature_matches, parse_captured_payment, create_payment_link, MalformedWebhook
 from app.services.play_billing import verify_purchase, PlayBillingNotConfigured
+from app.services import premium_trial
 from scripts.enrich_all_clusters import enrich_clusters
 
 # Per-run ceiling for the recurring news-enrich.timer. At a 20-minute cadence
@@ -719,13 +720,45 @@ async def login_user(request: Request, payload: UserAuthRequest, db: AsyncSessio
         "login ok user=%s provider=%s token_picture=%s stored_photo=%s",
         user.id, payload.provider, bool(identity.picture), bool(user.photo_url),
     )
+    trial = await premium_trial.get_trial(db, user.id)
     return UserAuthResponse(
         user_id=user.id,
         email=user.email,
         display_name=user.display_name,
         photo_url=user.photo_url,
         preferences=UserPreferences.model_validate(user.preferences or {}),
+        trial=TrialResponse(**premium_trial.to_response(trial, utc_now())),
     )
+
+
+@app.get(f"{settings.API_V1_STR}/users/{{user_id}}/trial", response_model=TrialResponse)
+async def get_premium_trial(
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    trial = await premium_trial.get_trial(db, user_id)
+    return TrialResponse(**premium_trial.to_response(trial, utc_now()))
+
+
+@app.post(f"{settings.API_V1_STR}/users/{{user_id}}/trial/start", response_model=TrialResponse, status_code=201)
+@limiter.limit("10/hour")
+async def start_premium_trial(
+    request: Request,
+    user_id: str,
+    _caller: CallerIdentity = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Starts the account's one 7-day trial. 409 if it already had one —
+    the existing trial is never restarted or extended."""
+    now = utc_now()
+    trial, created = await premium_trial.start_trial(db, user_id, now)
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail={"status": premium_trial.trial_status(trial, now)},
+        )
+    return TrialResponse(**premium_trial.to_response(trial, now))
 
 
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/photo")
@@ -3547,12 +3580,21 @@ async def razorpay_webhook(request: Request, db: AsyncSession = Depends(get_db))
 
 @app.post(f"{settings.API_V1_STR}/billing/verify-purchase", response_model=VerifyPurchaseResponse)
 @limiter.limit("20/minute")
-async def verify_play_purchase(request: Request, payload: VerifyPurchaseRequest):
+async def verify_play_purchase(
+    request: Request,
+    payload: VerifyPurchaseRequest,
+    caller_id: Optional[str] = Depends(optional_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     """Confirms a Play Billing purchase token is real and currently paid for.
 
     See app/services/play_billing.py's module doc for why this exists and why
-    it is deliberately anonymous (no user_id). Rate limited because each call
-    hits the Play Developer API, which has its own quota.
+    it works anonymously. Rate limited because each call hits the Play
+    Developer API, which has its own quota.
+
+    When the caller is signed in, a valid purchase also marks their Premium
+    trial converted, so they don't get the trial-ending reminder. Nothing
+    else is stored against the account.
     """
     try:
         result = await verify_purchase(payload.product_id, payload.purchase_token, payload.product_type)
@@ -3568,6 +3610,14 @@ async def verify_play_purchase(request: Request, payload: VerifyPurchaseRequest)
             # Google was unreachable or erroring; that is not a verdict on the
             # token. 503 lets the client treat it as "unknown, retry later".
             raise HTTPException(status_code=503, detail="Purchase verification temporarily unavailable")
+    if result.valid and caller_id:
+        try:
+            await premium_trial.mark_converted(db, caller_id, utc_now())
+        except Exception:
+            # Never fail a real purchase over trial bookkeeping; worst case
+            # the buyer gets one unneeded reminder.
+            logger.exception("Could not mark trial converted for %s", caller_id)
+            await db.rollback()
     return VerifyPurchaseResponse(valid=result.valid)
 
 

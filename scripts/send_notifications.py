@@ -83,6 +83,7 @@ from app.services import topic_updates
 from app.services import source_updates
 from app.services import morning_brief_notify
 from app.services import horoscope_notifications
+from app.services import trial_notifications
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -450,6 +451,18 @@ async def main():
                 logger.info(f"[Horoscope] pushed={horoscope_pushed}")
             except Exception:
                 logger.exception("Horoscope step failed")
+                await session.rollback()
+
+            # Premium trial reminder (day before the trial ends), isolated
+            # the same way — own dedup (PremiumTrial.reminder_sent_at).
+            try:
+                async def send_fn(token, title, body, cluster_id, channel_id, extra):
+                    return await _send(app, token, title, body, cluster_id, channel_id, extra)
+
+                trial_pushed = await trial_notifications.send_trial_reminders(session, now, send_fn)
+                logger.info(f"[Trial reminder] pushed={trial_pushed}")
+            except Exception:
+                logger.exception("Trial-reminder step failed")
                 await session.rollback()
         finally:
             await session.rollback()

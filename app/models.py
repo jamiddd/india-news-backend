@@ -581,6 +581,21 @@ class HoroscopeNotification(Base):
     )
 
 
+class PremiumTrial(Base):
+    """The 7-day free Premium trial — see app/services/premium_trial.py.
+    user_id is the primary key, so an account can only ever hold one trial.
+    Not an entitlement table: Premium itself is still granted client-side;
+    this only records when the trial ran, whether the day-before reminder
+    went out, and whether a verified purchase followed (which suppresses
+    the reminder)."""
+    __tablename__ = "premium_trials"
+    user_id = Column(String(64), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ends_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+    converted_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class DailyPoll(Base):
     __tablename__ = "daily_polls"
     id = Column(Integer, primary_key=True)

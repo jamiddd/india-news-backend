@@ -81,18 +81,22 @@ async def test_unknown_product_type_is_a_definite_rejection(monkeypatch):
 
 
 class TestEndpoint:
-    async def _call(self, monkeypatch, verification):
+    async def _call(self, monkeypatch, verification, caller_id=None, converted=None):
         from app import main
 
         async def fake_verify(*args, **kwargs):
             return verification
 
+        async def fake_mark_converted(db, user_id, now):
+            converted.append(user_id)
+
         monkeypatch.setattr(main, "verify_purchase", fake_verify)
+        monkeypatch.setattr(main.premium_trial, "mark_converted", fake_mark_converted)
         payload = main.VerifyPurchaseRequest(
             product_id="premium_x", purchase_token="tok", product_type="subs")
         # limiter.limit wraps the route; call the undecorated function.
         fn = getattr(main.verify_play_purchase, "__wrapped__", main.verify_play_purchase)
-        return await fn(request=None, payload=payload)
+        return await fn(request=None, payload=payload, caller_id=caller_id, db=None)
 
     async def test_transient_failure_answers_503_not_false(self, monkeypatch):
         v = play_billing.PurchaseVerification(False, "lookup failed: 503", transient=True)
@@ -107,3 +111,15 @@ class TestEndpoint:
     async def test_valid_purchase_answers_valid_true(self, monkeypatch):
         v = play_billing.PurchaseVerification(True, "purchased")
         assert (await self._call(monkeypatch, v)).valid is True
+
+    async def test_signed_in_valid_purchase_marks_the_trial_converted(self, monkeypatch):
+        converted = []
+        v = play_billing.PurchaseVerification(True, "purchased")
+        await self._call(monkeypatch, v, caller_id="usr_a", converted=converted)
+        assert converted == ["usr_a"]
+
+    async def test_rejected_purchase_never_marks_converted(self, monkeypatch):
+        converted = []
+        v = play_billing.PurchaseVerification(False, "lookup failed: 401")
+        await self._call(monkeypatch, v, caller_id="usr_a", converted=converted)
+        assert converted == []

@@ -397,6 +397,15 @@ class UserAuthRequest(BaseModel):
     uid: Optional[str] = None
 
 
+class TrialResponse(BaseModel):
+    # eligible | active | ended | converted — see app/services/premium_trial.py
+    status: str
+    started_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+    # Lets the client correct for a wrong device clock when counting down.
+    server_now: datetime
+
+
 class UserAuthResponse(BaseModel):
     user_id: str
     email: str
@@ -404,6 +413,7 @@ class UserAuthResponse(BaseModel):
     token: Optional[str] = None
     photo_url: Optional[str] = None
     preferences: UserPreferences
+    trial: Optional[TrialResponse] = None
 
 
 class AccountDeleteRequest(BaseModel):
