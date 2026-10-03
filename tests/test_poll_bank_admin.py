@@ -1,14 +1,15 @@
 """
-The poll question bank — /admin/poll-bank, backed by PollFallback.
+The poll question bank JSON API — /admin/api/poll-bank, backed by PollFallback
+(the admin SPA's Poll bank page).
 
 Covers the flows an admin actually uses: the built-in polls appear (and adding
-one can't suppress that seed), Claude drafts land in the form for review rather
-than the table, bad input is rejected before it can reach activate_poll(), and
-every state change requires the CSRF token.
+one can't suppress that seed), Claude drafts come back for review rather than
+landing in the table, bad input is rejected before it can reach
+activate_poll(), and every state change requires the CSRF header.
 """
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -47,21 +48,12 @@ async def client():
     app.dependency_overrides.clear()
 
 
-async def sign_in(client):
-    r = await client.post("/admin/polls/login",
-                          data={"username": USERNAME, "password": PASSWORD},
-                          follow_redirects=False)
-    assert r.status_code == 303
-
-
-def csrf_from(html_text):
-    marker = "name=csrf value='"
-    start = html_text.index(marker) + len(marker)
-    return html_text[start:html_text.index("'", start)]
-
-
-async def csrf_token(client):
-    return csrf_from((await client.get("/admin/poll-bank")).text)
+async def sign_in(client) -> dict:
+    """Signs in through the SPA login and returns the CSRF header for writes."""
+    r = await client.post("/admin/api/login", json={"username": USERNAME, "password": PASSWORD})
+    assert r.status_code == 200
+    csrf = (await client.get("/admin/api/session")).json()["csrf"]
+    return {"X-CSRF-Token": csrf}
 
 
 async def bank_rows(client):
@@ -69,51 +61,56 @@ async def bank_rows(client):
         return (await session.execute(select(PollFallback).order_by(PollFallback.id))).scalars().all()
 
 
+async def seed(client):
+    async with client.session_factory() as session:
+        await polls.seed_fallbacks(session)
+
+
 VALID = {
     "question": "Should every district have a public science museum?",
     "context": "Science museums support informal learning outside the classroom.",
-    "option_0": "Yes", "option_1": "Only in larger districts", "option_2": "No", "option_3": "",
+    "options": ["Yes", "Only in larger districts", "No", ""],
     "category": "education",
 }
+BANK = "/admin/api/poll-bank"
 
 
 class TestAccess:
-    async def test_redirects_to_login_when_signed_out(self, client):
-        r = await client.get("/admin/poll-bank", follow_redirects=False)
-        assert r.status_code == 303
-        assert r.headers["location"] == "/admin/quiz/login"
+    async def test_reads_need_a_session(self, client):
+        assert (await client.get(BANK)).status_code == 401
 
-    async def test_rejects_a_post_without_the_csrf_token(self, client):
+    async def test_rejects_a_write_without_the_csrf_header(self, client):
         await sign_in(client)
-        r = await client.post("/admin/poll-bank/add", data=VALID)
+        r = await client.post(BANK, json=VALID)
         assert r.status_code == 403
         assert await bank_rows(client) == []
 
 
-class TestDashboard:
+class TestList:
     async def test_seeds_the_built_in_polls_so_they_are_visible(self, client):
         await sign_in(client)
-        r = await client.get("/admin/poll-bank?tab=list")
-        assert f"{len(FALLBACKS)} poll(s) · {len(FALLBACKS)} active" in r.text
-        assert FALLBACKS[0][0] in r.text
+        r = (await client.get(BANK)).json()
+        assert r["total"] == len(FALLBACKS) and r["active"] == len(FALLBACKS)
+        assert FALLBACKS[0][0] in [item["question"] for item in r["items"]]
+        item = r["items"][0]
+        assert {"id", "question", "context", "options", "category", "active", "usedCount", "createdAt"} <= item.keys()
 
-    async def test_warns_when_no_poll_is_active(self, client):
+    async def test_reports_when_no_poll_is_active(self, client):
         await sign_in(client)
-        await client.get("/admin/poll-bank")
+        await seed(client)
         async with client.session_factory() as session:
             for row in (await session.execute(select(PollFallback))).scalars():
                 row.active = False
             await session.commit()
-        r = await client.get("/admin/poll-bank")
-        assert "No active polls" in r.text
+        assert (await client.get(BANK)).json()["active"] == 0
 
 
 class TestAdd:
     async def test_saves_a_valid_poll_and_drops_blank_options(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/add", data={**VALID, "csrf": csrf}, follow_redirects=False)
-        assert r.status_code == 303
+        h = await sign_in(client)
+        r = await client.post(BANK, json=VALID, headers=h)
+        assert r.status_code == 200
+        assert r.json()["item"]["question"] == VALID["question"]
         added = (await bank_rows(client))[-1]
         assert added.question == VALID["question"]
         assert added.options == ["Yes", "Only in larger districts", "No"]
@@ -121,112 +118,112 @@ class TestAdd:
         assert added.active is True and added.used_count == 0 and added.created_at is not None
 
     async def test_adding_to_an_empty_table_still_seeds_the_built_ins(self, client):
-        await sign_in(client)
-        r = await client.get("/admin/poll-bank")  # sign-in cookie set; table not yet seeded by anything else
-        csrf = csrf_from(r.text)
-        async with client.session_factory() as session:
-            await session.execute(PollFallback.__table__.delete())
-            await session.commit()
-        await client.post("/admin/poll-bank/add", data={**VALID, "csrf": csrf})
+        h = await sign_in(client)
+        await client.post(BANK, json=VALID, headers=h)
         assert len(await bank_rows(client)) == len(FALLBACKS) + 1
 
     async def test_rejects_a_single_option_poll(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
+        h = await sign_in(client)
+        await seed(client)
         before = len(await bank_rows(client))
-        r = await client.post("/admin/poll-bank/add", data={
-            **VALID, "csrf": csrf, "option_1": "", "option_2": ""})
-        assert "2-4 distinct options" in r.text
-        assert VALID["question"] in r.text  # form keeps what was typed
+        r = await client.post(BANK, json={**VALID, "options": ["Yes", "", ""]}, headers=h)
+        assert r.status_code == 422
+        assert "2-4 distinct options" in r.json()["detail"]
         assert len(await bank_rows(client)) == before
 
     async def test_rejects_duplicate_options(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/add", data={
-            **VALID, "csrf": csrf, "option_0": "Yes", "option_1": "yes", "option_2": ""})
-        assert "distinct" in r.text
+        h = await sign_in(client)
+        r = await client.post(BANK, json={**VALID, "options": ["Yes", "yes"]}, headers=h)
+        assert r.status_code == 422
+        assert "distinct" in r.json()["detail"]
 
     async def test_rejects_a_question_already_in_the_bank(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
+        h = await sign_in(client)
+        await seed(client)
         before = len(await bank_rows(client))
-        r = await client.post("/admin/poll-bank/add", data={
-            **VALID, "csrf": csrf, "question": FALLBACKS[0][0].upper()})
-        assert "already in the bank" in r.text
+        r = await client.post(BANK, json={**VALID, "question": FALLBACKS[0][0].upper()}, headers=h)
+        assert r.status_code == 409
+        assert "already in the bank" in r.json()["detail"]
         assert len(await bank_rows(client)) == before
 
     async def test_rejects_an_over_long_category(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/add", data={**VALID, "csrf": csrf, "category": "x" * 51})
-        assert "Category must be 50 characters or fewer" in r.text
+        h = await sign_in(client)
+        r = await client.post(BANK, json={**VALID, "category": "x" * 51}, headers=h)
+        assert r.status_code == 422
+        assert "Category must be 50 characters or fewer" in r.json()["detail"]
 
-    async def test_escapes_html_in_what_it_echoes_back(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/add", data={
-            **VALID, "csrf": csrf, "question": "<script>alert(1)</script>", "option_1": "", "option_2": ""})
-        assert "<script>alert(1)</script>" not in r.text
+    async def test_rejects_more_than_four_options(self, client):
+        h = await sign_in(client)
+        r = await client.post(BANK, json={**VALID, "options": ["A", "B", "C", "D", "E"]}, headers=h)
+        assert r.status_code == 422
+        assert await bank_rows(client) == []
 
 
 class TestGenerate:
-    async def test_puts_the_draft_in_the_form_without_saving_it(self, client, monkeypatch):
+    async def test_returns_the_draft_without_saving_it(self, client, monkeypatch):
         async def fake(category, existing):
             assert category == "environment"
             assert FALLBACKS[0][0] in existing
             return {"question": "Should cities plant more street trees?", "context": "Trees cool streets.",
                     "options": ["Yes", "No"], "category": category}
         monkeypatch.setattr("app.poll_bank_admin.draft_bank_poll", fake)
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        async with client.session_factory() as session:
-            await polls.seed_fallbacks(session)
+        h = await sign_in(client)
+        await seed(client)
         before = len(await bank_rows(client))
-        r = await client.post("/admin/poll-bank/generate", data={"csrf": csrf, "gen_category": "environment"})
-        assert "Should cities plant more street trees?" in r.text
+        r = await client.post(f"{BANK}/generate", json={"category": " environment "}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["draft"]["question"] == "Should cities plant more street trees?"
         assert len(await bank_rows(client)) == before
 
     async def test_reports_a_failed_claude_request(self, client, monkeypatch):
         async def fake(category, existing):
+            assert category is None
             return None
         monkeypatch.setattr("app.poll_bank_admin.draft_bank_poll", fake)
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/generate", data={"csrf": csrf})
-        assert "Claude request failed" in r.text
+        h = await sign_in(client)
+        r = await client.post(f"{BANK}/generate", json={}, headers=h)
+        assert r.status_code == 502
+        assert "Claude request failed" in r.json()["detail"]
 
     async def test_reports_a_draft_that_fails_validation(self, client, monkeypatch):
         async def fake(category, existing):
             raise ValueError("Poll needs 2-4 distinct options")
         monkeypatch.setattr("app.poll_bank_admin.draft_bank_poll", fake)
-        await sign_in(client)
-        csrf = await csrf_token(client)
-        r = await client.post("/admin/poll-bank/generate", data={"csrf": csrf})
-        assert "failed validation" in r.text
+        h = await sign_in(client)
+        r = await client.post(f"{BANK}/generate", json={}, headers=h)
+        assert r.status_code == 502
+        assert "failed validation" in r.json()["detail"]
 
 
 class TestToggleAndDelete:
     async def test_toggle_flips_active(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
+        h = await sign_in(client)
+        await seed(client)
         first = (await bank_rows(client))[0]
-        await client.post(f"/admin/poll-bank/{first.id}/toggle", data={"csrf": csrf})
+        r = await client.post(f"{BANK}/{first.id}/toggle", headers=h)
+        assert r.json()["active"] is False
         assert (await bank_rows(client))[0].active is False
-        await client.post(f"/admin/poll-bank/{first.id}/toggle", data={"csrf": csrf})
+        await client.post(f"{BANK}/{first.id}/toggle", headers=h)
         assert (await bank_rows(client))[0].active is True
 
     async def test_delete_removes_the_row(self, client):
-        await sign_in(client)
-        csrf = await csrf_token(client)
+        h = await sign_in(client)
+        await seed(client)
         first = (await bank_rows(client))[0]
-        await client.post(f"/admin/poll-bank/{first.id}/delete", data={"csrf": csrf})
+        assert (await client.delete(f"{BANK}/{first.id}", headers=h)).status_code == 200
         assert all(row.id != first.id for row in await bank_rows(client))
 
-    async def test_unknown_id_is_a_404(self, client):
+    async def test_delete_needs_the_csrf_header(self, client):
         await sign_in(client)
-        csrf = await csrf_token(client)
-        assert (await client.post("/admin/poll-bank/9999/toggle", data={"csrf": csrf})).status_code == 404
+        await seed(client)
+        first = (await bank_rows(client))[0]
+        assert (await client.delete(f"{BANK}/{first.id}")).status_code == 403
+        assert len(await bank_rows(client)) == len(FALLBACKS)
+
+    async def test_unknown_id_is_a_404(self, client):
+        h = await sign_in(client)
+        assert (await client.post(f"{BANK}/9999/toggle", headers=h)).status_code == 404
+        assert (await client.delete(f"{BANK}/9999", headers=h)).status_code == 404
 
 
 class TestDraftBankPoll:

@@ -1,8 +1,12 @@
 """Human review gate for the AI-drafted Daily Quiz.
 
-The page is deliberately its own thing rather than a generalisation of
+JSON API for the admin SPA's Daily Quiz page (app/static/admin/sections/
+quiz.js). Uses the shared app.admin_session cookie like every other section;
+reads need require_admin, writes require_admin_write (CSRF header).
+
+The section is deliberately its own thing rather than a generalisation of
 poll_admin.py: a quiz is 5 questions x 4 options where a poll is one question
-plus context, and sharing the form rendering would mean parameterising nearly
+plus context, and sharing the editing logic would mean parameterising nearly
 every line. Sign-in *is* shared — see app/admin_session.py — so one login and
 one notification cover both reviews.
 
@@ -11,113 +15,84 @@ can check Claude's facts automatically. That is the whole point of the gate:
 the reviewer is the filter, and Regenerate is unlimited because redrafting
 costs Claude tokens only — no APIVerve credits.
 """
-from datetime import datetime
-from urllib.parse import parse_qs
+from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+import logging
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import html
-
-from app.admin_session import (
-    credentials_match,
-    form_fields,
-    layout,
-    login_form,
-    session_csrf,
-    set_session_cookie,
-    verify,
-)
+from app.admin_session import require_admin, require_admin_write
 from app.database import get_db
 from app.models import DailyQuiz, utc_now
 from app.services.daily_games import IST, generate_quiz, quiz_publish_at
 
-router = APIRouter(prefix="/admin/quiz")
-TITLE = "Daily Quiz Review"
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/admin/api/quiz", dependencies=[Depends(require_admin)])
 
 QUESTION_COUNT = 5
 OPTION_COUNT = 4
 
 
-def _error_page(csrf: str, message: str) -> HTMLResponse:
-    return layout(TITLE,
-        f"<h1>Daily Quiz</h1><p class=danger>Draft generation failed: {html.escape(message)}</p>"
-        f"<form method=post action='/admin/quiz/generate'><input type=hidden name=csrf value='{csrf}'>"
-        f"<button>Try again</button></form>", current="/admin/quiz")
+def _iso(value) -> str | None:
+    return value.isoformat() if value else None
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return login_form(TITLE, "/admin/quiz/login")
+def _today():
+    return datetime.now(IST).date()
 
 
-@router.post("/login")
-async def login(request: Request):
-    fields = await form_fields(request)
-    if not credentials_match(fields):
-        return layout(TITLE, "<h1>Sign in failed</h1><p class=danger>Invalid credentials.</p><a href='/admin/quiz/login'>Try again</a>")
-    response = RedirectResponse("/admin/quiz", status_code=303)
-    set_session_cookie(response, request)
-    return response
+def _quiz_json(quiz: DailyQuiz | None) -> dict:
+    """Today's quiz as the SPA needs it. Questions are padded to four options
+    so the editor always has four fields, exactly like the old form did."""
+    payload = {
+        "date": _today().isoformat(),
+        "questionCount": QUESTION_COUNT,
+        "optionCount": OPTION_COUNT,
+        "quiz": None,
+    }
+    if quiz is None:
+        return payload
+    questions = []
+    for index, q in enumerate((quiz.questions or [])[:QUESTION_COUNT]):
+        options = [str(o) for o in (q.get("options") or [])][:OPTION_COUNT]
+        options += [""] * (OPTION_COUNT - len(options))
+        correct = q.get("correct_index", 0)
+        questions.append({
+            "id": q.get("id", index + 1),
+            "question": str(q.get("question", "")),
+            "options": options,
+            "correctIndex": correct if isinstance(correct, int) else 0,
+            "explanation": str(q.get("explanation", "") or ""),
+        })
+    payload["quiz"] = {
+        "id": quiz.id,
+        "puzzleDate": quiz.puzzle_date.isoformat(),
+        "status": quiz.status,
+        "source": quiz.source,
+        "generatedAt": _iso(quiz.generated_at),
+        "publishAt": _iso(quiz.publish_at),
+        "approvedAt": _iso(quiz.approved_at),
+        # Only a draft is editable; anything else can only be regenerated.
+        "editable": quiz.status == "draft",
+        # Readers get the curated fallback set until this quiz is approved.
+        "servedToReaders": quiz.status == "approved",
+        "questions": questions,
+    }
+    return payload
 
 
-def _question_fieldset(index: int, question: dict) -> str:
-    text = html.escape(str(question.get("question", "")))
-    explanation = html.escape(str(question.get("explanation", "")))
-    correct = question.get("correct_index", 0)
-    options = list(question.get("options") or [])
-    options += [""] * (OPTION_COUNT - len(options))
-    rows = "".join(
-        f"<label class=opt>"
-        f"<input type=radio name=correct_{index} value={i}{' checked' if i == correct else ''}>"
-        f"<input name=option_{index} value='{html.escape(str(options[i]), quote=True)}'>"
-        f"</label>"
-        for i in range(OPTION_COUNT)
-    )
-    return (
-        f"<fieldset><legend>Question {index + 1}</legend>"
-        f"<textarea name=question_{index} required>{text}</textarea>"
-        f"<p class=meta>Select the correct answer.</p>{rows}"
-        f"<label>Explanation<input name=explanation_{index} value='{explanation}'></label>"
-        f"</fieldset>")
+async def _today_quiz(db: AsyncSession) -> DailyQuiz | None:
+    return await db.scalar(select(DailyQuiz).where(DailyQuiz.puzzle_date == _today()))
 
 
-@router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    csrf = session_csrf(request)
-    if not csrf:
-        return RedirectResponse("/admin/quiz/login", status_code=303)
-    today = datetime.now(IST).date()
-    quiz = await db.scalar(select(DailyQuiz).where(DailyQuiz.puzzle_date == today))
-    if not quiz:
-        return layout(TITLE,
-            f"<h1>Daily Quiz</h1><p>No quiz exists for {today}.</p>"
-            f"<form method=post action='/admin/quiz/generate'><input type=hidden name=csrf value='{csrf}'>"
-            f"<button>Generate draft</button></form>", current="/admin/quiz")
-
-    fields = "".join(_question_fieldset(i, q) for i, q in enumerate(quiz.questions[:QUESTION_COUNT]))
-    editable = quiz.status == "draft"
-    if editable:
-        controls = ("<button name=action value=approve>Approve and publish</button>"
-                    "<button name=action value=regenerate>Regenerate</button>"
-                    "<button name=action value=reject>Reject and use curated set</button>")
-    else:
-        live_warning = (
-            " onclick=\"return confirm('Regenerating takes the live quiz offline: readers get the curated "
-            "set until you approve the new draft. Continue?')\"") if quiz.status == "approved" else ""
-        controls = ("<p>This quiz is no longer a draft. "
-                    f"<button name=action value=regenerate{live_warning}>Regenerate a new draft</button></p>")
-    served = "" if quiz.status == "approved" else (
-        "<p class=meta>Readers are currently being served the curated fallback set, "
-        "not this draft.</p>")
-    return layout(TITLE,
-        f"<h1>Daily Quiz — {quiz.puzzle_date}</h1>"
-        f"<p class=meta>Status: {quiz.status} · Source: {quiz.source}</p>{served}"
-        f"<form method=post action='/admin/quiz/update'>"
-        f"<input type=hidden name=csrf value='{csrf}'>"
-        f"<input type=hidden name=quiz_id value='{quiz.id}'>{fields}{controls}</form>", current="/admin/quiz")
+@router.get("")
+async def today_quiz(db: AsyncSession = Depends(get_db)):
+    return _quiz_json(await _today_quiz(db))
 
 
 async def _redraft(db: AsyncSession, day) -> None:
@@ -136,35 +111,49 @@ async def _redraft(db: AsyncSession, day) -> None:
     await db.commit()
 
 
-@router.post("/generate")
-async def generate(request: Request, db: AsyncSession = Depends(get_db)):
-    fields = await form_fields(request)
-    verify(request, fields)
+@router.post("/generate", dependencies=[Depends(require_admin_write)])
+async def generate(db: AsyncSession = Depends(get_db)):
+    """Generate today's draft when none exists, or regenerate it. Regenerating
+    an approved quiz takes it offline (readers get the curated set until the
+    new draft is approved) — the SPA confirms that before calling."""
+    day = _today()
     try:
-        await _redraft(db, datetime.now(IST).date())
+        await _redraft(db, day)
     except HTTPException:
         raise
     except Exception as exc:
-        return _error_page(fields.get("csrf", ""), str(exc))
-    return RedirectResponse("/admin/quiz", status_code=303)
+        logger.warning("Daily quiz draft generation failed: %s", exc)
+        await db.rollback()
+        raise HTTPException(status_code=502, detail=f"Draft generation failed: {exc}. Try again.")
+    return _quiz_json(await _today_quiz(db))
 
 
-def _read_edited_questions(raw: dict[str, list[str]]) -> list[dict]:
-    """Rebuild the question list from the edited form.
+class QuestionIn(BaseModel):
+    question: str = ""
+    options: list[str] = Field(default_factory=list)
+    correctIndex: int = 0
+    explanation: str = ""
+
+
+class ApproveIn(BaseModel):
+    questions: list[QuestionIn]
+
+
+def _read_edited_questions(items: list[QuestionIn]) -> list[dict]:
+    """Rebuild the question list from the reviewer's edits.
 
     Validated the same way generated content is: the reviewer can introduce a
     blank question or a duplicate option just as easily as Claude can, and an
     approved quiz goes straight to readers with nothing downstream to catch it.
     """
+    if len(items) != QUESTION_COUNT:
+        raise ValueError(f"A quiz needs exactly {QUESTION_COUNT} questions")
     questions = []
-    for index in range(QUESTION_COUNT):
-        text = (raw.get(f"question_{index}", [""])[0] or "").strip()
-        options = [option.strip() for option in raw.get(f"option_{index}", [])]
-        explanation = (raw.get(f"explanation_{index}", [""])[0] or "").strip()
-        try:
-            correct = int(raw.get(f"correct_{index}", ["0"])[0])
-        except ValueError:
-            correct = 0
+    for index, item in enumerate(items):
+        text = (item.question or "").strip()
+        options = [(option or "").strip() for option in item.options]
+        explanation = (item.explanation or "").strip()
+        correct = item.correctIndex
         if not text:
             raise ValueError(f"Question {index + 1} is empty")
         if len(options) != OPTION_COUNT or any(not option for option in options):
@@ -183,46 +172,35 @@ def _read_edited_questions(raw: dict[str, list[str]]) -> list[dict]:
     return questions
 
 
-@router.post("/update")
-async def update(request: Request, db: AsyncSession = Depends(get_db)):
-    body = (await request.body()).decode()
-    raw = parse_qs(body, keep_blank_values=True)
-    fields = {key: values[-1] for key, values in raw.items()}
-    verify(request, fields)
-    today = datetime.now(IST).date()
-    action = fields.get("action")
-
-    if action == "regenerate":
-        try:
-            await _redraft(db, today)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            return _error_page(fields.get("csrf", ""), str(exc))
-        return RedirectResponse("/admin/quiz", status_code=303)
-
-    quiz = await db.get(DailyQuiz, int(fields["quiz_id"]))
+@router.post("/{quiz_id}/approve", dependencies=[Depends(require_admin_write)])
+async def approve(quiz_id: int, body: ApproveIn, db: AsyncSession = Depends(get_db)):
+    """Save the reviewer's edits and publish. Edits are only ever saved by
+    approving, the same as the old form."""
+    quiz = await db.get(DailyQuiz, quiz_id)
     if quiz is None:
         raise HTTPException(status_code=404, detail="Quiz not found")
-
-    if action == "reject":
-        if quiz.status != "draft":
-            raise HTTPException(status_code=409, detail="Only a draft can be rejected")
-        quiz.status = "rejected"
-        await db.commit()
-        return RedirectResponse("/admin/quiz", status_code=303)
-
     if quiz.status != "draft":
         raise HTTPException(status_code=409, detail="Only a draft can be approved")
     try:
-        questions = _read_edited_questions(raw)
+        questions = _read_edited_questions(body.questions)
     except ValueError as exc:
-        return layout(TITLE,
-            f"<h1>Daily Quiz</h1><p class=danger>{html.escape(str(exc))}</p>"
-            f"<a href='/admin/quiz'>Back to the draft</a>", current="/admin/quiz")
+        raise HTTPException(status_code=400, detail=str(exc))
     quiz.questions = questions
     quiz.status = "approved"
     quiz.approved_at = utc_now()
     quiz.publish_at = quiz.publish_at or quiz_publish_at(quiz.puzzle_date)
     await db.commit()
-    return RedirectResponse("/admin/quiz", status_code=303)
+    return _quiz_json(await _today_quiz(db))
+
+
+@router.post("/{quiz_id}/reject", dependencies=[Depends(require_admin_write)])
+async def reject(quiz_id: int, db: AsyncSession = Depends(get_db)):
+    """Reject the draft; readers keep getting the curated fallback set."""
+    quiz = await db.get(DailyQuiz, quiz_id)
+    if quiz is None:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if quiz.status != "draft":
+        raise HTTPException(status_code=409, detail="Only a draft can be rejected")
+    quiz.status = "rejected"
+    await db.commit()
+    return _quiz_json(await _today_quiz(db))

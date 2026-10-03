@@ -1,34 +1,18 @@
-"""The reviewer's landing page: what needs a decision today, in one place.
+"""What needs a reviewer's decision today: the poll and quiz drafts that
+expire at 09:00 IST if nobody acts on them.
 
-Exists because there is one notification for one person doing two jobs. Deep
-linking the push straight at either review page would leave the other one
-silently waiting, which is exactly the failure mode a single notification is
-supposed to prevent.
+This used to render the admin landing page. That page is now the Today view
+of the admin SPA (app/static/admin/, fed by GET /admin/api/overview in
+app/admin_api.py); the helper below stays here because the morning push
+(app/services/admin_notify.py) and that overview must never disagree about
+what is outstanding.
 """
 from __future__ import annotations
 
-import html
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import (
-    credentials_match,
-    form_fields,
-    layout,
-    login_form,
-    session_csrf,
-    set_session_cookie,
-)
-from app.database import get_db
-from app.models import DailyPoll, DailyQuiz, Feedback
-from app.services.polls import IST
-
-router = APIRouter(prefix="/admin")
-TITLE = "Daily Review"
+from app.models import DailyPoll, DailyQuiz
 
 
 async def pending_reviews(db: AsyncSession, day) -> dict[str, dict]:
@@ -57,68 +41,3 @@ async def pending_reviews(db: AsyncSession, day) -> dict[str, dict]:
             "url": "/admin/quiz",
         },
     }
-
-
-def _task_card(name: str, task: dict) -> str:
-    if task["waiting"]:
-        state = "<b class=danger>Needs review</b>"
-    elif not task["exists"]:
-        state = "<b class=danger>Missing</b>"
-    elif task["status"] == "rejected":
-        state = ("<span class=meta>Rejected — a fallback poll goes live at 09:00 IST</span>"
-                 if name == "Poll"
-                 else "<span class=meta>Rejected — serving the curated set</span>")
-    else:
-        state = "<b class=done>Done</b>"
-    return (
-        f"<div class=task><h2>{name}</h2>"
-        f"<p class=meta>{state} · status: {task['status'] or 'none'}</p>"
-        f"<p>{html.escape(str(task['summary'])[:160])}</p>"
-        f"<a href='{task['url']}'>Open {name.lower()} review →</a></div>")
-
-
-@router.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return login_form(TITLE, "/admin/login")
-
-
-@router.post("/login")
-async def login(request: Request):
-    fields = await form_fields(request)
-    if not credentials_match(fields):
-        return layout(TITLE, "<h1>Sign in failed</h1><p class=danger>Invalid credentials.</p>"
-                             "<a href='/admin/login'>Try again</a>")
-    response = RedirectResponse("/admin", status_code=303)
-    set_session_cookie(response, request)
-    return response
-
-
-@router.get("", response_class=HTMLResponse)
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def home(request: Request, db: AsyncSession = Depends(get_db)):
-    if not session_csrf(request):
-        return RedirectResponse("/admin/login", status_code=303)
-    today = datetime.now(IST).date()
-    tasks = await pending_reviews(db, today)
-    waiting = sum(1 for task in tasks.values() if task["waiting"])
-    # Counts only the poll and quiz drafts (pending_reviews). Story reports,
-    # Breaking candidates and Explainers awaiting review are NOT counted here;
-    # find them under their own pages in the sidebar.
-    heading = ("No poll or quiz drafts waiting" if not waiting
-               else f"{waiting} poll/quiz draft{'s' if waiting > 1 else ''} to review")
-    # Feedback is not part of pending_reviews(): that dict drives the morning
-    # push, which is about the two drafts that expire if nobody acts on them
-    # today. Unread feedback is not urgent in the same way and must not make
-    # the notification fire, but the reviewer is already here, so show it.
-    unread = await db.scalar(
-        select(func.count()).select_from(Feedback).where(Feedback.status == "new")) or 0
-    feedback_card = (
-        f"<div class=task><h2>Feedback</h2>"
-        f"<p class=meta>{'<b class=danger>' + str(unread) + ' unread</b>' if unread else 'Nothing unread'}</p>"
-        f"<a href='/admin/feedback'>Open feedback →</a></div>")
-
-    return layout(TITLE, (
-        f"<h1>Daily Review — {today}</h1><p class=meta>{heading}</p>"
-        f"{_task_card('Poll', tasks['poll'])}"
-        f"{_task_card('Quiz', tasks['quiz'])}"
-        f"{feedback_card}"), current="/admin")

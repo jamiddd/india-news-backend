@@ -143,7 +143,8 @@ from app.poll_admin import router as poll_admin_router
 from app.quiz_admin import router as quiz_admin_router
 from app.quiz_bank_admin import router as quiz_bank_admin_router
 from app.poll_bank_admin import router as poll_bank_admin_router
-from app.admin_home import router as admin_home_router
+from app.admin_api import router as admin_api_router
+from app.admin_spa import assets as admin_assets, router as admin_spa_router
 from app.story_reports_admin import router as story_reports_admin_router
 from app.feedback_admin import router as feedback_admin_router
 from app.admin_donations import router as admin_donations_router
@@ -501,7 +502,7 @@ app.include_router(poll_admin_router)
 app.include_router(quiz_admin_router)
 app.include_router(quiz_bank_admin_router)
 app.include_router(poll_bank_admin_router)
-app.include_router(admin_home_router)
+app.include_router(admin_api_router)
 app.include_router(story_reports_admin_router)
 app.include_router(feedback_admin_router)
 app.include_router(admin_donations_router)
@@ -562,6 +563,7 @@ class CachedStaticFiles(StaticFiles):
 
 
 app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/admin/assets", admin_assets, name="admin_assets")
 
 # Every JSON response — cluster lists especially, with full article bodies
 # and JSON columns — was going out uncompressed end to end (confirmed: no
@@ -3666,11 +3668,11 @@ async def admin_engagement(request: Request, db: AsyncSession = Depends(get_db))
     }
 
 
-# The browsable /admin/timelines page (app/admin_timelines.py) replaced the
-# bare admin_list_timeline_picks/admin_pick_timeline/admin_unpick_timeline
-# JSON endpoints that used to live here — same StoryTimelineFeature rows and
-# the same _require_admin gate, now with a page and a headline search
-# instead of a cluster_id you had to already know.
+# The admin SPA's Timelines page (app/admin_timelines.py, /admin/api/timelines)
+# replaced the bare admin_list_timeline_picks/admin_pick_timeline/
+# admin_unpick_timeline JSON endpoints that used to live here — same
+# StoryTimelineFeature rows behind the same admin session, now with a headline
+# search instead of a cluster_id you had to already know.
 
 
 @app.post(f"{settings.API_V1_STR}/users/{{user_id}}/saved-stories", status_code=200)
@@ -4259,3 +4261,9 @@ async def list_subscribed_sources(
             for follow, source in rows
         ]
     )
+
+
+# The admin SPA's catch-all GET /admin/{path} (see app/admin_spa.py). Must stay
+# the last route registered: anything under /admin added after it would be
+# shadowed by the shell.
+app.include_router(admin_spa_router)

@@ -206,7 +206,7 @@ async def test_an_unexpected_error_is_reported_not_raised(service, session_facto
     assert not outcome.ok and "kaboom" in outcome.message
 
 
-# --- the admin page -------------------------------------------------------
+# --- the admin API (/admin/api/timelines) ----------------------------------
 
 
 @pytest.fixture(autouse=True)
@@ -253,83 +253,77 @@ async def admin(session_factory, monkeypatch):
     app.dependency_overrides.clear()
 
 
-async def sign_in(client):
-    r = await client.post("/admin/timelines/login", data={"username": USERNAME, "password": PASSWORD},
-                          follow_redirects=False)
-    assert r.status_code == 303
+async def sign_in(client) -> str:
+    r = await client.post("/admin/api/login", json={"username": USERNAME, "password": PASSWORD})
+    assert r.status_code == 200
+    return (await client.get("/admin/api/session")).json()["csrf"]
 
 
-def csrf_from(page):
-    marker = "name=csrf value='"
-    start = page.index(marker) + len(marker)
-    return page[start:page.index("'", start)]
+async def narrate(client, row_id, csrf):
+    return await client.post("/admin/api/timelines/narrate", json={"rowId": row_id},
+                             headers={"X-CSRF-Token": csrf})
 
 
 async def test_narrate_requires_a_signed_in_session_and_csrf(admin, session_factory):
     row_id = await add_row(session_factory)
-    assert (await admin.post("/admin/timelines/narrate", data={"row_id": row_id})).status_code == 403
+    assert (await narrate(admin, row_id, "")).status_code == 401
     await sign_in(admin)
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": row_id, "csrf": "wrong"})
+    assert (await narrate(admin, row_id, "wrong")).status_code == 403
+    r = await admin.post("/admin/api/timelines/narrate", json={"rowId": row_id})
     assert r.status_code == 403
     assert admin.scheduled == []
 
 
 async def test_status_endpoint_requires_sign_in(admin, session_factory):
     row_id = await add_row(session_factory)
-    assert (await admin.get(f"/admin/timelines/narrate/{row_id}")).status_code == 401
+    assert (await admin.get(f"/admin/api/timelines/narrate/{row_id}")).status_code == 401
+    assert (await admin.get("/admin/api/timelines")).status_code == 401
 
 
 async def test_the_button_schedules_the_run_and_returns_immediately(admin, session_factory):
     row_id = await add_row(session_factory)
-    await sign_in(admin)
-    csrf = csrf_from((await admin.get("/admin/timelines")).text)
+    csrf = await sign_in(admin)
 
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": row_id, "csrf": csrf},
-                         follow_redirects=False)
+    r = await narrate(admin, row_id, csrf)
 
-    assert r.status_code == 303 and r.headers["location"] == f"/admin/timelines#row-{row_id}"
+    assert r.status_code == 200 and r.json() == {"ok": True, "rowId": row_id, "state": "running"}
     assert admin.scheduled == [row_id]
-    assert admin.state["statuses"][row_id]["state"] == "running"  # visible on the redirected page
+    assert admin.state["statuses"][row_id]["state"] == "running"  # visible on the reloaded page
 
 
 async def test_a_second_click_while_running_does_not_start_another(admin, session_factory):
     row_id = await add_row(session_factory)
-    await sign_in(admin)
-    csrf = csrf_from((await admin.get("/admin/timelines")).text)
+    csrf = await sign_in(admin)
     admin.state["running"] = True
 
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": row_id, "csrf": csrf},
-                         follow_redirects=False)
+    r = await narrate(admin, row_id, csrf)
 
-    assert r.headers["location"].endswith("notice=already-running")
+    assert r.status_code == 409 and "already being narrated" in r.json()["detail"]
     assert admin.scheduled == []
 
 
-async def test_ineligible_and_unconfigured_rows_are_refused_with_a_notice(admin, session_factory):
+async def test_ineligible_and_unconfigured_rows_are_refused_with_a_reason(admin, session_factory):
     bad = await add_row(session_factory, anchor_cluster_id=2, coherent=False)
     good = await add_row(session_factory, anchor_cluster_id=3)
-    await sign_in(admin)
-    csrf = csrf_from((await admin.get("/admin/timelines")).text)
+    csrf = await sign_in(admin)
 
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": bad, "csrf": csrf}, follow_redirects=False)
-    assert r.headers["location"].endswith("notice=not-eligible")
+    r = await narrate(admin, bad, csrf)
+    assert r.status_code == 409 and "can't be narrated" in r.json()["detail"]
 
     admin.state["configured"] = False
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": good, "csrf": csrf}, follow_redirects=False)
-    assert r.headers["location"].endswith("notice=not-configured")
+    r = await narrate(admin, good, csrf)
+    assert r.status_code == 503 and "isn't configured" in r.json()["detail"]
     assert admin.scheduled == []
 
 
 async def test_unknown_row_is_a_404(admin, session_factory):
-    await add_row(session_factory)  # gives the page a form to take the CSRF token from
-    await sign_in(admin)
-    csrf = csrf_from((await admin.get("/admin/timelines")).text)
-    r = await admin.post("/admin/timelines/narrate", data={"row_id": 9999, "csrf": csrf})
+    csrf = await sign_in(admin)
+    r = await narrate(admin, 9999, csrf)
     assert r.status_code == 404
     assert admin.scheduled == []
 
 
-async def test_dashboard_shows_each_narration_state(admin, session_factory):
+async def test_list_reports_each_narration_state(admin, session_factory):
     none_id = await add_row(session_factory, anchor_cluster_id=10, title="No audio")
     old_id = await add_row(session_factory, anchor_cluster_id=11, title="Old voice",
                            audio_url="https://cdn/x.m4a", audio_duration_seconds=100,
@@ -337,30 +331,32 @@ async def test_dashboard_shows_each_narration_state(admin, session_factory):
     new_id = await add_row(session_factory, anchor_cluster_id=12, title="New voice",
                            audio_url="https://cdn/y.m4a", audio_duration_seconds=305,
                            spoken_script=SPOKEN)
-    await add_row(session_factory, anchor_cluster_id=13, title="Not coherent", coherent=False)
+    bad_id = await add_row(session_factory, anchor_cluster_id=13, title="Not coherent", coherent=False)
     admin.state["statuses"][none_id] = {"state": "failed", "message": "Sarvam/upload failed",
                                         "at": "2026-09-22T06:00:00+00:00"}
     await sign_in(admin)
 
-    page = (await admin.get("/admin/timelines")).text
+    body = (await admin.get("/admin/api/timelines")).json()
+    rows = {r["id"]: r for r in body["rows"]}
 
-    assert "No narration audio yet." in page
-    assert "Older narration (previous voice)" in page and "1:40" in page
-    assert "Current narration" in page and "5:05" in page
-    assert "Last run failed:" in page and "Sarvam/upload failed" in page
-    assert page.count("Generate narration") >= 1 and "Regenerate narration" in page
-    assert "(not a coherent timeline)" in page  # button disabled with the reason
-    assert "location.reload" not in page  # nothing running -> no auto-refresh
-    assert new_id and old_id
+    assert rows[none_id]["audio"] is None
+    assert rows[none_id]["narration"] == {"state": "failed", "message": "Sarvam/upload failed",
+                                          "at": "2026-09-22T06:00:00+00:00"}
+    assert rows[old_id]["audio"]["isCurrent"] is False and rows[old_id]["audio"]["durationSeconds"] == 100
+    assert rows[new_id]["audio"]["isCurrent"] is True and rows[new_id]["audio"]["durationSeconds"] == 305
+    assert rows[bad_id]["narrateBlocked"] == "not a coherent timeline"  # button disabled with the reason
+    assert rows[new_id]["narrateBlocked"] is None
+    assert body["anyRunning"] is False  # nothing running -> no polling
+    assert body["configured"] is True and body["narrateConfirm"]
 
 
-async def test_dashboard_auto_refreshes_while_a_run_is_in_flight(admin, session_factory):
+async def test_list_flags_a_run_in_flight_for_polling(admin, session_factory):
     row_id = await add_row(session_factory)
     admin.state["statuses"][row_id] = {"state": "running", "message": "", "at": "2026-09-22T06:00:00+00:00"}
     await sign_in(admin)
-    page = (await admin.get("/admin/timelines")).text
-    assert "Generating" in page and "location.reload" in page
-    assert "<button disabled>Generating" in page
+    body = (await admin.get("/admin/api/timelines")).json()
+    assert body["anyRunning"] is True
+    assert body["rows"][0]["narration"]["state"] == "running"
 
 
 async def test_status_endpoint_reports_state_and_audio(admin, session_factory):
@@ -368,6 +364,6 @@ async def test_status_endpoint_reports_state_and_audio(admin, session_factory):
     admin.state["statuses"][row_id] = {"state": "done", "message": "narration saved (5:05)",
                                        "at": "2026-09-22T06:00:00+00:00"}
     await sign_in(admin)
-    body = (await admin.get(f"/admin/timelines/narrate/{row_id}")).json()
-    assert body["state"] == "done" and body["has_audio"] and body["audio_is_current"]
-    assert (await admin.get("/admin/timelines/narrate/9999")).status_code == 404
+    body = (await admin.get(f"/admin/api/timelines/narrate/{row_id}")).json()
+    assert body["state"] == "done" and body["hasAudio"] and body["audioIsCurrent"]
+    assert (await admin.get("/admin/api/timelines/narrate/9999")).status_code == 404

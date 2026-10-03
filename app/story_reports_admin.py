@@ -1,39 +1,27 @@
 """Reviewing user-submitted story reports (misleading/offensive/etc flags).
 
-Used to carry its own copy of the signed-cookie session under a `poll_admin`
-cookie (see git history) — same credentials as everything else, but a
-separate sign-in, so opening this page after signing in anywhere else in the
-admin still prompted for a password. Migrated onto the shared
-app.admin_session cookie 2026-09-08 to close that gap; no other page carries
-its own auth plumbing anymore.
+JSON API for the admin SPA's Story reports page (app/static/admin/sections/
+reports.js). Uses the shared app.admin_session cookie like every other
+section; reads need require_admin, writes require_admin_write (CSRF header).
+
+A report is "open" until a reviewer marks it reviewed or dismisses it. The
+SPA lists open ones by default and can show the closed ones too, which the old
+HTML page never could.
 """
 from __future__ import annotations
 
-import html
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import (
-    credentials_match,
-    form_fields,
-    layout,
-    login_form,
-    session_csrf,
-    set_session_cookie,
-    verify,
-)
+from app.admin_session import require_admin, require_admin_write
 from app.database import get_db
-from app.models import StoryReport
+from app.models import StoryCluster, StoryReport
 
-_NOTE = ("<p class=meta>Only open reports are listed. Marking one reviewed or dismissed removes it "
-         "from this page, and there is no way to reopen it here. \u201cReported by\u201d is the "
-         "reporter's account id.</p>")
-
-router = APIRouter(prefix="/admin/reports")
-TITLE = "Story Reports"
+router = APIRouter(prefix="/admin/api/reports", dependencies=[Depends(require_admin)])
 
 REASON_LABELS = {
     "misleading": "Misleading / Clickbait",
@@ -42,70 +30,71 @@ REASON_LABELS = {
     "duplicate_spam": "Duplicate / Spam",
     "other": "Other",
 }
+STATUSES = ("open", "reviewed", "dismissed")
+LIST_LIMIT = 1000
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return login_form(TITLE, "/admin/reports/login")
+def _target(report: StoryReport, headline: str | None) -> dict:
+    if report.cluster_id:
+        return {"kind": "story", "id": report.cluster_id, "title": headline or f"Story {report.cluster_id}",
+                "url": f"/api/v1/clusters/{report.cluster_id}"}
+    if report.timeline_feature_id:
+        return {"kind": "timeline", "id": report.timeline_feature_id, "title": f"Timeline {report.timeline_feature_id}",
+                "url": f"/api/v1/timelines/{report.timeline_feature_id}"}
+    if report.explainer_id:
+        return {"kind": "explainer", "id": report.explainer_id, "title": f"Explainer {report.explainer_id}",
+                "url": f"/api/v1/explainers/{report.explainer_id}"}
+    return {"kind": "deleted", "id": None, "title": "Content deleted", "url": None}
 
 
-@router.post("/login")
-async def login(request: Request):
-    fields = await form_fields(request)
-    if not credentials_match(fields):
-        return layout(TITLE, "<h1>Sign in failed</h1><p class=danger>Invalid credentials.</p>"
-                             "<a href='/admin/reports/login'>Try again</a>")
-    response = RedirectResponse("/admin/reports", status_code=303)
-    set_session_cookie(response, request)
-    return response
+@router.get("")
+async def list_reports(status: str = "open", db: AsyncSession = Depends(get_db)):
+    counts = dict((await db.execute(
+        select(StoryReport.status, func.count()).group_by(StoryReport.status))).all())
+    query = (select(StoryReport, StoryCluster.headline)
+             .outerjoin(StoryCluster, StoryCluster.id == StoryReport.cluster_id)
+             .order_by(StoryReport.created_at.desc()).limit(LIST_LIMIT))
+    if status in STATUSES:
+        query = query.where(StoryReport.status == status)
+    rows = (await db.execute(query)).all()
+    return {
+        "counts": {s: counts.get(s, 0) for s in STATUSES},
+        "reasons": REASON_LABELS,
+        "items": [{
+            "id": r.id,
+            "reason": r.reason,
+            "reasonLabel": REASON_LABELS.get(r.reason, r.reason),
+            "note": r.note,
+            "userId": r.user_id,
+            "status": r.status,
+            "createdAt": r.created_at.isoformat() if r.created_at else None,
+            "target": _target(r, headline),
+        } for r, headline in rows],
+    }
 
 
-@router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    csrf = session_csrf(request)
-    if not csrf:
-        return RedirectResponse("/admin/reports/login", status_code=303)
+class DecideIn(BaseModel):
+    action: Literal["reviewed", "dismissed", "open"]
 
-    reports = (await db.execute(
-        select(StoryReport).where(StoryReport.status == "open").order_by(StoryReport.created_at.desc())
-    )).scalars().all()
 
-    if not reports:
-        return layout(TITLE, f"<h1>Story Reports</h1><p>No open reports.</p>{_NOTE}", current="/admin/reports")
+class BulkDecideIn(DecideIn):
+    ids: list[int] = Field(min_length=1, max_length=500)
 
-    rows = []
+
+@router.post("/bulk", dependencies=[Depends(require_admin_write)])
+async def decide_many(body: BulkDecideIn, db: AsyncSession = Depends(get_db)):
+    reports = (await db.execute(select(StoryReport).where(StoryReport.id.in_(body.ids)))).scalars().all()
     for report in reports:
-        reason_text = html.escape(REASON_LABELS.get(report.reason, report.reason))
-        note_text = f"<p>{html.escape(report.note)}</p>" if report.note else ""
-        if report.cluster_id:
-            source = f"<a target=_blank href='/api/v1/clusters/{report.cluster_id}'>cluster {report.cluster_id}</a>"
-        elif report.timeline_feature_id:
-            source = f"<a target=_blank href='/api/v1/timelines/{report.timeline_feature_id}'>timeline {report.timeline_feature_id}</a>"
-        elif report.explainer_id:
-            source = f"<a target=_blank href='/api/v1/explainers/{report.explainer_id}'>explainer {report.explainer_id}</a>"
-        else:
-            source = "content deleted"
-        rows.append(
-            f"<div class=report><p class=meta>{report.created_at} · reported by {html.escape(report.user_id)} · {source}</p>"
-            f"<p><b>{reason_text}</b></p>{note_text}"
-            f"<form method=post action='/admin/reports/update'><input type=hidden name=csrf value='{csrf}'>"
-            f"<input type=hidden name=report_id value='{report.id}'>"
-            f"<button name=action value=reviewed>Mark reviewed</button>"
-            f"<button name=action value=dismissed>Dismiss</button></form></div>"
-        )
-    return layout(TITLE, f"<h1>Story Reports</h1>{_NOTE}{''.join(rows)}", current="/admin/reports")
+        report.status = body.action
+    await db.commit()
+    return {"ok": True, "updated": len(reports)}
 
 
-@router.post("/update")
-async def update(request: Request, db: AsyncSession = Depends(get_db)):
-    fields = await form_fields(request)
-    verify(request, fields)
-    report = await db.get(StoryReport, int(fields["report_id"]))
+@router.post("/{report_id}", dependencies=[Depends(require_admin_write)])
+async def decide(report_id: int, body: DecideIn, db: AsyncSession = Depends(get_db)):
+    report = await db.get(StoryReport, report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    action = fields.get("action")
-    if action not in ("reviewed", "dismissed"):
-        raise HTTPException(status_code=400, detail="Invalid action")
-    report.status = action
+    report.status = body.action
     await db.commit()
-    return RedirectResponse("/admin/reports", status_code=303)
+    return {"ok": True, "id": report_id, "status": body.action}

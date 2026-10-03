@@ -3,38 +3,36 @@ Announcement and the public GET /announcements/active endpoint in
 app/main.py. Shows events, special offers or extra info at the top of the
 app for a scheduled window, without a client release.
 
-Same session/CSRF/nav/login plumbing as app/admin_topics.py.
+JSON API for the admin SPA's Announcements page (app/static/admin/sections/
+announcements.js). Uses the shared app.admin_session cookie like every other
+section; reads need require_admin, writes require_admin_write (CSRF header).
+
+Several rows can be active at once; the app shows them one at a time,
+highest priority first. Rows auto-expire at their end time, so the list only
+shows what is live or still to come — there is nothing to clean up.
 """
 from __future__ import annotations
 
-import html
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Request
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
 
-from app.admin_session import (
-    credentials_match,
-    custom_select,
-    form_fields,
-    layout,
-    login_form,
-    session_csrf,
-    set_session_cookie,
-    verify,
-)
+from app.admin_session import require_admin, require_admin_write
 from app.database import get_db
 from app.models import Announcement, utc_now
 from app.redis_client import get_redis_client
 
 KINDS = ("event", "offer", "info")
 ACTION_TYPES = ("", "url", "story", "paywall")
+TITLE_MAX, BODY_MAX, CTA_MAX, ACTION_VALUE_MAX = 120, 240, 40, 500
 
 # The admin form works in IST (fixed +05:30, no DST); storage stays UTC.
 IST = timezone(timedelta(hours=5, minutes=30))
+
+router = APIRouter(prefix="/admin/api/announcements", dependencies=[Depends(require_admin)])
 
 
 async def _invalidate_active_cache() -> None:
@@ -48,148 +46,118 @@ async def _invalidate_active_cache() -> None:
     except Exception:
         pass
 
-router = APIRouter(prefix="/admin/announcements")
-TITLE = "Announcements"
+
+def _utc(dt: datetime) -> datetime:
+    # SQLite (tests) hands back naive datetimes; they are UTC.
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _parse_local_dt(raw: str, field: str) -> datetime:
-    # <input type=datetime-local> posts "YYYY-MM-DDTHH:MM" with no
+def _parse_local_dt(raw: str, label: str) -> datetime:
+    # The form's <input type=datetime-local> sends "YYYY-MM-DDTHH:MM" with no
     # timezone. Interpreted as IST, then converted to UTC for storage in
     # Announcement.starts_at/ends_at's DateTime(timezone=True) columns.
     try:
         return datetime.fromisoformat(raw).replace(tzinfo=IST).astimezone(timezone.utc)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"{field} must be YYYY-MM-DDTHH:MM")
+        raise HTTPException(status_code=400, detail=f"{label} must be a date and time (YYYY-MM-DDTHH:MM, IST).")
 
 
-@router.get("/login", response_class=HTMLResponse)
-async def login_page():
-    return login_form(TITLE, "/admin/announcements/login")
+def _status(row: Announcement, now: datetime) -> str:
+    starts, ends = _utc(row.starts_at), _utc(row.ends_at)
+    if starts <= now < ends:
+        return "active"
+    return "upcoming" if starts > now else "expired"
 
 
-@router.post("/login")
-async def login(request: Request):
-    fields = await form_fields(request)
-    if not credentials_match(fields):
-        return layout(TITLE, "<h1>Sign in failed</h1><p class=danger>Invalid credentials.</p>"
-                             "<a href='/admin/announcements/login'>Try again</a>")
-    response = RedirectResponse("/admin/announcements", status_code=303)
-    set_session_cookie(response, request)
-    return response
+def _out(row: Announcement, now: datetime) -> dict:
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "title": row.title,
+        "body": row.body,
+        "ctaLabel": row.cta_label,
+        "actionType": row.action_type,
+        "actionValue": row.action_value,
+        "startsAt": _utc(row.starts_at).isoformat(),
+        "endsAt": _utc(row.ends_at).isoformat(),
+        "priority": row.priority,
+        "status": _status(row, now),
+        "createdAt": _utc(row.created_at).isoformat() if row.created_at else None,
+    }
 
 
-def _fmt_ist(dt: datetime) -> str:
-    return dt.astimezone(IST).strftime("%Y-%m-%d %H:%M")
-
-
-def _row(row: Announcement, csrf: str) -> str:
-    active = row.starts_at <= utc_now() < row.ends_at
-    status = "<b>active</b>" if active else ("upcoming" if row.starts_at > utc_now() else "expired")
-    return (
-        f"<tr><td>{row.kind}</td>"
-        f"<td>{html.escape(row.title)}</td>"
-        f"<td>{_fmt_ist(row.starts_at)}</td>"
-        f"<td>{_fmt_ist(row.ends_at)}</td>"
-        f"<td>{row.priority}</td>"
-        f"<td>{status}</td>"
-        f"<td><form method=post action='/admin/announcements/{row.id}/delete'>"
-        f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
-        f"<button class=danger>Delete</button></form></td></tr>"
-    )
-
-
-@router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    csrf = session_csrf(request)
-    if not csrf:
-        return RedirectResponse("/admin/announcements/login", status_code=303)
-
+@router.get("")
+async def list_announcements(db: AsyncSession = Depends(get_db)):
+    now = utc_now()
     rows = (await db.execute(
-        select(Announcement).where(Announcement.ends_at >= utc_now())
+        select(Announcement).where(Announcement.ends_at >= now)
         .order_by(Announcement.starts_at, Announcement.priority.desc())
     )).scalars().all()
-
-    table = (
-        "<table><tr><th>Kind</th><th>Title</th><th>Starts (IST)</th><th>Ends (IST)</th>"
-        "<th>Priority</th><th>Status</th><th></th></tr>"
-        + "".join(_row(r, csrf) for r in rows)
-        + "</table>"
-        if rows else "<p class=meta>No announcements scheduled from now onward.</p>"
-    )
-
-    kind_select = custom_select("kind", [(k, k) for k in KINDS])
-    action_select = custom_select(
-        "action_type", [(a, a or "(none)") for a in ACTION_TYPES]
-    )
-
-    body = (
-        f"<h1>Announcements</h1>"
-        f"<p class=meta>Shown one at a time at the top of the app (highest priority first), "
-        f"queued while active. Auto-expires at End — nothing to clean up.</p>"
-        f"<form method=post action='/admin/announcements/add'>"
-        f"<input type=hidden name=csrf value='{html.escape(csrf)}'>"
-        f"<label>Kind{kind_select}</label>"
-        f"<label>Title<input name=title maxlength=120 required></label>"
-        f"<label>Body<input name=body maxlength=240></label>"
-        f"<label>CTA label<input name=cta_label maxlength=40></label>"
-        f"<label>Action type{action_select}</label>"
-        f"<label>Action value (URL or story cluster id)<input name=action_value maxlength=500></label>"
-        f"<label>Starts (IST)<input type=datetime-local name=starts_at required></label>"
-        f"<label>Ends (IST)<input type=datetime-local name=ends_at required></label>"
-        f"<label>Priority (higher shows first)<input type=number name=priority value=0></label>"
-        f"<button>Add announcement</button></form>"
-        f"<h2>Scheduled ({len(rows)})</h2>{table}"
-    )
-    return layout(TITLE, body, current="/admin/announcements")
+    return {
+        "now": now.isoformat(),
+        "kinds": list(KINDS),
+        "actionTypes": [a for a in ACTION_TYPES if a],
+        "items": [_out(r, now) for r in rows],
+    }
 
 
-@router.post("/add")
-async def add_announcement(request: Request, db: AsyncSession = Depends(get_db)):
-    fields = await form_fields(request)
-    verify(request, fields)
+class AnnouncementIn(BaseModel):
+    kind: str = "info"
+    title: str = ""
+    body: str | None = None
+    ctaLabel: str | None = None
+    actionType: str | None = None
+    actionValue: str | None = None
+    startsAt: str = ""  # "YYYY-MM-DDTHH:MM" in IST
+    endsAt: str = ""
+    priority: int = 0
 
-    kind = fields.get("kind", "info")
-    if kind not in KINDS:
-        raise HTTPException(status_code=400, detail="invalid kind")
-    title = fields.get("title", "").strip()
+
+def _clean(value: str | None, label: str, limit: int) -> str | None:
+    value = (value or "").strip()
+    if len(value) > limit:
+        raise HTTPException(status_code=400, detail=f"{label} can be at most {limit} characters.")
+    return value or None
+
+
+@router.post("", dependencies=[Depends(require_admin_write)])
+async def add_announcement(body: AnnouncementIn, db: AsyncSession = Depends(get_db)):
+    if body.kind not in KINDS:
+        raise HTTPException(status_code=400, detail=f"Kind must be one of: {', '.join(KINDS)}.")
+    title = _clean(body.title, "Title", TITLE_MAX)
     if not title:
-        raise HTTPException(status_code=400, detail="title is required")
-    body = (fields.get("body") or "").strip() or None
-    cta_label = (fields.get("cta_label") or "").strip() or None
-    action_type = fields.get("action_type") or ""
+        raise HTTPException(status_code=400, detail="Give the announcement a title.")
+    action_type = body.actionType or ""
     if action_type not in ACTION_TYPES:
-        raise HTTPException(status_code=400, detail="invalid action_type")
-    action_value = (fields.get("action_value") or "").strip() or None
-    starts_at = _parse_local_dt(fields.get("starts_at", ""), "starts_at")
-    ends_at = _parse_local_dt(fields.get("ends_at", ""), "ends_at")
+        raise HTTPException(status_code=400, detail="Action must be none, url, story or paywall.")
+    starts_at = _parse_local_dt(body.startsAt, "Start")
+    ends_at = _parse_local_dt(body.endsAt, "End")
     if ends_at <= starts_at:
-        raise HTTPException(status_code=400, detail="ends_at must be after starts_at")
-    try:
-        priority = int(fields.get("priority") or 0)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="priority must be an integer")
+        raise HTTPException(status_code=400, detail="The end has to be after the start.")
 
-    db.add(Announcement(
-        kind=kind,
+    row = Announcement(
+        kind=body.kind,
         title=title,
-        body=body,
-        cta_label=cta_label,
+        body=_clean(body.body, "Body", BODY_MAX),
+        cta_label=_clean(body.ctaLabel, "Button label", CTA_MAX),
         action_type=action_type or None,
-        action_value=action_value,
+        action_value=_clean(body.actionValue, "Action value", ACTION_VALUE_MAX),
         starts_at=starts_at,
         ends_at=ends_at,
-        priority=priority,
-    ))
+        priority=body.priority,
+    )
+    db.add(row)
     await db.commit()
     await _invalidate_active_cache()
-    return RedirectResponse("/admin/announcements", status_code=303)
+    return {"ok": True, "item": _out(row, utc_now())}
 
 
-@router.post("/{announcement_id}/delete")
-async def delete_announcement(announcement_id: int, request: Request, db: AsyncSession = Depends(get_db)):
-    fields = await form_fields(request)
-    verify(request, fields)
-    await db.execute(delete(Announcement).where(Announcement.id == announcement_id))
+@router.delete("/{announcement_id}", dependencies=[Depends(require_admin_write)])
+async def delete_announcement(announcement_id: int, db: AsyncSession = Depends(get_db)):
+    row = await db.get(Announcement, announcement_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="That announcement is already gone.")
+    await db.delete(row)
     await db.commit()
     await _invalidate_active_cache()
-    return RedirectResponse("/admin/announcements", status_code=303)
+    return {"ok": True, "id": announcement_id}

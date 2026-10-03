@@ -1,85 +1,88 @@
-"""A browsable donations page: captured-payment totals plus a raw list of
-recent captures. (There is no GET /admin/donations JSON route in app/main.py;
-the only JSON admin route there is /admin/engagement, which this nav does not
-link to.)
+"""Donations: captured-payment totals, a monthly series and the recent
+payments, for the admin SPA's Donations page (app/static/admin/sections/
+donations.js).
 
 Read-only by design, same as the Donation model itself (see its docstring):
 this page exists to answer "is the demand signal moving", not to let anyone
-act on a donation from the admin.
+act on a donation from the admin. (/admin/engagement in app/main.py is the
+other half of that signal and stays a separate JSON route.)
 """
 from __future__ import annotations
 
-import html
+from collections import defaultdict
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.admin_session import layout, session_csrf
+from app.admin_session import require_admin
 from app.database import get_db
 from app.models import Donation, User, utc_now
+from app.services.polls import IST
 
-router = APIRouter(prefix="/admin/donations")
-TITLE = "Donations"
+router = APIRouter(prefix="/admin/api/donations", dependencies=[Depends(require_admin)])
 
-PAGE_SIZE = 50
+LIST_LIMIT = 500
+MONTHS = 12
 
 
-@router.get("", response_class=HTMLResponse)
-async def dashboard(request: Request, db: AsyncSession = Depends(get_db)):
-    if not session_csrf(request):
-        return RedirectResponse("/admin/login", status_code=303)
-
-    cutoff = utc_now() - timedelta(days=30)
+@router.get("")
+async def donations(db: AsyncSession = Depends(get_db)):
+    now = utc_now()
 
     async def totals(*where):
         count, paise = (await db.execute(
             select(func.count(Donation.id), func.coalesce(func.sum(Donation.amount_paise), 0))
             .where(Donation.status == "captured", *where)
         )).one()
-        return count, round((paise or 0) / 100, 2)
+        return {"count": count, "inr": round((paise or 0) / 100, 2)}
 
-    all_count, all_inr = await totals()
-    month_count, month_inr = await totals(Donation.created_at >= cutoff)
+    all_time = await totals()
+    last_30 = await totals(Donation.created_at >= now - timedelta(days=30))
     distinct_donors = (await db.execute(
         select(func.count(func.distinct(Donation.user_id)))
         .where(Donation.status == "captured", Donation.user_id.isnot(None))
     )).scalar_one()
 
-    summary = (
-        "<div class=task><h2>All time</h2>"
-        f"<p class=meta>{all_count} donations · ₹{all_inr:,.2f} · {distinct_donors} distinct donors</p></div>"
-        "<div class=task><h2>Last 30 days</h2>"
-        f"<p class=meta>{month_count} donations · ₹{month_inr:,.2f}</p></div>"
-    )
+    # Grouped in Python rather than with date_trunc so the same code runs on
+    # SQLite in tests; a year of captured donations is a small set.
+    local = now.astimezone(IST)
+    index = local.year * 12 + local.month - 1 - (MONTHS - 1)
+    start_month = local.replace(year=index // 12, month=index % 12 + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    captured = (await db.execute(
+        select(Donation.created_at, Donation.amount_paise)
+        .where(Donation.status == "captured", Donation.created_at >= start_month)
+    )).all()
+    by_month: dict[str, int] = defaultdict(int)
+    for created_at, paise in captured:
+        moment = created_at if created_at.tzinfo else created_at.replace(tzinfo=now.tzinfo)
+        by_month[moment.astimezone(IST).strftime("%Y-%m")] += paise
+    months = []
+    for i in range(index, index + MONTHS):
+        key = f"{i // 12:04d}-{i % 12 + 1:02d}"
+        months.append({"month": key, "inr": round(by_month.get(key, 0) / 100, 2)})
 
     rows = (await db.execute(
         select(Donation, User.display_name, User.email)
         .outerjoin(User, User.id == Donation.user_id)
         .order_by(Donation.created_at.desc())
-        .limit(PAGE_SIZE)
+        .limit(LIST_LIMIT)
     )).all()
 
-    def _row(donation: Donation, name: str | None, email: str | None) -> str:
-        who = f"{html.escape(name)} ({html.escape(email)})" if name else (
-            "anonymous / signed-out" if donation.user_id is None else f"user {donation.user_id}")
-        status = donation.status if donation.status == "captured" else f"<b class=danger>{donation.status}</b>"
-        return (
-            f"<tr><td>{donation.created_at:%Y-%m-%d %H:%M}</td>"
-            f"<td>₹{donation.amount_paise / 100:,.2f}</td>"
-            f"<td>{html.escape(donation.provider)}</td>"
-            f"<td>{status}</td>"
-            f"<td>{who}</td></tr>")
-
-    table = (
-        "<table style='width:100%;border-collapse:collapse'>"
-        "<tr><th align=left>When (UTC)</th><th align=left>Amount</th>"
-        "<th align=left>Provider</th><th align=left>Status</th><th align=left>Donor</th></tr>"
-        + "".join(_row(donation, name, email) for donation, name, email in rows)
-        + "</table>") if rows else "<p class=meta>No donations yet.</p>"
-
-    return layout(TITLE, (
-        f"<h1>Donations</h1>{summary}"
-        f"<h2>Last {PAGE_SIZE}</h2>{table}"), current="/admin/donations")
+    return {
+        "allTime": {**all_time, "donors": distinct_donors},
+        "last30Days": last_30,
+        "months": months,
+        "items": [{
+            "id": d.id,
+            "createdAt": d.created_at.isoformat() if d.created_at else None,
+            "inr": round(d.amount_paise / 100, 2),
+            "currency": d.currency,
+            "provider": d.provider,
+            "status": d.status,
+            "userId": d.user_id,
+            "donorName": name,
+            "donorEmail": email,
+        } for d, name, email in rows],
+    }

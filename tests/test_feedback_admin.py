@@ -1,8 +1,8 @@
 """
-The feedback triage page — /admin/feedback.
+The feedback triage API behind the admin SPA's inbox — /admin/api/feedback.
 
-Covers the two things that would actually hurt: that the page is not readable
-without signing in (it displays email addresses people gave us in confidence),
+Covers the two things that would actually hurt: that nothing is readable
+without signing in (it returns email addresses people gave us in confidence),
 and that a status change cannot be driven by a forged cross-site POST.
 """
 import pytest
@@ -54,42 +54,29 @@ async def seed(client, **kwargs):
         return item.id
 
 
-async def sign_in(client):
-    r = await client.post("/admin/feedback/login",
-                          data={"username": USERNAME, "password": PASSWORD},
-                          follow_redirects=False)
-    assert r.status_code == 303
-    return r
-
-
-def csrf_from(html_text):
-    marker = "name=csrf value='"
-    start = html_text.index(marker) + len(marker)
-    return html_text[start:html_text.index("'", start)]
+async def sign_in(client) -> str:
+    r = await client.post("/admin/api/login", json={"username": USERNAME, "password": PASSWORD})
+    assert r.status_code == 200
+    return (await client.get("/admin/api/session")).json()["csrf"]
 
 
 class TestAccess:
-    async def test_redirects_to_login_when_signed_out(self, client):
-        r = await client.get("/admin/feedback", follow_redirects=False)
-        assert r.status_code == 303
-        assert r.headers["location"] == "/admin/feedback/login"
-
-    async def test_does_not_leak_a_message_to_a_signed_out_visitor(self, client):
+    async def test_refuses_a_signed_out_visitor(self, client):
         await seed(client, email="someone@example.com")
-        r = await client.get("/admin/feedback", follow_redirects=False)
+        r = await client.get("/admin/api/feedback")
+        assert r.status_code == 401
         assert "someone@example.com" not in r.text
 
     async def test_rejects_the_wrong_password(self, client):
-        r = await client.post("/admin/feedback/login",
-                              data={"username": USERNAME, "password": "wrong"})
-        assert "Sign in failed" in r.text
+        r = await client.post("/admin/api/login", json={"username": USERNAME, "password": "wrong"})
+        assert r.status_code == 401
 
     async def test_shows_feedback_once_signed_in(self, client):
         await seed(client)
         await sign_in(client)
-        r = await client.get("/admin/feedback")
+        r = await client.get("/admin/api/feedback")
         assert r.status_code == 200
-        assert "The sports tab will not load." in r.text
+        assert r.json()["items"][0]["message"] == "The sports tab will not load."
 
 
 class TestListing:
@@ -97,93 +84,103 @@ class TestListing:
         await seed(client, message="I am unread and should show.")
         await seed(client, message="I am closed and should not.", status="closed")
         await sign_in(client)
-        r = await client.get("/admin/feedback")
-        assert "I am unread and should show." in r.text
-        assert "I am closed and should not." not in r.text
+        r = (await client.get("/admin/api/feedback")).json()
+        assert [i["message"] for i in r["items"]] == ["I am unread and should show."]
+        assert r["counts"] == {"new": 1, "read": 0, "closed": 1}
 
     async def test_filters_by_status(self, client):
         await seed(client, message="I am closed and should show.", status="closed")
         await sign_in(client)
-        r = await client.get("/admin/feedback?status=closed")
-        assert "I am closed and should show." in r.text
+        r = (await client.get("/admin/api/feedback?status=closed")).json()
+        assert [i["message"] for i in r["items"]] == ["I am closed and should show."]
 
     async def test_falls_back_to_new_for_an_unknown_status(self, client):
         await seed(client, message="Still visible.")
         await sign_in(client)
-        r = await client.get("/admin/feedback?status=nonsense")
-        assert "Still visible." in r.text
+        r = (await client.get("/admin/api/feedback?status=nonsense")).json()
+        assert [i["message"] for i in r["items"]] == ["Still visible."]
+
+    async def test_searches_message_and_email(self, client):
+        await seed(client, message="Audio stops at 2:10")
+        await seed(client, message="Please add Assamese", email="asha@example.com")
+        await sign_in(client)
+        r = (await client.get("/admin/api/feedback?q=asha@")).json()
+        assert [i["message"] for i in r["items"]] == ["Please add Assamese"]
+        assert r["total"] == 1
+
+    async def test_pages_newest_first(self, client):
+        for n in range(3):
+            await seed(client, message=f"message {n}")
+        await sign_in(client)
+        r = (await client.get("/admin/api/feedback?offset=1&limit=1")).json()
+        assert r["total"] == 3
+        assert [i["message"] for i in r["items"]] == ["message 1"]
 
     async def test_marks_anonymous_feedback_as_such(self, client):
         await seed(client)
         await sign_in(client)
-        r = await client.get("/admin/feedback")
-        assert "anonymous" in r.text
+        item = (await client.get("/admin/api/feedback")).json()["items"][0]
+        assert item["name"] is None and item["email"] is None and item["userId"] is None
 
     async def test_flags_a_sender_who_wants_a_reply(self, client):
         await seed(client, name="Asha", email="asha@example.com")
         await sign_in(client)
-        r = await client.get("/admin/feedback")
-        assert "wants a reply" in r.text
-        assert "mailto:asha@example.com" in r.text
+        item = (await client.get("/admin/api/feedback")).json()["items"][0]
+        assert item["wantsReply"] is True
+        assert item["email"] == "asha@example.com"
 
     async def test_does_not_claim_an_app_sender_wants_a_reply(self, client):
         """The Android app fills email from the signed-in account, so an email
         on a source=android row is not a request for a reply."""
         await seed(client, source="android", email="asha@example.com", user_id="u-123")
         await sign_in(client)
-        r = await client.get("/admin/feedback")
-        assert "wants a reply" not in r.text
-        assert "email from account" in r.text
-        assert "signed-in user u-123" in r.text
+        item = (await client.get("/admin/api/feedback")).json()["items"][0]
+        assert item["wantsReply"] is False
+        assert item["emailFromAccount"] is True
+        assert item["userId"] == "u-123"
 
-    async def test_escapes_html_in_a_message(self, client):
-        """The message is attacker-controlled text on a page holding a session."""
+    async def test_serves_a_message_as_json_not_html(self, client):
+        """The message is attacker-controlled text. The API returns it as JSON
+        data and the SPA escapes it when rendering (sections/feedback.js)."""
         await seed(client, message="<script>alert('xss')</script> and more text")
         await sign_in(client)
-        r = await client.get("/admin/feedback")
-        assert "<script>alert" not in r.text
-        assert "&lt;script&gt;" in r.text
+        r = await client.get("/admin/api/feedback")
+        assert r.headers["content-type"].startswith("application/json")
+        assert r.json()["items"][0]["message"].startswith("<script>")
 
 
 class TestTriage:
     async def test_marks_an_item_read(self, client):
         item_id = await seed(client)
-        await sign_in(client)
-        page = await client.get("/admin/feedback")
-        r = await client.post("/admin/feedback/update",
-                              data={"csrf": csrf_from(page.text), "feedback_id": item_id,
-                                    "action": "read", "back": "new"},
-                              follow_redirects=False)
-        assert r.status_code == 303
+        csrf = await sign_in(client)
+        r = await client.post(f"/admin/api/feedback/{item_id}", json={"status": "read"},
+                              headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 200
         async with client.session_factory() as session:
             row = (await session.execute(select(Feedback))).scalar_one()
         assert row.status == "read"
 
-    async def test_returns_to_the_tab_you_were_on(self, client):
-        item_id = await seed(client)
-        await sign_in(client)
-        page = await client.get("/admin/feedback")
-        r = await client.post("/admin/feedback/update",
-                              data={"csrf": csrf_from(page.text), "feedback_id": item_id,
-                                    "action": "closed", "back": "new"},
-                              follow_redirects=False)
-        assert r.headers["location"] == "/admin/feedback?status=new"
+    async def test_bulk_closes(self, client):
+        ids = [await seed(client), await seed(client)]
+        csrf = await sign_in(client)
+        r = await client.post("/admin/api/feedback/bulk", json={"ids": ids, "status": "closed"},
+                              headers={"X-CSRF-Token": csrf})
+        assert r.json()["updated"] == 2
+        counts = (await client.get("/admin/api/feedback")).json()["counts"]
+        assert counts == {"new": 0, "read": 0, "closed": 2}
 
     async def test_rejects_a_missing_csrf_token(self, client):
         item_id = await seed(client)
         await sign_in(client)
-        r = await client.post("/admin/feedback/update",
-                              data={"feedback_id": item_id, "action": "closed"})
+        r = await client.post(f"/admin/api/feedback/{item_id}", json={"status": "closed"})
         assert r.status_code == 403
         async with client.session_factory() as session:
             row = (await session.execute(select(Feedback))).scalar_one()
         assert row.status == "new"
 
-    async def test_rejects_an_invalid_action(self, client):
+    async def test_rejects_an_invalid_status(self, client):
         item_id = await seed(client)
-        await sign_in(client)
-        page = await client.get("/admin/feedback")
-        r = await client.post("/admin/feedback/update",
-                              data={"csrf": csrf_from(page.text), "feedback_id": item_id,
-                                    "action": "deleted"})
-        assert r.status_code == 400
+        csrf = await sign_in(client)
+        r = await client.post(f"/admin/api/feedback/{item_id}", json={"status": "deleted"},
+                              headers={"X-CSRF-Token": csrf})
+        assert r.status_code == 422

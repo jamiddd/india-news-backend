@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>OIN Admin</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%230A0A0A'/><text x='16' y='21' font-family='Arial,sans-serif' font-size='11' font-weight='800' fill='%23fff' text-anchor='middle'>oin</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="__BASE__/assets/admin.css?v=__V__">
+<script>
+  window.ADMIN_BASE = "__BASE__";
+  (function () { var t = null; try { t = localStorage.getItem('oin_admin_theme'); } catch (e) {} if (t) document.documentElement.setAttribute('data-theme', t); })();
+</script>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="side" id="side" aria-label="Sections">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">oin</div>
+      <div class="brand-txt"><b>Open Indian News</b><span class="mono" style="font-size:10px">Admin</span></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">
+      <div class="me">
+        <div class="av" id="whoInitial">A</div>
+        <div style="flex:1;min-width:0"><b id="who">Admin</b><small>Signed in · 8 h session</small></div>
+        <button class="ibtn" id="signOut" aria-label="Sign out" title="Sign out"><svg class="i" viewBox="0 0 24 24"><path d="M14.5 4.5h4a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-4M10 16.5 5.5 12 10 7.5M5.5 12h10"/></svg></button>
+      </div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <header class="top" id="top">
+      <button class="ibtn" id="toggleNav" aria-label="Toggle sidebar" title="Toggle sidebar (\)"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></svg></button>
+      <div class="crumb" id="crumb"><i class="hue-dot"></i><span>Today</span></div>
+      <div class="search" id="search">
+        <button class="ibtn only-mobile" id="closeSearch" aria-label="Close search"><svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+        <div class="search-box">
+          <svg class="i" viewBox="0 0 24 24" style="color:var(--muted)"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+          <input id="q" type="search" placeholder="Search stories, users, explainers, feedback" autocomplete="off" aria-label="Search">
+          <kbd>⌘K</kbd>
+        </div>
+        <div class="results" id="results" hidden></div>
+      </div>
+      <div class="top-actions">
+        <button class="ibtn only-mobile" id="openSearch" aria-label="Search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+        <button class="ibtn" id="theme" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+        <button class="ibtn hide-sm" id="bell" aria-label="Today's queue"><svg class="i" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/></svg><i class="pip" hidden></i></button>
+      </div>
+      <i class="topbar-progress" id="progress"></i>
+    </header>
+    <main class="view" id="view"></main>
+  </div>
+</div>
+
+<div class="login" id="login" hidden>
+  <form class="login-card" id="loginForm">
+    <div class="mark" aria-hidden="true">oin</div>
+    <div><span class="mono">Open Indian News · Admin</span><h1 style="margin-top:8px">Sign in to review.</h1></div>
+    <div class="field"><label for="lu">Username</label><input class="inp" id="lu" name="username" autocomplete="username" required></div>
+    <div class="field"><label for="lp">Password</label><input class="inp" id="lp" name="password" type="password" autocomplete="current-password" required></div>
+    <div class="login-err" id="loginErr" role="alert"></div>
+    <button class="btn btn-ink" id="loginBtn" type="submit">Sign in</button>
+  </form>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="__BASE__/assets/vendor/jquery-3.7.1.min.js"></script>
+<script src="__BASE__/assets/vendor/dataTables-2.1.8.min.js"></script>
+<script src="__BASE__/assets/core.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/today.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/breaking.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/reports.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/feedback.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/explainers.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/timelines.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/daily-brief.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/topics.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/announcements.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/polls.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/quiz.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/users.js?v=__V__"></script>
+<script src="__BASE__/assets/sections/donations.js?v=__V__"></script>
+<script>Admin.start();</script>
+</body>
+</html>

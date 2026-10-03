@@ -95,3 +95,175 @@ def test_poll_scheduler_runs_each_action_once_per_day():
         log = simulate(datetime(2026, 9, 3, start_hour, 0))
         repeated = [entry for entry, count in Counter(log).items() if count > 1]
         assert not repeated, f"start {start_hour}:00 repeated {repeated}"
+
+
+# ---------------------------------------------------------------------------
+# Daily poll review JSON API — /admin/api/polls (app/poll_admin.py), the admin
+# SPA's Poll of the Day page. Same sign-in + CSRF pattern as test_admin_api.py.
+# ---------------------------------------------------------------------------
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from fastapi import HTTPException  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import select  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+
+from app.config import settings  # noqa: E402
+from app.database import get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models import DailyPoll, PollOption  # noqa: E402
+from app.services.polls import IST  # noqa: E402
+
+POLLS = "/admin/api/polls"
+
+
+@pytest.fixture
+def admin_credentials(monkeypatch):
+    monkeypatch.setattr(settings, "POLL_ADMIN_USERNAME", "reviewer")
+    monkeypatch.setattr(settings, "POLL_ADMIN_PASSWORD", "correct-horse")
+    monkeypatch.setattr(settings, "POLL_SESSION_SECRET", "test-secret")
+
+
+@pytest.fixture
+async def client(admin_credentials):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        for model in (DailyPoll, PollOption):
+            await conn.run_sync(model.__table__.create)
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override():
+        async with Session() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        c.session_factory = Session
+        yield c
+    app.dependency_overrides.clear()
+
+
+async def sign_in(client) -> dict:
+    r = await client.post("/admin/api/login", json={"username": "reviewer", "password": "correct-horse"})
+    assert r.status_code == 200
+    return {"X-CSRF-Token": (await client.get("/admin/api/session")).json()["csrf"]}
+
+
+async def seed_poll(client, status="draft", publish_in=timedelta(hours=2)) -> int:
+    # UTC: SQLite drops tzinfo and the API reads naive values back as UTC.
+    publish = datetime.now(timezone.utc) + publish_in
+    async with client.session_factory() as session:
+        poll = DailyPoll(poll_date=datetime.now(IST).date(), question="Should towns add more bus lanes?",
+                         context="Bus lanes change road space.", status=status, source_cluster_id=7,
+                         source_headline="City plans bus lanes", generation_method="ai",
+                         publish_at=publish, closes_at=publish + timedelta(days=1))
+        session.add(poll)
+        await session.flush()
+        session.add_all(PollOption(poll_id=poll.id, position=i, text=t) for i, t in enumerate(["Yes", "No"]))
+        await session.commit()
+        return poll.id
+
+
+class TestDailyPollAdmin:
+    async def test_reads_need_a_session(self, client):
+        assert (await client.get(POLLS)).status_code == 401
+
+    async def test_writes_need_the_csrf_header(self, client):
+        await sign_in(client)
+        poll_id = await seed_poll(client)
+        assert (await client.post(f"{POLLS}/generate")).status_code == 403
+        assert (await client.post(f"{POLLS}/{poll_id}/reject")).status_code == 403
+
+    async def test_no_draft_yet(self, client):
+        await sign_in(client)
+        r = (await client.get(POLLS)).json()
+        assert r["poll"] is None
+        assert r["today"] == datetime.now(IST).date().isoformat()
+
+    async def test_shows_an_editable_draft(self, client):
+        await sign_in(client)
+        await seed_poll(client)
+        p = (await client.get(POLLS)).json()["poll"]
+        assert p["options"] == ["Yes", "No"]
+        assert p["editable"] is True
+        assert p["sourceUrl"] == "/api/v1/clusters/7"
+        assert p["sourceHeadline"] == "City plans bus lanes"
+
+    async def test_past_publish_time_is_not_editable(self, client):
+        await sign_in(client)
+        await seed_poll(client, publish_in=timedelta(hours=-1))
+        assert (await client.get(POLLS)).json()["poll"]["editable"] is False
+
+    async def test_generate_creates_todays_draft(self, client, monkeypatch):
+        calls = []
+
+        async def fake(db, day, replace=False):
+            calls.append((day, replace))
+            publish = datetime.now(timezone.utc) + timedelta(hours=1)
+            db.add(DailyPoll(poll_date=day, question="Q?", context="C.", status="draft",
+                             publish_at=publish, closes_at=publish + timedelta(days=1)))
+            await db.commit()
+        monkeypatch.setattr("app.poll_admin.generate_draft", fake)
+        h = await sign_in(client)
+        r = await client.post(f"{POLLS}/generate", headers=h)
+        assert r.status_code == 200
+        assert r.json()["poll"]["question"] == "Q?"
+        assert calls == [(datetime.now(IST).date(), False)]
+
+    async def test_failed_generation_reports_why(self, client, monkeypatch):
+        async def fake(db, day, replace=False):
+            raise RuntimeError("No corroborated stories available")
+        monkeypatch.setattr("app.poll_admin.generate_draft", fake)
+        h = await sign_in(client)
+        r = await client.post(f"{POLLS}/generate", headers=h)
+        assert r.status_code == 502
+        assert r.json()["detail"] == "Draft generation failed: No corroborated stories available"
+
+    async def test_regenerate_replaces_and_passes_conflicts_through(self, client, monkeypatch):
+        calls = []
+
+        async def fake(db, day, replace=False):
+            calls.append(replace)
+            raise HTTPException(status_code=409, detail="Only a draft can be regenerated")
+        monkeypatch.setattr("app.poll_admin.generate_draft", fake)
+        h = await sign_in(client)
+        r = await client.post(f"{POLLS}/regenerate", headers=h)
+        assert r.status_code == 409
+        assert r.json()["detail"] == "Only a draft can be regenerated"
+        assert calls == [True]
+
+    async def test_approve_sends_the_edits_without_blank_options(self, client, monkeypatch):
+        seen = {}
+
+        async def fake(db, poll_id, question, context, options):
+            seen.update(poll_id=poll_id, question=question, context=context, options=options)
+        monkeypatch.setattr("app.poll_admin.approve_poll", fake)
+        h = await sign_in(client)
+        poll_id = await seed_poll(client)
+        r = await client.post(f"{POLLS}/{poll_id}/approve", headers=h,
+                              json={"question": "Edited?", "context": "Edited.", "options": ["A", " ", "B", ""]})
+        assert r.status_code == 200
+        assert seen == {"poll_id": poll_id, "question": "Edited?", "context": "Edited.", "options": ["A", "B"]}
+
+    async def test_approve_reports_validation_errors(self, client, monkeypatch):
+        async def fake(db, poll_id, question, context, options):
+            validate_draft({"question": question, "context": context, "options": options})
+        monkeypatch.setattr("app.poll_admin.approve_poll", fake)
+        h = await sign_in(client)
+        poll_id = await seed_poll(client)
+        r = await client.post(f"{POLLS}/{poll_id}/approve", headers=h,
+                              json={"question": "Edited?", "context": "Edited.", "options": ["Only one"]})
+        assert r.status_code == 422
+        assert "2-4 distinct options" in r.json()["detail"]
+
+    async def test_reject_switches_to_the_fallback_once(self, client):
+        h = await sign_in(client)
+        poll_id = await seed_poll(client)
+        r = await client.post(f"{POLLS}/{poll_id}/reject", headers=h)
+        assert r.status_code == 200
+        assert r.json()["poll"]["status"] == "rejected"
+        assert r.json()["poll"]["editable"] is False
+        again = await client.post(f"{POLLS}/{poll_id}/reject", headers=h)
+        assert again.status_code == 409
+        async with client.session_factory() as session:
+            assert (await session.scalar(select(DailyPoll.status))) == "rejected"
