@@ -98,6 +98,7 @@ from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from app.services.poller import poll_all_sources
 from app.services.extractor import _resolve_brightcove_policy_key, _resolve_brightcove_video
 from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
+from app.services.dedup import video_matches_cluster
 from app.services.watch_feed import has_watchable_video, has_shorts_video, encode_cursor as encode_watch_cursor, decode_cursor as decode_watch_cursor
 from app.services.enrichment import enrich_cluster_with_ai
 from app.services.feed_gate import (
@@ -334,6 +335,24 @@ def _entities_for_response(entities: Optional[Any]) -> Optional[Any]:
     return filtered
 
 
+def _video_fields(art: Article, cluster: StoryCluster, cluster_size: int) -> dict:
+    """The article's video columns for a response, blanked when the video isn't
+    about the story the cluster presents — see dedup.video_matches_cluster.
+    Blanked rather than the article dropped: its text still belongs to the story."""
+    if not (art.video_url or art.brightcove_video_id) or video_matches_cluster(
+        art.title, cluster.headline, cluster.summary, cluster_size
+    ):
+        return dict(
+            video_url=art.video_url,
+            video_is_short=art.video_is_short,
+            video_duration_seconds=art.video_duration_seconds,
+            has_pending_video=not art.video_url and bool(
+                art.brightcove_account_id and art.brightcove_player_id and art.brightcove_video_id
+            ),
+        )
+    return dict(video_url=None, video_is_short=None, video_duration_seconds=None, has_pending_video=False)
+
+
 def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
     """Builds a full StoryClusterOut (incl. article content/entities/topics/
     framing_comparison) from an ORM StoryCluster, filling
@@ -358,12 +377,7 @@ def _cluster_to_out(cluster: StoryCluster) -> StoryClusterOut:
             published_at=art.published_at,
             image_url=art.image_url,
             image_urls=art.image_urls,
-            video_url=art.video_url,
-            video_is_short=art.video_is_short,
-            video_duration_seconds=art.video_duration_seconds,
-            has_pending_video=not art.video_url and bool(
-                art.brightcove_account_id and art.brightcove_player_id and art.brightcove_video_id
-            ),
+            **_video_fields(art, cluster, len(cluster.articles)),
         )
         for art in cluster.articles
     ]
@@ -433,12 +447,7 @@ def _cluster_to_list_out(cluster: StoryCluster, *, image_priority_sort: bool = F
             content=_truncate_content_preview(art.content),
             published_at=art.published_at,
             image_url=art.image_url,
-            video_url=art.video_url,
-            video_is_short=art.video_is_short,
-            video_duration_seconds=art.video_duration_seconds,
-            has_pending_video=not art.video_url and bool(
-                art.brightcove_account_id and art.brightcove_player_id and art.brightcove_video_id
-            ),
+            **_video_fields(art, cluster, len(articles)),
         )
         for art in articles
     ]
@@ -2388,7 +2397,7 @@ async def list_video_clusters(
     watching whether or not a second outlet has matched it yet. It still obeys
     the listing age window, so nothing stale surfaces.
     """
-    cache_key = f"cache:clusters:videos:v4:{kind}:{limit}:{cursor or ''}"
+    cache_key = f"cache:clusters:videos:v5:{kind}:{limit}:{cursor or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return PaginatedClustersListOut.model_validate_json(cached)
@@ -2412,8 +2421,14 @@ async def list_video_clusters(
         encode_watch_cursor(items[-1].last_updated_at, items[-1].id) if has_more and items else None
     )
 
+    # The SQL only knows some article has a video; _cluster_to_list_out blanks any
+    # that isn't about the story. A row left with nothing to play is dropped here
+    # (after the cursor is taken from the unfiltered page, so paging still advances).
+    def _has_video(out: StoryClusterListOut) -> bool:
+        return any(a.video_url or a.has_pending_video for a in out.articles)
+
     page = PaginatedClustersListOut(
-        items=[_cluster_to_list_out(c) for c in items],
+        items=[o for o in (_cluster_to_list_out(c) for c in items) if _has_video(o)],
         next_cursor=next_cursor,
         has_more=has_more,
     )

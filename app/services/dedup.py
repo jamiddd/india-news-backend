@@ -122,6 +122,30 @@ def shares_topic(
     jaccard = len(shared) / len(tokens1 | tokens2)
     return jaccard >= min_jaccard
 
+MIN_VIDEO_SHARED_TOKENS = 2
+
+
+def video_matches_cluster(
+    video_article_title: str,
+    headline: Optional[str],
+    summary: Optional[str],
+    cluster_size: int,
+) -> bool:
+    """Is this article's video about the story the cluster presents?
+
+    Clustering admits an article on overlap with any single member, so a
+    cluster's headline can drift away from a member — and a publisher's own
+    video about a different story (same outlet, similar theme) then plays
+    under the wrong headline. The video is kept only when its article's title
+    shares MIN_VIDEO_SHARED_TOKENS significant words with the headline or
+    summary. A single-article cluster can't be mismatched with itself.
+    Mirrored client-side by StoryCluster.videoBelongsToStory (Android).
+    """
+    if cluster_size <= 1:
+        return True
+    story_tokens = title_tokens(f"{headline or ''} {summary or ''}")
+    return len(title_tokens(video_article_title) & story_tokens) >= MIN_VIDEO_SHARED_TOKENS
+
 TRACKING_PARAMS = {
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
     'rss', 'ref', 'cmpid', 'gad_source', 'gclid', 'fbclid', 'at_custom1'

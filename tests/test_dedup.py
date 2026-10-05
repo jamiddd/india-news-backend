@@ -309,3 +309,18 @@ class TestSharesTopic:
         # One shared significant token can never be enough, regardless of how
         # short both headlines are.
         assert not shares_topic("Indus treaty", "Indus ruling", min_shared=2)
+
+
+def test_video_matches_cluster():
+    from app.services.dedup import video_matches_cluster
+
+    headline = "Three Women Journalists Allege Sexual Harassment by Delhi Police at Jantar Mantar Protest"
+    # The screenshot case: same publisher, similar theme, different story.
+    assert not video_matches_cluster(
+        "What Really Happened At LPU? Rape Claim, FIR Filed", headline, None, 3
+    )
+    assert video_matches_cluster(
+        "Journalists allege harassment by Delhi Police at Jantar Mantar", headline, None, 3
+    )
+    # A lone article can't be mismatched with its own cluster.
+    assert video_matches_cluster("Anything at all", headline, None, 1)
