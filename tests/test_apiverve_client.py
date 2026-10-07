@@ -75,6 +75,40 @@ class TestCreditFloor:
         assert not called, "a call was made below the credit floor"
 
     @pytest.mark.asyncio
+    async def test_stale_exhausted_balance_is_rechecked_after_renewal(self, monkeypatch):
+        """Regression: the floor stops calls, so the balance never refreshed and
+        stayed "-3/200" days past the renewal date (2026-10-04..07)."""
+        monkeypatch.setattr(apiverve_client.settings, "APIVERVE_API_KEY", "k")
+        apiverve_client._remaining_credits = -3
+        apiverve_client._max_credits = 200
+        apiverve_client._renewal_at = int(apiverve_client.time.time()) - 3600
+
+        called = False
+
+        class _Client:
+            def __init__(self, **_):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                return False
+
+            async def request(self, *_, **__):
+                nonlocal called
+                called = True
+                return _response(
+                    200, body={"status": "ok", "data": {"x": 1}},
+                    headers={"x-api-remaining-credits": "199"},
+                )
+
+        monkeypatch.setattr(apiverve_client.httpx, "AsyncClient", _Client)
+        assert await call_apiverve("crossword") == {"x": 1}
+        assert called
+        assert apiverve_client.remaining_credits() == 199
+
+    @pytest.mark.asyncio
     async def test_unknown_balance_still_allows_a_first_call(self, monkeypatch):
         """A freshly started worker has never seen a response. It must not
         treat that as exhaustion or it could never make its first call."""

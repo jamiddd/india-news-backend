@@ -59,6 +59,13 @@ def credit_status() -> dict[str, object]:
     }
 
 
+def _reset_credit_state() -> None:
+    global _remaining_credits, _max_credits, _renewal_at
+    _remaining_credits = None
+    _max_credits = None
+    _renewal_at = None
+
+
 def _days_until_renewal() -> float | None:
     if _renewal_at is None:
         return None
@@ -138,6 +145,17 @@ async def call_apiverve(
     """
     if not settings.APIVERVE_API_KEY:
         return None
+    if (
+        _remaining_credits is not None and _remaining_credits <= CREDIT_FLOOR
+        and _renewal_at is not None and time.time() >= _renewal_at
+    ):
+        # The balance is only refreshed by a response, and the floor stops us
+        # making calls — so without this the stale figure outlives the billing
+        # period forever (seen 2026-10-04..07: renewed, still "-3/200"). Forget
+        # it and let the next response report the real one; if the quota has
+        # not actually renewed yet, that response is a free 429 that restores it.
+        logger.info("APIVerve credit renewal passed (%s); re-checking balance", _renewal_phrase())
+        _reset_credit_state()
     if _remaining_credits is not None and _remaining_credits <= CREDIT_FLOOR:
         logger.warning(
             "APIVerve %s skipped: %s/%s credits remaining, at or below floor of %s (%s)",
