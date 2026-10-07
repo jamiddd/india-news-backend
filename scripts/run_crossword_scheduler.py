@@ -21,18 +21,28 @@ from app.services.crossword import get_or_create_puzzle
 from app.services.sudoku import get_or_create_sudoku
 from app.services.word_search import get_or_create_word_search
 from app.services.daily_games import get_or_create_daily_games
-from app.services.editorial_features import get_or_create_editorial
+from app.config import settings
+from app.services.editorial_features import get_or_create_editorial, retry_fallback_quote
 from app.services.horoscope import prewarm_horoscopes
 from sqlalchemy import text
 
 IST = ZoneInfo("Asia/Kolkata")
 
 
+# The backup droplet runs CONTENT_RUN_OFFSET_MINUTES after the primary and only
+# re-tries what the primary left on a fallback. Both droplets share one
+# APIVerve quota, so the primary spends it first and the backup spends only on
+# failures — never on a day the primary already got right.
+OFFSET_MINUTES = settings.CONTENT_RUN_OFFSET_MINUTES
+IS_BACKUP = OFFSET_MINUTES > 0
+
+
 async def ensure(day):
     async with AsyncSessionLocal() as session:
         # The one place an algorithmic puzzle is re-attempted against APIVerve
-        # for better clues — once a night, never from a user request.
-        puzzle = await get_or_create_puzzle(session, day, allow_upgrade=True)
+        # for better clues — once a night, from the backup run only, never
+        # from a user request.
+        puzzle = await get_or_create_puzzle(session, day, allow_upgrade=IS_BACKUP)
         print(f"Crossword ready for {day} ({puzzle.source})", flush=True)
     async with AsyncSessionLocal() as session:
         await get_or_create_sudoku(session, day)
@@ -46,6 +56,10 @@ async def ensure(day):
     async with AsyncSessionLocal() as session:
         await get_or_create_editorial(session, day)
         print(f"Daily editorial features ready for {day}", flush=True)
+        if IS_BACKUP:
+            upgraded = await retry_fallback_quote(session, day)
+            if upgraded:
+                print(f"Quote of the day for {day} upgraded to {upgraded}", flush=True)
 
 
 async def horoscope_loop():
@@ -71,14 +85,16 @@ async def horoscope_loop():
 async def puzzle_loop():
     while True:
         now = datetime.now(IST)
-        run_at = datetime.combine(now.date(), time(0, 0), tzinfo=IST)
+        midnight = datetime.combine(now.date(), time(0, 0), tzinfo=IST)
+        run_at = midnight + timedelta(minutes=OFFSET_MINUTES)
         if now >= run_at:
+            midnight += timedelta(days=1)
             run_at += timedelta(days=1)
         await asyncio.sleep(max(1, (run_at - now).total_seconds()))
-        # run_at IS the target day's midnight now (unlike the old 23:55
-        # trigger, which woke before midnight and needed +5min to roll the
-        # date forward) — no date fudge needed.
-        await ensure(run_at.date())
+        # midnight IS the target day's midnight (unlike the old 23:55 trigger,
+        # which woke before midnight and needed +5min to roll the date
+        # forward) — no date fudge needed. The offset only delays the wake-up.
+        await ensure(midnight.date())
 
 
 async def main():

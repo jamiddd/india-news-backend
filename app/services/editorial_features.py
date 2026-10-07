@@ -233,13 +233,57 @@ async def _recent_words_and_authors(
     return words, authors, used_keys
 
 
-async def _apiverve_quote(recent_authors: list[str] | None = None) -> dict | None:
-    """APIVerve's Random Quote has no topic/avoid-author filter, so draw a
-    few and prefer one whose author wasn't used recently — same intent as
-    the Claude prompt's avoid-list, just done client-side."""
-    recent = {author.casefold() for author in (recent_authors or [])}
+# Each draw bills a credit and the API has no author/topic filter, so a rejected
+# draw is pure loss. Two is enough: a fresh author on the second try is likely,
+# and a text-unique quote by a recent author is acceptable (see below).
+QUOTE_MAX_DRAWS = 2
+
+_HONORIFICS = {"dr", "mr", "mrs", "ms", "sir", "saint", "st", "prof", "the"}
+
+
+def quote_key(text: str) -> str:
+    """Uniqueness key for a quote: letters/digits only, first 40 characters.
+    Robust to quoting, punctuation and trailing-clause edits, so the same line
+    returned with different formatting still collides."""
+    return "".join(ch for ch in str(text).casefold() if ch.isalnum())[:40]
+
+
+def author_key(name: str) -> str:
+    """'A. Einstein', 'Albert Einstein' and 'Dr. Albert Einstein' all become
+    'a einstein' — first initial plus last name, honorifics dropped."""
+    tokens = [t for t in "".join(ch if ch.isalnum() else " " for ch in str(name).casefold()).split()
+              if t not in _HONORIFICS]
+    if not tokens:
+        return ""
+    return tokens[0][0] + " " + tokens[-1] if len(tokens) > 1 else tokens[0]
+
+
+async def _used_quote_keys(session: AsyncSession, feature_date: date) -> set[str]:
+    """Quote keys across ALL history (authors only get a 21-day window; the same
+    quote must never repeat, however long ago)."""
+    result = await session.execute(
+        select(DailyEditorial.quote).where(DailyEditorial.feature_date != feature_date)
+    )
+    return {quote_key(q["quote"]) for (q,) in result.all() if q and q.get("quote")}
+
+
+async def _apiverve_quote(
+    recent_authors: list[str] | None = None,
+    used_quote_keys: set[str] | None = None,
+) -> dict | None:
+    """APIVerve's Random Quote has no topic/avoid-author filter, so draw up to
+    QUOTE_MAX_DRAWS times.
+
+    Two rules, deliberately different strength:
+      * the quote text must never have been used before (hard — a draw that
+        repeats is discarded, never returned);
+      * the author should not be a recent one (soft — preferred, but a
+        text-unique quote by a recent author beats spending more credits).
+    Returns None if every draw failed or repeated, so the caller falls back."""
+    recent = {author_key(a) for a in (recent_authors or [])}
+    used = used_quote_keys or set()
     first_valid: dict | None = None
-    for attempt in range(5):
+    for attempt in range(QUOTE_MAX_DRAWS):
         if attempt > 0:
             await asyncio.sleep(0.5)
         data = await call_apiverve("randomquote")
@@ -250,9 +294,12 @@ async def _apiverve_quote(recent_authors: list[str] | None = None) -> dict | Non
         except Exception as exc:
             logger.info("APIVerve random quote unusable: %s", exc)
             continue
+        if quote_key(quote["quote"]) in used:
+            logger.info("APIVerve random quote already used, discarding")
+            continue
         if first_valid is None:
             first_valid = quote
-        if quote["author"].casefold() not in recent:
+        if author_key(quote["author"]) not in recent:
             return quote
     return first_valid
 
@@ -327,6 +374,7 @@ async def generate_word_and_quote(
     recent_words: list[str] | None = None,
     recent_authors: list[str] | None = None,
     used_keys: set[str] | None = None,
+    used_quote_keys: set[str] | None = None,
 ) -> tuple[dict, dict, str]:
     """Quote of the Day comes from APIVerve first (falling back to the
     combined Claude prompt, then the curated bank, for the quote only).
@@ -343,7 +391,7 @@ async def generate_word_and_quote(
     ordinal = feature_date.toordinal()
     used_keys = used_keys or set()
 
-    quote = await _apiverve_quote(recent_authors)
+    quote = await _apiverve_quote(recent_authors, used_quote_keys)
     quote_source = "apiverve" if quote is not None else None
 
     word = await _ai_word(feature_date, recent_words, used_keys)
@@ -395,6 +443,9 @@ async def generate_word_and_quote(
                 quote, quote_source = {"quote": fallback_quote, "author": fallback_author}, "curated"
 
     source = quote_source if quote_source == word_source else f"{word_source}+{quote_source}"
+    # Stored with the quote so the backup run can tell a fallback from a real
+    # APIVerve quote. The quote-of-the-day response model drops unknown keys.
+    quote = {**quote, "source": quote_source}
     return word, quote, source
 
 
@@ -420,6 +471,25 @@ async def _ensure_background(session: AsyncSession, row: DailyEditorial, feature
     return row
 
 
+async def retry_fallback_quote(session: AsyncSession, feature_date: date) -> str | None:
+    """Backup-run pass: if the day's quote fell back to the AI/curated bank,
+    try APIVerve again. Returns the new source, or None if nothing changed.
+
+    Rows written before `source` was stored have no marker and are left alone —
+    not knowing is not a reason to spend a credit."""
+    result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
+    row = result.scalar_one_or_none()
+    if row is None or (row.quote or {}).get("source") not in ("ai", "curated"):
+        return None
+    _, recent_authors, _ = await _recent_words_and_authors(session, feature_date)
+    quote = await _apiverve_quote(recent_authors, await _used_quote_keys(session, feature_date))
+    if quote is None:
+        return None
+    row.quote = {**quote, "source": "apiverve"}
+    await session.commit()
+    return "apiverve"
+
+
 async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> DailyEditorial:
     result = await session.execute(select(DailyEditorial).where(DailyEditorial.feature_date == feature_date))
     existing = result.scalar_one_or_none()
@@ -432,7 +502,9 @@ async def get_or_create_editorial(session: AsyncSession, feature_date: date) -> 
     if existing:
         return await _ensure_background(session, existing, feature_date)
     recent_words, recent_authors, used_keys = await _recent_words_and_authors(session, feature_date)
-    word, quote, _ = await generate_word_and_quote(feature_date, recent_words, recent_authors, used_keys)
+    word, quote, _ = await generate_word_and_quote(
+        feature_date, recent_words, recent_authors, used_keys, await _used_quote_keys(session, feature_date)
+    )
     row = DailyEditorial(
         feature_date=feature_date,
         word=word,

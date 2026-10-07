@@ -59,3 +59,39 @@ async def test_ai_word_gives_up_when_every_attempt_repeats(monkeypatch):
 
     monkeypatch.setattr("app.services.editorial_features.call_claude_json", fake_claude)
     assert await _ai_word(date(2026, 9, 4), [], {word_key("SERENDIPITY")}) is None
+
+
+def test_author_key_collapses_name_variants():
+    from app.services.editorial_features import author_key
+    assert author_key("Albert Einstein") == author_key("A. Einstein") == author_key("Dr. Albert Einstein")
+    assert author_key("Maya Angelou") != author_key("Albert Einstein")
+
+
+def test_quote_key_ignores_formatting():
+    from app.services.editorial_features import quote_key
+    assert quote_key('"Be the change you wish to see."') == quote_key("be the change  you wish to see")
+
+
+async def test_quote_draw_discards_used_text_and_caps_draws(monkeypatch):
+    from app.services import editorial_features as ef
+    draws = []
+
+    async def fake_call(_endpoint, *a, **k):
+        draws.append(1)
+        return {"quote": "Same old line", "author": "Someone New"}
+
+    monkeypatch.setattr(ef, "call_apiverve", fake_call)
+    result = await ef._apiverve_quote([], {ef.quote_key("Same old line")})
+    assert result is None
+    assert len(draws) == ef.QUOTE_MAX_DRAWS
+
+
+async def test_quote_draw_accepts_recent_author_when_text_is_new(monkeypatch):
+    from app.services import editorial_features as ef
+
+    async def fake_call(_endpoint, *a, **k):
+        return {"quote": "A brand new line", "author": "Albert Einstein"}
+
+    monkeypatch.setattr(ef, "call_apiverve", fake_call)
+    result = await ef._apiverve_quote(["A. Einstein"], set())
+    assert result == {"quote": "A brand new line", "author": "Albert Einstein"}

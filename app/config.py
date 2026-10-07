@@ -133,6 +133,12 @@ class Settings(BaseSettings):
     # allows ~100/month, so the two survivors are budgeted at one call a day
     # each (~62/month). See apiverve_client.CREDIT_FLOOR.
     APIVERVE_API_KEY: Optional[str] = None
+    # Both droplets run the nightly content job. 0 = primary: runs at 00:00 IST
+    # and generates. >0 = backup: runs that many minutes later and only re-tries
+    # what the primary left on a fallback (algorithmic crossword, non-APIVerve
+    # quote). Set on one droplet only, so the shared credit quota is spent by
+    # one caller at a time.
+    CONTENT_RUN_OFFSET_MINUTES: int = 0
 
     # Donations. Collected through an external Razorpay payment page (a UPI
     # link opened in a browser tab, no in-app payment SDK) because the payment
