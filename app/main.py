@@ -612,6 +612,11 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# Spot launcher feed. Registered here, after `limiter` exists, because the
+# router takes the shared limiter instead of importing it from this module.
+from app.launcher_feed import create_launcher_feed_router  # noqa: E402
+app.include_router(create_launcher_feed_router(limiter))
+
 @app.middleware("http")
 async def enforce_min_client_version(request: Request, call_next):
     """
