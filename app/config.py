@@ -224,6 +224,10 @@ class Settings(BaseSettings):
     # no-ops, same convention as GEMINI_API_KEY etc. See
     # app/services/admin_email.py.
     ADMIN_ALERT_EMAIL_TO: Optional[str] = None
+    # Shared secret for the operational trigger routes (/ingest/*, per-cluster
+    # enrich). Sent as X-Ingest-Secret by the systemd timers. Unset = those
+    # routes refuse every caller (fail closed).
+    INGEST_SECRET: Optional[str] = None
     BREVO_API_KEY: Optional[str] = None
     BREVO_SENDER_EMAIL: Optional[str] = None
 

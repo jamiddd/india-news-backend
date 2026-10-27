@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import random
 import secrets
 from html import escape as html_escape
@@ -11,7 +12,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal, Optional, List, Dict
-from fastapi import FastAPI, Depends, HTTPException, Query, BackgroundTasks, Request
+from fastapi import FastAPI, Depends, Header, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -518,7 +519,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    # Interactive docs and the schema are a free route map for anyone probing
+    # the API, so they are off. Set ENABLE_API_DOCS=1 locally when needed.
+    openapi_url=f"{settings.API_V1_STR}/openapi.json" if os.environ.get("ENABLE_API_DOCS") == "1" else None,
+    docs_url=None,
+    redoc_url=None,
     lifespan=lifespan
 )
 app.include_router(poll_admin_router)
@@ -1705,13 +1710,22 @@ async def list_sources(request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Source))
     return result.scalars().all()
 
-@app.post(f"{settings.API_V1_STR}/ingest/poll")
+def require_ingest_secret(x_ingest_secret: Optional[str] = Header(None)) -> None:
+    """Gate for operational trigger routes (poll/enrich/notify). These spend
+    money (LLM enrichment) or send pushes, so they are callable only with the
+    shared secret the systemd timers carry. Fails closed when unset."""
+    expected = settings.INGEST_SECRET
+    if not expected or not x_ingest_secret or not secrets.compare_digest(x_ingest_secret, expected):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.post(f"{settings.API_V1_STR}/ingest/poll", dependencies=[Depends(require_ingest_secret)])
 @limiter.limit("5/hour")
 async def trigger_poll(request: Request, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
     background_tasks.add_task(poll_all_sources, db)
     return {"message": "Ingestion polling triggered in background."}
 
-@app.post(f"{settings.API_V1_STR}/ingest/enrich")
+@app.post(f"{settings.API_V1_STR}/ingest/enrich", dependencies=[Depends(require_ingest_secret)])
 @limiter.limit("5/hour")
 async def trigger_enrich(
     request: Request,
@@ -1742,7 +1756,7 @@ async def trigger_enrich(
         )
     }
 
-@app.post(f"{settings.API_V1_STR}/ingest/notify")
+@app.post(f"{settings.API_V1_STR}/ingest/notify", dependencies=[Depends(require_ingest_secret)])
 @limiter.limit("5/hour")
 async def trigger_notify(request: Request, background_tasks: BackgroundTasks):
     """Fires scripts/send_notifications.py's breaking+daily push run. Meant
@@ -1756,7 +1770,7 @@ async def trigger_notify(request: Request, background_tasks: BackgroundTasks):
     background_tasks.add_task(run_send_notifications)
     return {"message": "Notification run triggered in background."}
 
-@app.post(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/enrich")
+@app.post(f"{settings.API_V1_STR}/clusters/{{cluster_id}}/enrich", dependencies=[Depends(require_ingest_secret)])
 @limiter.limit("10/hour")
 async def enrich_cluster_endpoint(request: Request, cluster_id: int, db: AsyncSession = Depends(get_db)):
     query = (

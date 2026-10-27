@@ -14,4 +14,5 @@ Type=oneshot
 # failures — which is what "going forward" actually needs. The one-time
 # force re-enrichment of the initial 2-day backlog (e.g. after a prompt
 # change) is a manual run: curl -X POST ".../ingest/enrich?since_days=2&force_all=true"
-ExecStart=/usr/bin/curl -s -X POST "http://127.0.0.1:8080/api/v1/ingest/enrich?since_days=2"
+EnvironmentFile=/etc/news/ingest.env
+ExecStart=/usr/bin/curl -s -H "X-Ingest-Secret: ${INGEST_SECRET}" -X POST "http://127.0.0.1:8080/api/v1/ingest/enrich?since_days=2"
