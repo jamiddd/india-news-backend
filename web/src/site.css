@@ -1395,3 +1395,7 @@ header.masthead .ph{background:#2A2A31; border-color:#3A3A43; color:#9A9AA3}
 .sk-ctx{padding-top:0}
 .spot-row.src .fv{display:inline-block; flex:0 0 auto; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.14)}
 .spot-row.src .fv img{background:#fff}
+
+/* No grey tap-highlight box over buttons and links on touch screens (keyboard focus rings are untouched) */
+*{-webkit-tap-highlight-color:transparent}
+a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:manipulation}
