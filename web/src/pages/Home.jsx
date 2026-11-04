@@ -155,7 +155,10 @@ function CatBar({ d, c, onSearch }) {
   const [menu, setMenu] = useState(null), btn = useRef(null), pop = useRef(null);
   useLayoutEffect(() => {
     if (!menu || !pop.current) return;
-    pop.current.style.left = Math.max(12, Math.min(menu.left, innerWidth - pop.current.offsetWidth - 12)) + "px";
+    // Starts at left:0 (see the style below) so it can never widen the page, then slides to sit
+    // under the button, kept 12px inside the visible width.
+    const vw = document.documentElement.clientWidth;
+    pop.current.style.left = Math.max(12, Math.min(menu.left, vw - pop.current.offsetWidth - 12)) + "px";
   }, [menu]);
   useEffect(() => {
     if (!menu) return;
@@ -179,7 +182,7 @@ function CatBar({ d, c, onSearch }) {
         <button type="button" className="search-btn" id="search-open" aria-label="Search" title="Search (Ctrl/Cmd+K)" onClick={onSearch}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg></button>
       </div>
       {menu ? createPortal(
-        <div className="cat-pop" role="menu" ref={pop} style={{ top: menu.top, left: menu.left }}>
+        <div className="cat-pop" role="menu" ref={pop} style={{ top: menu.top, left: 0 }}>
           {more.map((k) => <Link key={k} role="menuitem" className={k === c ? "on" : ""} to={"/?c=" + encodeURIComponent(k)} onClick={() => setMenu(null)}>{k}</Link>)}
         </div>, document.body) : null}
     </nav>
