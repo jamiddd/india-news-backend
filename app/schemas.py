@@ -898,6 +898,13 @@ class ExplainersOut(BaseModel):
     explainers: List[ExplainerListItemOut]
 
 
+class TeaserOut(BaseModel):
+    """The one timeline and one explainer the public website shows, as list items. Either is null
+    when there is nothing to show. Deliberately not a list: the website never receives the rest."""
+    timeline: Optional[TimelineFeatureListItemOut] = None
+    explainer: Optional[ExplainerListItemOut] = None
+
+
 class ExplainerDetailOut(BaseModel):
     id: int
     question: str

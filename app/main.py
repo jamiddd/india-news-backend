@@ -61,7 +61,7 @@ from app.models import Source, Article, StoryCluster, User, DeviceToken, DailyCr
 from app.schemas import (
     DailyBriefItemOut,
     DailyBriefOut,
-    ExplainersOut, ExplainerListItemOut, ExplainerDetailOut, ExplainerSectionOut, ExplainerSourceOut,
+    TeaserOut, ExplainersOut, ExplainerListItemOut, ExplainerDetailOut, ExplainerSectionOut, ExplainerSourceOut,
     SourceOut, StoryClusterOut, ArticleOut, StoryClusterListOut, ArticleListOut, ArticleVideoUrlOut,
     PaginatedClustersOut, PaginatedClustersListOut, ClustersCacheEnvelope, RelatedClustersOut,
     TimelineOut,
@@ -2789,6 +2789,26 @@ async def list_explainers(request: Request, db: AsyncSession = Depends(get_db)):
     ])
     await _cache_set(EXPLAINERS_LIST_CACHE_KEY, result_out.model_dump_json())
     return result_out
+
+
+@app.get(f"{settings.API_V1_STR}/teaser", response_model=TeaserOut)
+@limiter.limit("60/minute")
+async def get_teaser(request: Request, db: AsyncSession = Depends(get_db)):
+    """The single timeline and single explainer the public website shows as a taste of the Context
+    tab, which is Premium in the app. Same ordering as the full lists (the top tracked timeline,
+    the newest explainer), but only one of each, so the website never has to fetch the rest.
+
+    This is presentation, not protection: GET /timelines and GET /explainers (and their detail
+    routes) are still open, exactly as the Android app uses them. Closing those needs a
+    server-side entitlement, which does not exist yet (see docs/web-client-scope.md)."""
+    # No cache of its own: both lists are cached (and invalidated on publish) already, so this
+    # stays in step with them instead of adding a second thing that can go stale.
+    timelines = await list_timeline_features(request=request, db=db)
+    explainers = await list_explainers(request=request, db=db)
+    return TeaserOut(
+        timeline=timelines.timelines[0] if timelines.timelines else None,
+        explainer=explainers.explainers[0] if explainers.explainers else None,
+    )
 
 
 EXPLAINER_SEARCH_LIMIT = 30

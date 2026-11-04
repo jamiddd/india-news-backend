@@ -90,12 +90,29 @@ async def test_spa_paths_get_shell(client, dist, path):
 
 
 @pytest.mark.parametrize("path", ["/api/v1/nope", "/admin/api/nope", "/static/nope.css",
-                                  "/.well-known/nope", "/download/apk/x", "/app-assets/assets/nope.js",
-                                  "/favicon.ico"])
+                                  "/.well-known/nope", "/download/apk/x", "/app-assets/assets/nope.js"])
 async def test_server_paths_not_swallowed(client, dist, path):
     r = await client.get(path)
     assert r.status_code == 404
     assert "app-assets" not in r.text
+
+
+@pytest.mark.parametrize("path,content_type", [("/favicon.ico", "image/x-icon"),
+                                                ("/manifest.webmanifest", "application/manifest+json"),
+                                                ("/sw.js", "application/javascript")])
+async def test_root_files_are_real_files_not_the_shell(client, dist, path, content_type):
+    """The icon, the install manifest and the service worker live at the site root (their scope and
+    browsers' own requests need that) and must not fall through to the app shell."""
+    r = await client.get(path)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith(content_type)
+    assert "app-assets" not in r.text[:400] if path != "/favicon.ico" else True
+
+
+async def test_service_worker_is_never_cached_and_covers_the_whole_site(client, dist):
+    r = await client.get("/sw.js")
+    assert "no-cache" in r.headers["cache-control"]        # a new worker must be picked up at once
+    assert r.headers["service-worker-allowed"] == "/"
 
 
 async def test_registered_routes_still_win(client, dist):
