@@ -600,6 +600,20 @@ async def favicon_ico():
     catch-all treats dotted paths as 404s), so serve the multi-size icon here."""
     return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon",
                         headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def web_manifest():
+    """Makes the site installable ("Install app" in Chrome). At the root so its scope is "/"."""
+    return FileResponse(STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker():
+    """Served from the root so it can control every page; never cached so updates ship at once."""
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 app.mount("/admin/assets", admin_assets, name="admin_assets")
 _web_assets = web_spa.make_assets()
 if _web_assets is not None:

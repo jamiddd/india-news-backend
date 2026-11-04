@@ -1,0 +1,25 @@
+{
+  "id": "/",
+  "name": "Open Indian News",
+  "short_name": "News",
+  "description": "Indian news from many outlets, clustered by story, with the framing compared. No ads.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0A0A",
+  "theme_color": "#0A0A0A",
+  "lang": "en-IN",
+  "categories": ["news"],
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Top stories", "url": "/?source=shortcut", "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Watch", "url": "/watch?source=shortcut", "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Context", "url": "/context?source=shortcut", "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
