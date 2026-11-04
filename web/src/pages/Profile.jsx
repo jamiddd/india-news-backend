@@ -29,6 +29,7 @@ function Row({ st, kind, onUnsave }) {
   );
 }
 
+// Stories opened before times were recorded have none: they are grouped under one "EARLIER" label.
 // History, as in the Android app: a timeline, oldest at the top and newest at the bottom, with the
 // day (once per day) and the time it was opened on a rail beside the line, then the story.
 const sameDay = (a, b) => !!a && !!b && new Date(a).toDateString() === new Date(b).toDateString();
@@ -40,7 +41,7 @@ function HistoryRow({ st, at, prevAt, first, last }) {
   const opened = at ? ago(Math.max(0, Math.round((Date.now() - at) / 60000))) + " ago" : "";
   return (
     <Link className={"pr-hr" + (first ? " first" : "") + (last ? " last" : "")} to={"/story/" + st.id}>
-      <span className="hr-rail"><span className="hr-when">{d && (first || !sameDay(prevAt, at)) ? <span>{date}</span> : null}<span>{time}</span></span><i className="hr-ln"></i></span>
+      <span className="hr-rail"><span className="hr-when">{d ? (<>{first || !sameDay(prevAt, at) ? <span>{date}</span> : null}<span>{time}</span></>) : (first ? <span>EARLIER</span> : null)}</span><i className="hr-ln"></i></span>
       <span className="hr-body"><span className="hr-tx"><b>{st.headline}</b><small>{[outlet, opened].filter(Boolean).join(" \u00b7 ")}</small></span>
         {st.image ? <Ph className="hr-pic" r="1/1" t="" src={st.image} /> : null}</span>
     </Link>
