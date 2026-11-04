@@ -1450,5 +1450,12 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
 .cx-past .meta .cat{color:var(--ink-3)}
 
 /* Fallback picture: our mark, muted, on the placeholder tile */
+.ph{container-type:inline-size}
+.ph-fb{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; width:100%}
 .ph-mark{width:42%; height:auto; min-width:14px; max-width:96px; opacity:.4}
+.ph-msg{display:none; font:600 12px/1.3 var(--sans,Inter,sans-serif); color:var(--ink-3); text-align:center}
+@container (min-width:190px){ .ph-msg{display:block} .ph-mark{width:26%; max-width:84px} }
 .mvw-media .ph-mark{max-width:140px}
+.mvw-media .ph-msg{color:#9A9AA3; font-size:14px}
+.vp-fail{display:flex; align-items:center; gap:8px}
+.vp-fail .ph-mark{width:26px; min-width:26px; opacity:1}

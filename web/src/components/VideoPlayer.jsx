@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { resolveVideoUrl } from "../api.js";
+import OinMark from "./OinMark.jsx";
 
 // Plays whichever kind of video a story carries:
 //   - YouTube embeds (youtube.com/embed/<id>)  -> iframe (privacy-enhanced domain)
@@ -54,7 +55,7 @@ export default function VideoPlayer({ src, articleId, poster, autoPlay = true, m
   }, [url, yt]);
 
   const bg = poster ? { backgroundImage: "url(" + poster + ")" } : undefined;
-  if (state === "failed") return <div className="vp vp-msg" style={bg}><span>Video unavailable right now</span></div>;
+  if (state === "failed") return <div className="vp vp-msg" style={bg}><span className="vp-fail"><OinMark tone="dark" className="ph-mark" size={28} />Could not load the video</span></div>;
   if (state === "resolving" || !url) return <div className="vp vp-msg" style={bg}><i className="spin"></i></div>;
   if (yt) {
     return <iframe className="vp" title={label} loading="lazy" allowFullScreen referrerPolicy="strict-origin-when-cross-origin"

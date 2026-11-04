@@ -1,4 +1,5 @@
 import { Ph } from "../components/Photo.jsx";
+import VideoPlayer from "../components/VideoPlayer.jsx";
 
 // Dev-only gallery of the fallback picture (route /fallback-preview, not in production builds).
 // Use the theme button in the header to see it in light and dark.
@@ -27,8 +28,11 @@ export default function FallbackPreview() {
         {cell("104px", "saved row", <Ph r="3/2" t="" src={null} style={{ width: 104 }} />, 104)}
         {cell("36px", "search result", <Ph t="" src={null} style={{ width: 36, height: 36, padding: 0, borderRadius: 6 }} />, 60)}
       </div>
-      <h2 className="sec-h" style={{ marginTop: 40 }}><span>With a label</span></h2>
-      <div style={{ maxWidth: 360 }}>{cell("Video with no thumbnail", "keeps its label instead of the mark", <Ph r="16/9" t="video 1" src={null} />)}</div>
+      <h2 className="sec-h" style={{ marginTop: 40 }}><span>Video</span></h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 24 }}>
+        {cell("Video that fails to load", "the player's failure message", <div style={{ position: "relative", aspectRatio: "16/9", borderRadius: 8, overflow: "hidden", background: "#000" }}><VideoPlayer src="https://media.invalid/none.mp4" /></div>)}
+        {cell("Video with no thumbnail", "just the mark: a missing thumbnail isn't an error (the video still plays)", <Ph r="16/9" src={null} msg={false} />)}
+      </div>
     </main>
   );
 }

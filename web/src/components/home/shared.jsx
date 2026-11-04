@@ -157,7 +157,7 @@ export function Carousel({ s }) {
     const x = m[0], v = x && x.kind === "video", label = (x && x.label) || "image";
     return (
       <>
-        <Ph className="mv" r="16/9" src={x ? (v ? x.poster : x.src) : null} t={v ? label : undefined} role="button" tabIndex={0} aria-label={v ? "Play video" : "Open media fullscreen"}
+        <Ph className="mv" r="16/9" src={x ? (v ? x.poster : x.src) : null} msg={v ? false : undefined} role="button" tabIndex={0} aria-label={v ? "Play video" : "Open media fullscreen"}
           onClick={(e) => { e.preventDefault(); if (v) setVp(0); else setView(true); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (v) setVp(0); else setView(true); } }}>
           {v && vp !== 0 && <span className="car-play">{PLAY_SVG}</span>}
           {v && vp === 0 && <VideoPlayer src={x.src} articleId={x.article_id} poster={x.poster} />}
@@ -183,7 +183,7 @@ export function Carousel({ s }) {
           {m.map((x, j) => {
             const v = x.kind === "video";
             return (
-              <Ph key={j} className="car-slide" r="16/9" src={v ? x.poster : x.src} t={v ? x.label + " " + (j + 1) : undefined} role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length}
+              <Ph key={j} className="car-slide" r="16/9" src={v ? x.poster : x.src} msg={v ? false : undefined} role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length}
                 onClick={(e) => { e.preventDefault(); if (v) setVp(j); else setView(j); }}>
                 {v && vp !== j && <span className="car-play">{PLAY_SVG}</span>}
                 {v && vp === j && <VideoPlayer src={x.src} articleId={x.article_id} poster={x.poster} />}
