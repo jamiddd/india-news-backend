@@ -219,6 +219,8 @@
   font-family:var(--mono); font-size:12px; text-align:center; padding:8px; border:1px solid #C4C4CB}
 :root[data-theme="dark"] .ph{background:#2A2A31; color:#9A9AA3; border-color:#3A3A43}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .ph{background:#2A2A31; color:#9A9AA3; border-color:#3A3A43} }
+.fv{overflow:hidden}
+.fv img{width:100%; height:100%; object-fit:cover; display:block; background:#fff; border-radius:50%}
 .ph.round{border-radius:50%}
 .ph{position:relative; overflow:hidden}
 .ph.has-img{padding:0; border-color:transparent; background:#D9D9DE}

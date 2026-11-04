@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Viewer } from "../shell/MediaViewer.jsx";
-import { Ph } from "../Photo.jsx";
+import { Ph, Fav } from "../Photo.jsx";
 import { shareStory } from "../shell/toast.js";
 
 export function ago(m) { return m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d"; }
@@ -71,7 +71,7 @@ export function Acts({ id }) {
   );
 }
 export function Tip({ id }) { return <div className="tip" role="group" aria-label="Story actions"><Acts id={id} /></div>; }
-export function Fv() { return <i className="fv"></i>; }
+export function Fv({ name }) { return <Fav name={name} />; }
 export { Ph };
 
 // ---- coverage popover ----------------------------------------------------
@@ -84,7 +84,7 @@ export function CoverageRows({ list, link = false }) {
   return list.map((v, i) => (
     <div key={i} className={"pop-r" + (i === list.length - 1 ? " last" : "")}>
       <span className="pop-t">{ago(v.minutes_ago)}</span><span className={"pop-dot" + (i === 0 ? " first" : "")}></span>
-      <div><div className="pop-n"><i className="fv"></i><Link className="so" to={"/source/" + slug(v.outlet)}><b>{v.outlet}</b></Link>{i === 0 && <em>FIRST</em>}</div><div className="pop-s">{link ? <a href="#" target="_blank" rel="noopener" style={{ color: "inherit" }} onClick={(e) => e.preventDefault()}>{v.title}</a> : v.title}</div></div>
+      <div><div className="pop-n"><Fav name={v.outlet} /><Link className="so" to={"/source/" + slug(v.outlet)}><b>{v.outlet}</b></Link>{i === 0 && <em>FIRST</em>}</div><div className="pop-s">{link ? <a href="#" target="_blank" rel="noopener" style={{ color: "inherit" }} onClick={(e) => e.preventDefault()}>{v.title}</a> : v.title}</div></div>
     </div>
   ));
 }
@@ -121,6 +121,7 @@ export function PopHost() {
 
 export function Src({ s }) {
   const first = (s.coverage[0] || {}).outlet || "News Desk", n = Math.max(0, s.outlet_count - 1);
+  const outs = s.coverage.map((c) => c.outlet).filter((o, i, a) => a.indexOf(o) === i);
   function click(e) {
     e.preventDefault();
     const a = e.currentTarget;
@@ -130,7 +131,7 @@ export function Src({ s }) {
   }
   return (
     <a className="src" data-sid={s.id} href={"/story/" + s.id + "#coverage"} onClick={click}>
-      <span className="favs"><i className="fv"></i>{s.outlet_count > 1 && <i className="fv"></i>}</span>
+      <span className="favs"><Fav name={outs[0]} />{s.outlet_count > 1 && <Fav name={outs[1]} />}</span>
       <span>{first}{n ? " & " + n + " other" + (n > 1 ? "s" : "") : ""}</span>
     </a>
   );

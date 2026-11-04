@@ -102,9 +102,18 @@ export function splitBullets(summary) {
 // SourceOut[] -> lookup by id. Story clusters carry no category of their own;
 // the API derives categories from the publisher (Source.category), so the web
 // client does the same.
+// Outlet name -> homepage domain, filled whenever the sources list is indexed. Source logos
+// are the publisher's favicon (same approach as the Android app), so no backend field is needed.
+const HOME_BY_NAME = {};
+export function faviconFor(name) {
+  const home = HOME_BY_NAME[String(name || "").toLowerCase()];
+  if (!home) return null;
+  try { return "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(new URL(home).hostname.replace(/^www\./, "")) + "&sz=64"; } catch (e) { return null; }
+}
+
 export function indexSources(list) {
   const byId = {};
-  (list || []).forEach((s) => { byId[s.id] = s; });
+  (list || []).forEach((s) => { byId[s.id] = s; if (s.name && s.homepage_url) HOME_BY_NAME[String(s.name).toLowerCase()] = s.homepage_url; });
   return { byId, list: list || [] };
 }
 const EMPTY_SOURCES = indexSources([]);
@@ -379,15 +388,28 @@ export async function loadHome({ category } = {}) {
 }
 
 // Story page: { stories: [story, ...related] } (empty when the id is unknown).
-export async function loadStory(id) {
+export async function loadStoryMain(id) {
   if (USE_SAMPLE) return sample();
-  const cx = await ctx();
-  const [s, rel] = await Promise.all([
+  // Start all three requests together; related stories are loaded separately (loadRelated)
+  // so a slow related query never holds up the story itself.
+  const [cx, s] = await Promise.all([
+    ctx(),
     getJSON(V1 + "/clusters/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; }),
-    getJSON(V1 + "/clusters/" + encodeURIComponent(id) + "/related?limit=6").catch(() => ({ items: [] })),
   ]);
   if (!s) return { stories: [] };
-  return { stories: [adaptCluster(s, cx)].concat((rel.items || []).filter((x) => x.id !== s.id).map((x) => adaptCluster(x, cx))) };
+  return { stories: [adaptCluster(s, cx)] };
+}
+export async function loadRelated(id) {
+  if (USE_SAMPLE) return { stories: [] };
+  const [cx, rel] = await Promise.all([
+    ctx(),
+    getJSON(V1 + "/clusters/" + encodeURIComponent(id) + "/related?limit=6").catch(() => ({ items: [] })),
+  ]);
+  return { stories: (rel.items || []).filter((x) => String(x.id) !== String(id)).map((x) => adaptCluster(x, cx)) };
+}
+export async function loadStory(id) {
+  const [main, rel] = await Promise.all([loadStoryMain(id), loadRelated(id)]);
+  return main.stories.length ? { stories: main.stories.concat(rel.stories) } : main;
 }
 
 // Publisher (/source/:key), topic (/topic/:key) and plain /list pages: { stories }.

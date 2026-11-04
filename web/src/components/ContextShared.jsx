@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { shareStory } from "./shell/toast.js";
 import { Link } from "react-router-dom";
-import { Ph as PhBox } from "./Photo.jsx";
+import { Ph as PhBox, Fav } from "./Photo.jsx";
 
 export const ago = (m) => (m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d");
 
@@ -61,7 +61,7 @@ export function SrcRow({ s, onChange }) {
   }
   return (
     <div className="srcrow">
-      <Link className="src" data-sid={s.id} to={"/story/" + s.id + "#coverage"}><span className="favs"><i className="fv"></i>{s.outlet_count > 1 ? <i className="fv"></i> : null}</span><span>
+      <Link className="src" data-sid={s.id} to={"/story/" + s.id + "#coverage"}><span className="favs"><Fav name={(s.coverage[0] || {}).outlet} />{s.outlet_count > 1 ? <Fav name={(s.coverage[1] || {}).outlet} /> : null}</span><span>
         {first}{n ? " & " + n + " other" + (n > 1 ? "s" : "") : ""}</span></Link>
       <div className="acts"><button type="button" className={"act save" + (on ? " on" : "")} aria-pressed={on} aria-label={on ? "Remove from saved" : "Save story"} title={on ? "Saved" : "Save"} onClick={toggle}>{BM}</button>
         <button type="button" className="act" aria-label="Share story" title="Share" onClick={share}>{SH}</button></div>

@@ -5,7 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // the new data arrives (no flash back to the loading state, e.g. switching home
 // tabs); otherwise it shows the loading state again. A late response from an
 // older call is always ignored.
-export function useData(loader, deps = [], { keep = false } = {}) {
+// With cacheKey, the last result for that key is shown immediately on the next visit
+// (e.g. coming back to Home) while a fresh copy loads in the background.
+const SWR = new Map();
+export function useData(loader, deps = [], { keep = false, cacheKey = null } = {}) {
   const [state, setState] = useState({ key: null, data: null, error: null });
   const [n, setN] = useState(0);
   const seq = useRef(0);
@@ -13,17 +16,21 @@ export function useData(loader, deps = [], { keep = false } = {}) {
   useEffect(() => {
     const my = ++seq.current;
     Promise.resolve().then(loader).then(
-      (data) => { if (my === seq.current) setState({ key, data, error: null }); },
+      (data) => {
+        if (cacheKey) { SWR.delete(cacheKey); SWR.set(cacheKey, data); if (SWR.size > 30) SWR.delete(SWR.keys().next().value); }
+        if (my === seq.current) setState({ key, data, error: null });
+      },
       (error) => { if (my === seq.current) setState({ key, data: null, error }); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   const retry = useCallback(() => setN((x) => x + 1), []);
   const fresh = state.key === key;
+  const cached = !fresh && cacheKey && SWR.has(cacheKey) ? SWR.get(cacheKey) : null;
   return {
-    data: fresh || keep ? state.data : null,
+    data: fresh ? state.data : cached || (keep ? state.data : null),
     error: fresh ? state.error : null,
-    loading: !fresh,
+    loading: !fresh && !cached,
     retry,
   };
 }

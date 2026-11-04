@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ago, useSaved, toast, toggleSaved } from "../components/home/shared.jsx";
+import { Fav } from "../components/Photo.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadWatch } from "../api.js";
 
@@ -90,7 +91,7 @@ function Pills({ v, rail }) {
   );
 }
 
-function Src({ v }) { return <span className="wt-src"><i className="fv"></i><span>{v.outlet} &middot; {ago(v.s.minutes_ago)} ago</span></span>; }
+function Src({ v }) { return <span className="wt-src"><Fav name={v.outlet} /><span>{v.outlet} &middot; {ago(v.s.minutes_ago)} ago</span></span>; }
 
 export default function Watch() {
   const q = useData(loadWatch), d = q.data;
@@ -138,7 +139,7 @@ export default function Watch() {
         {V.map((x, i) => i === cur ? null : (
           <button type="button" className="wt-row" key={x.id} onClick={() => { setCur(i); setPos(0); setPlaying(true); window.scrollTo(0, 0); }}>
             <span className="wt-th"><em>{mmss(x.dur)}</em></span>
-            <span className="wt-tx"><b>{x.s.headline}</b><small><i className="fv"></i>{x.outlet} &middot; {ago(x.s.minutes_ago)}</small></span>
+            <span className="wt-tx"><b>{x.s.headline}</b><small><Fav name={x.outlet} />{x.outlet} &middot; {ago(x.s.minutes_ago)}</small></span>
           </button>
         ))}
       </>

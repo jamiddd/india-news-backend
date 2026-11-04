@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
+import { Fav } from "../components/Photo.jsx";
 import { AudioPlayer, Carousel, Ph, PopHost, SRow, Src, Tip, getFollows, openLogin, signedIn, slug } from "../components/home/shared.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadHome as fetchHome } from "../api.js";
@@ -67,7 +68,7 @@ function CatSection({ k, ALL, at }) {
 }
 
 function Matrix({ rows }) {
-  return <div className="matrix">{rows.map((f, i) => <div className="mrow" key={i}><b><i className="fv"></i><span><Link className="so" to={"/source/" + slug(f.outlet)}>{f.outlet}</Link></span></b><span>{f.angle}</span><span className="t">{f.tag}</span></div>)}</div>;
+  return <div className="matrix">{rows.map((f, i) => <div className="mrow" key={i}><b><Fav name={f.outlet} /><span><Link className="so" to={"/source/" + slug(f.outlet)}>{f.outlet}</Link></span></b><span>{f.angle}</span><span className="t">{f.tag}</span></div>)}</div>;
 }
 
 function Band({ TLS, EXS }) {
@@ -188,7 +189,7 @@ function CatBar({ d, c, onSearch }) {
 export default function Home() {
   const [qs] = useSearchParams();
   const c = qs.get("c") || "All";
-  const q = useData(() => loadHome(c), [c], { keep: true }), d = q.data;
+  const q = useData(() => loadHome(c), [c], { keep: true, cacheKey: "home:" + c }), d = q.data;
   const [phone, setPhone] = useState(() => matchMedia("(max-width:700px)").matches);
   const [search, setSearch] = useState(null);   // null | "open" | "closing"
   useEffect(() => {

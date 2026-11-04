@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Carousel, CoverageRows, PopHost, SRow, Tip, ago, slug } from "../components/home/shared.jsx";
+import { Fav } from "../components/Photo.jsx";
 import { useData, statusView } from "../components/Status.jsx";
-import { loadStory } from "../api.js";
+import { loadStoryMain, loadRelated } from "../api.js";
 
 const COLLAPSED = 5, TOPIC_SHOWN = 6;
 
-// Data access for this page: loadStory (src/api.js) returns the story first, then its related stories.
-function pickStory(d, id) {
-  const S = d.stories, s = S.filter((x) => x.id === +id)[0];
+// Data access for this page: loadStoryMain (src/api.js) returns the story; its related stories
+// arrive separately and fill in when ready.
+function pickStory(d, rel, id) {
+  const s = d.stories.filter((x) => x.id === +id)[0];
   if (!s) return {};
+  const S = (rel && rel.stories) || [];
   const related = S.filter((x) => x.id !== s.id && x.category === s.category)
     .concat(S.filter((x) => x.id !== s.id && x.category !== s.category)).slice(0, 3);
   return { s, related };
@@ -17,9 +20,10 @@ function pickStory(d, id) {
 
 export default function Story() {
   const { id } = useParams();
-  const q = useData(() => loadStory(id), [id]), d = q.data;
+  const q = useData(() => loadStoryMain(id), [id], { cacheKey: "story:" + id }), d = q.data;
+  const rq = useData(() => loadRelated(id), [id], { cacheKey: "related:" + id });
   const [covOpen, setCovOpen] = useState(false), [topOpen, setTopOpen] = useState(false);
-  const { s, related } = d ? pickStory(d, id) : {};
+  const { s, related = [] } = d ? pickStory(d, rq.data, id) : {};
 
   useEffect(() => {
     if (!s) return;
@@ -48,7 +52,7 @@ export default function Story() {
         <div className="sty-media"><Carousel s={s} /></div>
         <section className="sty-sec" id="summary"><h2 className="sec-h"><span>Summary</span></h2><ul className="bullets">{s.summary.map((b, i) => <li key={i}>{b}</li>)}</ul></section>
         <section className="sty-sec" id="framing"><h2 className="sec-h"><span>Media framing</span></h2><p className="sty-sub">Comparing how {s.outlet_count} outlets are framing this story.</p>
-          <div className="matrix">{s.framing.map((f, i) => <div className="mrow" key={i}><b><i className="fv"></i><span><Link className="so" to={"/source/" + slug(f.outlet)}>{f.outlet}</Link></span></b><span>{f.angle}</span><span className="t">{f.tag}</span></div>)}</div></section>
+          <div className="matrix">{s.framing.map((f, i) => <div className="mrow" key={i}><b><Fav name={f.outlet} /><span><Link className="so" to={"/source/" + slug(f.outlet)}>{f.outlet}</Link></span></b><span>{f.angle}</span><span className="t">{f.tag}</span></div>)}</div></section>
         <section className="sty-sec" id="coverage"><h2 className="sec-h"><span>Coverage</span><span className="sec-n">{chrono.length} articles</span></h2>
           <div className="cov-l" id="cov-l"><CoverageRows link list={covOpen ? chrono : chrono.slice(0, COLLAPSED)} /></div>
           {chrono.length > COLLAPSED ? <button type="button" className="more-btn" id="cov-more" onClick={() => setCovOpen(!covOpen)}>{covOpen ? "Show fewer" : "Show " + (chrono.length - COLLAPSED) + " more articles"}</button> : null}</section>

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Ph } from "../components/Photo.jsx";
+import { Ph, Fav } from "../components/Photo.jsx";
 import { Link, useParams } from "react-router-dom";
 import { AiBadge, AudioPlayer } from "../components/ContextShared.jsx";
 
@@ -43,7 +43,7 @@ export default function Explainer() {
         {srcs.length ? (
           <section className="sty-sec"><h2 className="sec-h"><span>Sources</span><span className="sec-n">{srcs.length} real stor{srcs.length === 1 ? "y" : "ies"}</span></h2><div className="srcl">
             {srcs.map((s) => (
-              <Link key={s.id} className="srcl-r" to={"/story/" + s.id}><span className="favs"><i className="fv"></i><i className="fv"></i></span><span className="srcl-t"><small>{attribution(s)}</small><b>{s.headline}</b></span></Link>
+              <Link key={s.id} className="srcl-r" to={"/story/" + s.id}><span className="favs"><Fav name={(s.coverage[0] || {}).outlet} /><Fav name={(s.coverage[1] || {}).outlet} /></span><span className="srcl-t"><small>{attribution(s)}</small><b>{s.headline}</b></span></Link>
             ))}
           </div></section>
         ) : null}
