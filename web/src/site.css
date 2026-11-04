@@ -1189,6 +1189,8 @@ html.has-mplay footer{padding-bottom:calc(44px + var(--nav-h) + var(--mplay-h,0p
   /* tighter side margins, as in the app */
   .wide,.masthead .wrap,footer .wrap,.signal-bar .wrap,.ann-in,.mplay-in,.story,.sty{padding-left:16px; padding-right:16px}
   .sty{width:100%}
+  /* the page wrapper (.wide) already pads 16px; the article inside must not add another 16px */
+  .wide .sty,.wide .story{padding-left:0; padding-right:0}
   .catbar .search-btn{display:none}
   .chip{font-size:14px}
   .hero-s h1{font-size:25.5px; letter-spacing:-0.04em}
@@ -1417,3 +1419,24 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
   .pr-list i{font-style:normal; color:var(--ink-3); font-size:20px; line-height:1}
   .pr-copy{margin:14px 4px 0; font-size:12px; color:var(--ink-3); font-family:var(--mono); text-align:center}
 }
+
+/* Profile > History: a timeline, as in the Android app */
+.pr-hs{display:flex; flex-direction:column}
+.pr-hr{display:flex; color:var(--ink); text-decoration:none}
+.pr-hr:hover{text-decoration:none; background:var(--surface)}
+.pr-hr .hr-rail{flex:0 0 88px; display:flex; align-items:center; padding-left:8px; box-sizing:border-box}
+.pr-hr .hr-when{flex:1; display:flex; flex-direction:column; align-items:flex-end; font:500 11px/1.35 var(--mono); color:var(--ink-3); white-space:nowrap}
+.pr-hr .hr-ln{position:relative; flex:0 0 10px; align-self:stretch; margin-left:8px}
+.pr-hr .hr-ln::before{content:""; position:absolute; left:50%; transform:translateX(-50%); top:0; bottom:0; width:2px; background:color-mix(in srgb,var(--ink) 16%,var(--bg))}
+.pr-hr.first .hr-ln::before{top:26px}
+.pr-hr.last .hr-ln::before{bottom:26px}
+.pr-hr .hr-ln::after{content:""; position:absolute; left:50%; top:50%; width:6px; height:6px; border-radius:50%; background:var(--oin-i); transform:translate(-50%,-50%)}
+.pr-hr .hr-body{flex:1; min-width:0; display:flex; align-items:center; gap:12px; padding:14px 4px 14px 4px}
+.pr-hr .hr-tx{flex:1; min-width:0}
+.pr-hr .hr-tx b{display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; font-size:16px; font-weight:600; line-height:1.35}
+.pr-hr .hr-tx small{display:block; margin-top:4px; font:500 11px var(--mono); color:var(--ink-3)}
+.pr-hr .hr-pic{flex:0 0 64px; width:64px; height:64px; padding:0; border-radius:4px}
+
+/* Context: the tagline sits under the title like a subtitle */
+.feed-h.ctx-h{flex-direction:column; align-items:flex-start; gap:8px}
+.feed-h.ctx-h p{font-size:13px}

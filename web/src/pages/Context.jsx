@@ -15,7 +15,7 @@ export default function Context() {
   const list = data ? data[tab] : [];
   return (
     <main className="wide" style={{ paddingBottom: 72 }}>
-      <div className="feed-h"><h1>Context</h1><p>The story behind the story</p></div>
+      <div className="feed-h ctx-h"><h1>Context</h1><p>The story behind the story</p></div>
       <div className="ctx-tabs" role="tablist" aria-label="Context sections">
         {["timelines", "explainers"].map((t) => (
           <Link key={t} role="tab" aria-selected={t === tab} className={"ctx-tab" + (t === tab ? " on" : "")} to={"/context?t=" + t}>{t === "timelines" ? "Timelines" : "Explainers"}</Link>

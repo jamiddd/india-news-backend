@@ -32,7 +32,10 @@ export default function Story() {
     // Reading history (shown on the profile's History tab).
     try {
       const l = (JSON.parse(localStorage.getItem("oin-read")) || []).filter((x) => x !== s.id);
-      l.push(s.id); localStorage.setItem("oin-read", JSON.stringify(l.slice(-50)));
+      l.push(s.id); const keep = l.slice(-50); localStorage.setItem("oin-read", JSON.stringify(keep));
+      const at = JSON.parse(localStorage.getItem("oin-read-at")) || {}, next = {};
+      keep.forEach((x) => { if (x !== s.id && at[x]) next[x] = at[x]; });
+      next[s.id] = Date.now(); localStorage.setItem("oin-read-at", JSON.stringify(next));
     } catch (e) {}
     if (location.hash) { try { const el = document.querySelector(location.hash); if (el) el.scrollIntoView(); } catch (e) {} }
   }, [s]);

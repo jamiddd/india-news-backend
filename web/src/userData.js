@@ -9,7 +9,7 @@
 import { idToken } from "./auth.js";
 import { slug, sourceList } from "./api.js";
 
-const SAVED = "oin-saved", FOLLOW = "oin-follow", NAMES = "oin-follow-names", QUEUE = "oin-sync-q", MARK = "oin-sync", SESSION = "oin-session", READ = "oin-read";
+const SAVED = "oin-saved", FOLLOW = "oin-follow", NAMES = "oin-follow-names", QUEUE = "oin-sync-q", MARK = "oin-sync", SESSION = "oin-session", READ = "oin-read", READ_AT = "oin-read-at";
 
 const rd = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
 const wr = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode / full */ } };
@@ -131,5 +131,5 @@ async function run() {
 
 // Signing out must not leave this reader's lists behind for the next person on the browser.
 export function clearLocal() {
-  [SAVED, FOLLOW, NAMES, QUEUE, MARK, READ].forEach((k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } });
+  [SAVED, FOLLOW, NAMES, QUEUE, MARK, READ, READ_AT].forEach((k) => { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } });
 }

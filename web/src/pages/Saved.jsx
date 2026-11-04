@@ -9,7 +9,7 @@ import { loadStoriesByIds } from "../api.js";
 const loadStories = () => loadStoriesByIds(savedIds());
 
 export default function Saved() {
-  const q = useData(loadStories), stories = q.data;
+  const q = useData(loadStories, [], { cacheKey: "saved-stories" }), stories = q.data;
   const [, bump] = useState(0);
   useEffect(() => { document.title = "Saved stories — Open Indian News"; }, []);
   const wait = statusView(q, "your saved stories", ({ children }) => <main className="wide" style={{ paddingBottom: 72 }}>{children}</main>);

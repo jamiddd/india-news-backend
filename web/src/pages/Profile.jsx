@@ -4,6 +4,7 @@ import css from "../components/ProfileStyles.js";
 import { ago } from "../components/ContextShared.jsx";
 import AboutLinks from "../components/AboutLinks.jsx";
 import { push, clearLocal } from "../userData.js";
+import { Ph } from "../components/Photo.jsx";
 
 import { Loading, LoadError, useData } from "../components/Status.jsx";
 import { loadStoriesByIds } from "../api.js";
@@ -23,13 +24,32 @@ function openLogin() { const b = document.getElementById("user"); if (b) b.click
 function Row({ st, kind, onUnsave }) {
   if (!st) return null;
   return (
-    <div className="pr-rw"><div className="th" aria-hidden="true"></div><div className="tx"><Link to={"/story/" + st.id}>{st.headline}</Link><small>{st.category} &middot; {ago(st.minutes_ago)} ago</small></div>
+    <div className="pr-rw"><Ph className="th" r="3/2" t="" src={st.image} aria-hidden="true" /><div className="tx"><Link to={"/story/" + st.id}>{st.headline}</Link><small>{st.category} &middot; {ago(st.minutes_ago)} ago</small></div>
       {kind === "saved" ? <button type="button" className="rm" aria-label="Remove from saved" onClick={() => onUnsave(st.id)}><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z" /></svg></button> : null}</div>
   );
 }
 
+// History, as in the Android app: a timeline, oldest at the top and newest at the bottom, with the
+// day (once per day) and the time it was opened on a rail beside the line, then the story.
+const sameDay = (a, b) => !!a && !!b && new Date(a).toDateString() === new Date(b).toDateString();
+function HistoryRow({ st, at, prevAt, first, last }) {
+  const d = at ? new Date(at) : null;
+  const date = d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }).replace(" ", "/").toUpperCase() : "";
+  const time = d ? d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase() : "";
+  const outlet = (st.coverage[0] || {}).outlet;
+  const opened = at ? ago(Math.max(0, Math.round((Date.now() - at) / 60000))) + " ago" : "";
+  return (
+    <Link className={"pr-hr" + (first ? " first" : "") + (last ? " last" : "")} to={"/story/" + st.id}>
+      <span className="hr-rail"><span className="hr-when">{d && (first || !sameDay(prevAt, at)) ? <span>{date}</span> : null}<span>{time}</span></span><i className="hr-ln"></i></span>
+      <span className="hr-body"><span className="hr-tx"><b>{st.headline}</b><small>{[outlet, opened].filter(Boolean).join(" \u00b7 ")}</small></span>
+        {st.image ? <Ph className="hr-pic" r="1/1" t="" src={st.image} /> : null}</span>
+    </Link>
+  );
+}
+
 export default function Profile() {
-  const q = useData(loadStories), stories = q.data;
+  // cacheKey: coming back to this page shows the last list at once and refreshes it quietly
+  const q = useData(loadStories, [], { cacheKey: "profile-stories" }), stories = q.data;
   const [, setTick] = useState(0);
   const redraw = useCallback(() => setTick((n) => n + 1), []);
   const [editing, setEditing] = useState(false);
@@ -73,7 +93,7 @@ export default function Profile() {
     push({ k: "save", id, on: false });
     redraw();
   }
-  function clearHistory() { try { localStorage.removeItem("oin-read"); } catch (x) {} redraw(); }
+  function clearHistory() { try { localStorage.removeItem("oin-read"); localStorage.removeItem("oin-read-at"); } catch (x) {} redraw(); }
   function signOut() {
     const finish = () => { clearLocal(); try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
     import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
@@ -109,7 +129,10 @@ export default function Profile() {
   const srcs = fol.filter((k) => k.indexOf("source:") === 0), tops = fol.filter((k) => k.indexOf("topic:") === 0);
   const byId = {}; (stories || []).forEach((s) => { byId[s.id] = s; });
   const rows = (ids, kind) => ids.slice().reverse().map((i) => <Row key={kind + i} st={byId[i]} kind={kind} onUnsave={unsave} />);
-  const sv = rows(savedList, "saved"), hs = rows(hist, "hist");
+  const sv = rows(savedList, "saved");
+  let readAt = {}; try { readAt = JSON.parse(localStorage.getItem("oin-read-at")) || {}; } catch (x) { /* none yet */ }
+  const histShown = hist.filter((i) => byId[i]);   // oldest first, like the app
+  const hs = histShown.map((i, n) => <HistoryRow key={i} st={byId[i]} at={readAt[i]} prevAt={n ? readAt[histShown[n - 1]] : null} first={n === 0} last={n === histShown.length - 1} />);
 
   return (
     <main className="wide pr" id="page">{style}
@@ -127,7 +150,7 @@ export default function Profile() {
         <button type="button" role="tab" className={tab ? "on" : ""} onClick={() => goTab(1)}>History</button></div></div>
       <div className="pr-pg" id="pr-pg" ref={pg} onScroll={onScroll}>
         <div className="pr-pane"><h2 className="pr-ph">Saved<span>{savedList.length}</span></h2>{sv.length ? sv : <p className="pr-none">Nothing saved yet. Tap the bookmark on any story to keep it here.</p>}</div>
-        <div className="pr-pane"><h2 className="pr-ph">History<span>{hist.length}</span></h2>{hs.length ? <>{hs}<button type="button" className="pr-clear" id="pr-clear" onClick={clearHistory}>Clear history</button></> : <p className="pr-none">Stories you open will show up here.</p>}</div>
+        <div className="pr-pane"><h2 className="pr-ph">History<span>{hist.length}</span></h2>{hs.length ? <><div className="pr-hs">{hs}</div><button type="button" className="pr-clear" id="pr-clear" onClick={clearHistory}>Clear history</button></> : <p className="pr-none">Stories you open will show up here as a timeline, most recent at the bottom.</p>}</div>
       </div>
       <div className="pr-stats"><Link className="pr-stat" to="/saved"><b>{savedList.length}</b><span>Saved</span></Link><Link className="pr-stat" to="/sources"><b>{srcs.length}</b><span>Sources</span></Link><Link className="pr-stat" to="/sources"><b>{tops.length}</b><span>Topics</span></Link></div>
       <section className="pr-sec"><h2>Following<Link to="/sources">Find sources &rarr;</Link></h2>
