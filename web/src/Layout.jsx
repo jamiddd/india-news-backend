@@ -69,7 +69,6 @@ function Shell() {
           <OinMark size={30} tone="dark" />
           <span className="brand-text">
             <span className="wordmark">{brand.name}<span className="stop">.</span></span>
-            <span className="brand-sub">{brand.tagline}</span>
           </span>
         </Link>
         <nav className="links"><NavLinks list={nav} /></nav>

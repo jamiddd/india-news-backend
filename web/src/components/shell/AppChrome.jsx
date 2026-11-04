@@ -55,7 +55,7 @@ export function AppBar({ brand, onTheme }) {
   return (
     <header className={"appbar" + (showDate ? " show-date" : "") + (hide ? " hide" : "")}>
       <Link className="ab-brand" to="/" aria-label="Open Indian News, top of the feed"><OinMark size={26} tone="dark" />
-        <span className="ab-title"><span className="ab-t1"><b>{brand.name}</b><small>Multi-Outlet Clustered Feed &amp; Framing Intelligence</small></span>
+        <span className="ab-title"><span className="ab-t1"><b>{brand.name}</b></span>
           <span className="ab-t2"><b>{day}</b><small>{dm}</small></span></span></Link>
       <div className="ab-act">
         <button type="button" className="ab-i" id="ab-theme" aria-label={dark ? "Switch to day mode" : "Switch to night mode"} onClick={onTheme}>{dark ? IC.sun : IC.moon}</button>
