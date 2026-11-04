@@ -23,7 +23,7 @@ export default function Saved() {
       {list.length ? (
         <div className="cards flat" id="grid">
           {list.map((x) => (
-            <div className="c" key={x.id}><Ph ratio="3/2" /><div className="meta"><span className="cat">{x.category}</span><span>{ago(x.minutes_ago)} ago</span></div>
+            <div className="c" key={x.id}><Ph ratio="3/2" src={x.image} /><div className="meta"><span className="cat">{x.category}</span><span>{ago(x.minutes_ago)} ago</span></div>
               <h3><Link to={"/story/" + x.id}>{x.headline}</Link></h3><SrcRow s={x} onChange={() => bump((n) => n + 1)} /></div>
           ))}
         </div>

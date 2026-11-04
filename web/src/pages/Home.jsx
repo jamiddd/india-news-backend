@@ -14,20 +14,20 @@ export const loadHome = (category) => fetchHome({ category });
 function ago(m) { return m < 60 ? m + "m" : Math.round(m / 60) + "h"; }
 function Meta({ s }) { return <div className="meta"><span className="cat">{s.category}</span><span>{ago(s.minutes_ago)} ago</span></div>; }
 function SLink({ s }) { return <Link to={"/story/" + s.id}>{s.headline}</Link>; }
-function Card({ s }) { return <div className="c"><Ph r="3/2" /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
+function Card({ s }) { return <div className="c"><Ph r="3/2" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
 function SmallHead({ s }) { return <Link to={"/story/" + s.id}><small>{s.category.toUpperCase()} &middot; {ago(s.minutes_ago)} ago</small>{s.headline}</Link>; }
 
-function Img({ s }) { return <div className="side-card"><Ph r="3/2" /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
+function Img({ s }) { return <div className="side-card"><Ph r="3/2" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
 function Txt({ s }) { return <div className="side-card txt hv"><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.summary[0]}</p><Src s={s} /><Tip id={s.id} /></div>; }
-function Thumb({ s }) { return <div className="side-card th hv"><div><Meta s={s} /><h3><SLink s={s} /></h3></div><Ph r="1/1" /><Src s={s} /><Tip id={s.id} /></div>; }
+function Thumb({ s }) { return <div className="side-card th hv"><div><Meta s={s} /><h3><SLink s={s} /></h3></div><Ph r="1/1" src={s.image} /><Src s={s} /><Tip id={s.id} /></div>; }
 const O = (F, s) => (s ? <F s={s} /> : null);
 
 // Lower-page compositions.
 function G({ s, type, grow, r }) {
   const cls = (grow ? "grow " : "") + "g";
-  if (type === "big") return <article className={cls + " g-big"}><Ph r="4/3" /><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.dek}</p><SRow s={s} /></article>;
+  if (type === "big") return <article className={cls + " g-big"}><Ph r="4/3" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.dek}</p><SRow s={s} /></article>;
   if (type === "note") return <article className={cls + " g-txt hv"}><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.summary[0]}</p><Src s={s} /><Tip id={s.id} /></article>;
-  return <article className={cls}><Ph r={type === "sq" ? "1/1" : r || "3/2"} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></article>;
+  return <article className={cls}><Ph r={type === "sq" ? "1/1" : r || "3/2"} src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></article>;
 }
 // Spread stories over n columns, each with at least one image card; the last image card stretches.
 function Columns({ L, types, n }) {
@@ -77,7 +77,7 @@ function Band({ TLS, EXS }) {
         {TLS.map((t, i) => i ? (
           <div className="tl tl-plain" key={t.id}><div><div className="meta"><span>{t.updated}</span><span>{t.points.length} events</span></div><h3><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><p>{t.dek || ""}</p></div></div>
         ) : (
-          <div className="tl tl-top" key={t.id}><Ph r="3/2" /><h3 style={{ marginTop: 12 }}><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><div className="meta"><span>{t.updated}</span></div>
+          <div className="tl tl-top" key={t.id}><Ph r="3/2" src={t.image} /><h3 style={{ marginTop: 12 }}><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><div className="meta"><span>{t.updated}</span></div>
             {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} /> : null}
             <ol>{t.points.map((p, j) => <li key={j}><b>{p.date}</b><span>{p.text}</span></li>)}</ol></div>
         ))}
@@ -85,7 +85,7 @@ function Band({ TLS, EXS }) {
       <div><h2 className="sec-h"><span>Explainers</span><Link to="/explainers">See all &rarr;</Link></h2>
         <div className="exs">{EXS.map((x, i) => (
           // The first explainer is the featured one: an excerpt and three key points.
-          <div className="ex" key={x.id}><Ph r="3/2" /><div className="meta"><span className="cat">{x.category}</span><span>{x.read}</span></div><h3><Link to={"/explainer/" + x.id}>{x.title}</Link></h3><p>{x.dek}</p>
+          <div className="ex" key={x.id}><Ph r="3/2" src={x.image} /><div className="meta"><span className="cat">{x.category}</span><span>{x.read}</span></div><h3><Link to={"/explainer/" + x.id}>{x.title}</Link></h3><p>{x.dek}</p>
             {i ? null : <><p className="ex-body">{x.excerpt || ""}</p><div className="ex-pts"><b>In brief</b><ul>{(x.points || []).map((t, j) => <li key={j}>{t}</li>)}</ul></div><Link className="ex-more" to={"/explainer/" + x.id}>Read the explainer &rarr;</Link></>}
           </div>
         ))}</div>

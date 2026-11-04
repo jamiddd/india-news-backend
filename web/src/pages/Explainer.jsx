@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Ph } from "../components/Photo.jsx";
 import { Link, useParams } from "react-router-dom";
 import { AiBadge, AudioPlayer } from "../components/ContextShared.jsx";
 
@@ -33,7 +34,7 @@ export default function Explainer() {
       <article className="sty"><div className="sty-main">
         <p className="meta crumb"><Link to="/">&larr; Top stories</Link><span className="cat" style={{ color: "var(--hue-context)" }}>Explainer</span><Link className="cat" to={"/?c=" + encodeURIComponent(x.category)}>{x.category}</Link><span>{x.updated || "Updated 4h ago"}</span><AiBadge /></p>
         <h1>{x.title}</h1>
-        <div className="sty-media"><div className="ph mv" role="button" tabIndex={0} aria-label="Open media fullscreen" style={{ aspectRatio: "16/9" }}>image</div></div>
+        <div className="sty-media"><Ph className="mv" r="16/9" src={x.image} role="button" tabIndex={0} aria-label="Open media fullscreen" /></div>
         <div style={{ marginTop: 14 }}>{x.audio || !("audio" in x) ? <AudioPlayer id={x.id} kind="explainer" title={x.title} url={"/explainer/" + x.id} label="Listen to this explainer" duration={(x.audio && x.audio.duration) || 150 + (x.id % 7) * 20} /> : null}</div>
         <div className="quick"><b>QUICK ANSWER</b><p>{x.quick || x.dek}</p></div>
         {(x.sections || []).map((sec, i) => (

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Ph } from "../Photo.jsx";
 import { Link } from "react-router-dom";
 import { searchStories } from "../../api.js";
 
@@ -70,7 +71,7 @@ export default function Search({ d, S, state, onClose }) {
         <div className="spot-h">Recent</div>
         {hist.map((x) => (
           <div className="spot-hist" key={x.id}>
-            <Link to={"/story/" + x.id} onClick={() => remember(x.id)}><span className="ph" style={{ width: 36, height: 36, padding: 0, borderRadius: 6 }}></span><span>{x.headline}</span></Link>
+            <Link to={"/story/" + x.id} onClick={() => remember(x.id)}><Ph src={x.image} t="" style={{ width: 36, height: 36, padding: 0, borderRadius: 6 }} /><span>{x.headline}</span></Link>
             <button type="button" aria-label={"Remove " + x.headline + " from recent"} onClick={() => { saveHist(history().filter((h) => h.id != x.id)); setHist(history()); }}>&times;</button>
           </div>
         ))}
@@ -83,7 +84,7 @@ export default function Search({ d, S, state, onClose }) {
       if (tab === "Stories") return (
         <Link className="spot-row" key={x.id} to={"/story/" + x.id} onClick={() => remember(x.id)}>
           <div><div className="spot-hd"><Hl text={x.headline} n={n} /></div><Snippet text={x.summary.join(" ")} n={n} /></div>
-          <div className="ph" style={{ width: 96, alignSelf: "stretch", minHeight: 56 }}>image</div>
+          <Ph src={x.image} style={{ width: 96, alignSelf: "stretch", minHeight: 56 }} />
         </Link>
       );
       if (tab === "Timelines") return <Link className="spot-card" key={x.id} to={"/timeline/" + x.id}><span className="spot-badge">TIMELINE</span><div className="spot-hd"><Hl text={x.title} n={n} /></div><div className="spot-sn">{x.points.length} events &middot; {x.updated}{x.audio ? " · Has audio" : ""}</div></Link>;

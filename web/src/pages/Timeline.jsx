@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Ph } from "../components/Photo.jsx";
 import { Link, useParams } from "react-router-dom";
 import { AiBadge, AudioPlayer, ago } from "../components/ContextShared.jsx";
 
@@ -25,7 +26,7 @@ export default function Timeline() {
       <article className="sty"><div className="sty-main">
         <p className="meta crumb"><Link to="/">&larr; Top stories</Link><span className="cat" style={{ color: "var(--hue-context)" }}>Timeline</span><Link className="cat" to={"/?c=" + encodeURIComponent(t.category)}>{t.category}</Link><span>{t.updated}</span><AiBadge /></p>
         <h1>{t.title}</h1>
-        <div className="sty-media"><div className="ph mv" role="button" tabIndex={0} aria-label="Open media fullscreen" style={{ aspectRatio: "16/9" }}>image</div></div>
+        <div className="sty-media"><Ph className="mv" r="16/9" src={t.image} role="button" tabIndex={0} aria-label="Open media fullscreen" /></div>
         <p className="dek" style={{ marginTop: 14 }}>{t.context || t.dek || ""}</p>
         {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} /> : null}
         <section className="sty-sec"><h2 className="sec-h"><span>The story so far</span><span className="sec-n">{beats.length} entries</span></h2><ol className="beats">

@@ -23,7 +23,7 @@ function Meta({ x }) { return <div className="meta"><span className="cat">{x.cat
 function Card({ x, outlet }) {
   return (
     <div className="c">
-      <Ph r="3/2" /><Meta x={x} />
+      <Ph r="3/2" src={x.image} /><Meta x={x} />
       <h3><Link to={"/story/" + x.id}>{x.headline}</Link></h3>
       {outlet ? <a className="ext" href="#" target="_blank" rel="noopener" onClick={(e) => e.preventDefault()}>Read on {outlet} &#8599;</a> : null}
       <SRow s={x} />

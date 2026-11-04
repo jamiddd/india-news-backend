@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { shareStory } from "./shell/toast.js";
 import { Link } from "react-router-dom";
+import { Ph as PhBox } from "./Photo.jsx";
 
 export const ago = (m) => (m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d");
 
-export function Ph({ ratio }) {
-  return <div className="ph" style={{ aspectRatio: ratio }}>image</div>;
+export function Ph({ ratio, src }) {
+  return <PhBox r={ratio} src={src} />;
 }
 
 export function AiBadge() {
@@ -16,7 +17,7 @@ export function AiBadge() {
 
 export function TimelineCard({ t }) {
   return (
-    <article className="cx"><Link className="cx-img" to={"/timeline/" + t.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" /></Link><div className="cx-b">
+    <article className="cx"><Link className="cx-img" to={"/timeline/" + t.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" src={t.image} /></Link><div className="cx-b">
       <div className="meta"><span className="cat" style={{ color: "var(--hue-context)" }}>{t.category}</span><span>{t.updated}</span></div>
       <h3><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><p>{t.dek || ""}</p>
       <div className="cx-f"><span>{t.points.length} events</span>{t.audio ? <span className="cx-au"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg> Audio</span> : null}</div>
@@ -26,7 +27,7 @@ export function TimelineCard({ t }) {
 
 export function ExplainerCard({ x }) {
   return (
-    <article className="cx"><Link className="cx-img" to={"/explainer/" + x.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" /></Link><div className="cx-b">
+    <article className="cx"><Link className="cx-img" to={"/explainer/" + x.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" src={x.image} /></Link><div className="cx-b">
       <div className="meta"><span className="cat" style={{ color: "var(--hue-context)" }}>{x.category}</span><span>{x.read}</span></div>
       <h3><Link to={"/explainer/" + x.id}>{x.title}</Link></h3><p>{x.dek}</p></div></article>
   );

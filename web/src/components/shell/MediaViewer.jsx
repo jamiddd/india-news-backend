@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+// One viewer item: the real video/image when there is a source, else the labelled placeholder.
+function Stage({ it }) {
+  const [bad, setBad] = useState(false);
+  if (it.src && !bad) {
+    return it.video
+      ? <div className="mvw-media"><video className="ph-vid" src={it.src} controls autoPlay playsInline onError={() => setBad(true)} /></div>
+      : <div className="mvw-media ph has-img"><img className="ph-img" src={it.src} alt="" referrerPolicy="no-referrer" onError={() => setBad(true)} /></div>;
+  }
+  return <div className="mvw-media ph">{it.video && <span className="car-play big"><svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z" /></svg></span>}{it.label}</div>;
+}
+
 // Fullscreen media viewer (previous/next, counter, close, arrows + Esc).
 export function Viewer({ items, start, onClose }) {
   const [at, setAt] = useState(start), n = items.length, it = items[at];
@@ -24,7 +35,7 @@ export function Viewer({ items, start, onClose }) {
     <div className="mvw" role="dialog" aria-modal="true" aria-label="Media viewer" onClick={(e) => { if (e.target.classList.contains("mvw") || e.target.classList.contains("mvw-stage")) onClose(); }}>
       <div className="mvw-top"><span className="mvw-count" hidden={n < 2}>{at + 1} / {n}</span><span className="mvw-cap">{it.video ? "Video" : "Image"}</span><button type="button" className="mvw-x" aria-label="Close" ref={x} onClick={onClose}>&times;</button></div>
       <button type="button" className="mvw-nav mvw-prev" aria-label="Previous" hidden={n < 2 || at === 0} onClick={() => setAt(at - 1)}>{arrow("M15 5l-7 7 7 7")}</button>
-      <div className="mvw-stage"><div className="mvw-media ph">{it.video && <span className="car-play big"><svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z" /></svg></span>}{it.label}</div></div>
+      <div className="mvw-stage"><Stage key={at} it={it} /></div>
       <button type="button" className="mvw-nav mvw-next" aria-label="Next" hidden={n < 2 || at === n - 1} onClick={() => setAt(at + 1)}>{arrow("M9 5l7 7-7 7")}</button>
     </div>, document.body);
 }
@@ -34,13 +45,17 @@ export function Viewer({ items, start, onClose }) {
 export function MediaFullscreen() {
   const [view, setView] = useState(null);
   useEffect(() => {
+    function item(el) {
+      const img = el.querySelector("img.ph-img");
+      return { video: !!el.querySelector(".car-play"), src: img ? img.currentSrc || img.src : null, label: el.textContent.trim() };
+    }
     function collect(from) {
       const car = from.closest(".car");
       if (car) {
         const slides = [].slice.call(car.querySelectorAll(".car-slide"));
-        return { items: slides.map((sl) => ({ video: !!sl.querySelector(".car-play"), label: sl.textContent.trim() })), at: slides.indexOf(from.closest(".car-slide")) };
+        return { items: slides.map((sl) => item(sl)), at: slides.indexOf(from.closest(".car-slide")) };
       }
-      return { items: [{ video: !!from.querySelector(".car-play"), label: from.textContent.trim() }], at: 0 };
+      return { items: [item(from)], at: 0 };
     }
     const click = (e) => {
       if (e.defaultPrevented || e.target.closest(".mvw, .car-btn, .car-dot")) return;

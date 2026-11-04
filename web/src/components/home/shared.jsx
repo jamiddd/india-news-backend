@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Viewer } from "../shell/MediaViewer.jsx";
+import { Ph } from "../Photo.jsx";
 import { shareStory } from "../shell/toast.js";
 
 export function ago(m) { return m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d"; }
@@ -71,7 +72,7 @@ export function Acts({ id }) {
 }
 export function Tip({ id }) { return <div className="tip" role="group" aria-label="Story actions"><Acts id={id} /></div>; }
 export function Fv() { return <i className="fv"></i>; }
-export function Ph({ r, t, style }) { return <div className="ph" style={{ aspectRatio: r, ...style }}>{t || "image"}</div>; }
+export { Ph };
 
 // ---- coverage popover ----------------------------------------------------
 let pop = null; // { story, anchor }
@@ -147,11 +148,11 @@ export function Carousel({ s }) {
     const v = m[0] && m[0].kind === "video", label = (m[0] && m[0].label) || "image";
     return (
       <>
-        <div className="ph mv" role="button" tabIndex={0} aria-label="Open media fullscreen" style={{ aspectRatio: "16/9" }}
+        <Ph className="mv" r="16/9" src={!v && m[0] ? m[0].src : null} t={label} role="button" tabIndex={0} aria-label="Open media fullscreen"
           onClick={(e) => { e.preventDefault(); setView(true); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setView(true); } }}>
-          {v && <span className="car-play">{PLAY_SVG}</span>}{label}
-        </div>
-        {view && <Viewer items={[{ video: v, label }]} start={0} onClose={() => setView(null)} />}
+          {v && <span className="car-play">{PLAY_SVG}</span>}
+        </Ph>
+        {view && <Viewer items={[{ video: v, src: m[0] && m[0].src, label }]} start={0} onClose={() => setView(null)} />}
       </>
     );
   }
@@ -170,16 +171,16 @@ export function Carousel({ s }) {
         onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); go(idx() + (e.key === "ArrowRight" ? 1 : -1)); } }}>
         <div className="car-track" ref={track} onScroll={() => setI(idx())}>
           {m.map((x, j) => (
-            <div key={j} className="car-slide ph" role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length} style={{ aspectRatio: "16/9" }} onClick={(e) => { e.preventDefault(); setView(j); }}>
-              {x.kind === "video" && <span className="car-play">{PLAY_SVG}</span>}{x.label + " " + (j + 1)}
-            </div>
+            <Ph key={j} className="car-slide" r="16/9" src={x.kind === "video" ? null : x.src} t={x.label + " " + (j + 1)} role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length} onClick={(e) => { e.preventDefault(); setView(j); }}>
+              {x.kind === "video" && <span className="car-play">{PLAY_SVG}</span>}
+            </Ph>
           ))}
         </div>
         <button type="button" className="car-btn prev" aria-label="Previous media" disabled={i <= 0} onClick={() => go(idx() - 1)}>{chev("M15 5l-7 7 7 7")}</button>
         <button type="button" className="car-btn next" aria-label="Next media" disabled={i >= m.length - 1} onClick={() => go(idx() + 1)}>{chev("M9 5l7 7-7 7")}</button>
         <div className="car-dots">{m.map((x, j) => <button key={j} type="button" className={"car-dot" + (j === i ? " on" : "")} aria-label={"Go to media " + (j + 1)} aria-current={j === i ? "true" : undefined} onClick={() => go(j)}></button>)}</div>
       </div>
-      {view !== null && <Viewer items={m.map((x, j) => ({ video: x.kind === "video", label: x.label + " " + (j + 1) }))} start={view} onClose={() => setView(null)} />}
+      {view !== null && <Viewer items={m.map((x, j) => ({ video: x.kind === "video", src: x.src, label: x.label + " " + (j + 1) }))} start={view} onClose={() => setView(null)} />}
     </>
   );
 }
