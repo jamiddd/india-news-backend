@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { faviconFor } from "../api.js";
 
+// A picture that failed to show must not stay in the service worker's image cache.
+const dropCached = (u) => { try { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ evict: u }); } catch (e) { /* no worker */ } };
+
 // The grey `.ph` box, filled with a real picture when there is a URL. A missing URL or a
 // failed load leaves the placeholder (and its label) in place, so layout never shifts.
 export function Ph({ r, t, style, src, alt = "", round, children, ...rest }) {
@@ -10,7 +13,7 @@ export function Ph({ r, t, style, src, alt = "", round, children, ...rest }) {
   return (
     <div {...rest} className={"ph" + (show ? " has-img" : "") + (round ? " round" : "") + (rest.className ? " " + rest.className : "")}
       style={{ aspectRatio: r, ...style }}>
-      {show ? <img className="ph-img" src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setBad(true)} /> : (t === undefined ? "image" : t)}
+      {show ? <img className="ph-img" src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => { setBad(true); dropCached(src); }} /> : (t === undefined ? "image" : t)}
       {children}
     </div>
   );
