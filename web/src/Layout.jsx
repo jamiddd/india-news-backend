@@ -66,7 +66,7 @@ function Shell() {
       <Announcements items={ann.data} />
       <header className="masthead"><div className="wrap">
         <Link className="brand" to="/">
-          <OinMark size={30} />
+          <OinMark size={30} tone="dark" />
           <span className="brand-text">
             <span className="wordmark">{brand.name}<span className="stop">.</span></span>
             <span className="brand-sub">{brand.tagline}</span>

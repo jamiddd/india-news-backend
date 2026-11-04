@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Carousel, CoverageRows, PopHost, SRow, Tip, ago, slug } from "../components/home/shared.jsx";
 import { Fav } from "../components/Photo.jsx";
+import { RelatedSkeleton } from "../components/Skeleton.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadStoryMain, loadRelated } from "../api.js";
 
@@ -64,7 +65,7 @@ export default function Story() {
         {related.length ? (
           <section className="sty-sec" id="related"><h2 className="sec-h"><span>Related stories</span></h2>
             <div className="latest">{related.map((x) => <div className="hv" key={x.id}><Link to={"/story/" + x.id}><small>{x.category.toUpperCase()} &middot; {ago(x.minutes_ago)} ago</small>{x.headline}</Link><Tip id={x.id} /></div>)}</div></section>
-        ) : null}
+        ) : rq.loading ? <RelatedSkeleton /> : null}
       </div></article>
       <PopHost />
     </main>

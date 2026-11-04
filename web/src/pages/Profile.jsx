@@ -114,7 +114,7 @@ export default function Profile() {
           <div className="pr-act"><button type="submit" className="btn btn-primary btn-sm"><span>Save changes</span></button></div></div></form>
       ) : null}
       {flash ? <p className="pr-ok" role="status" style={{ margin: "12px 4px 0" }}>Profile updated</p> : null}
-      {q.error ? <LoadError error={q.error} onRetry={q.retry} what="your stories" /> : !stories && (savedList.length || hist.length) ? <Loading what="your stories" /> : null}
+      {q.error ? <LoadError error={q.error} onRetry={q.retry} what="your stories" /> : !stories && (savedList.length || hist.length) ? <Loading what="your stories" compact /> : null}
       <div className={"pr-tabs" + (tab ? " h" : "")} role="tablist"><i></i><div>
         <button type="button" role="tab" className={tab ? "" : "on"} onClick={() => goTab(0)}>Saved</button>
         <button type="button" role="tab" className={tab ? "on" : ""} onClick={() => goTab(1)}>History</button></div></div>

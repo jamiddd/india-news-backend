@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import Skeleton from "./Skeleton.jsx";
 
 // Runs a loader from src/api.js and tracks { data, error, loading, retry }.
 // With keep: true a dependency change leaves the previous data on screen until
@@ -35,7 +36,10 @@ export function useData(loader, deps = [], { keep = false, cacheKey = null } = {
   };
 }
 
-export function Loading({ what = "stories" }) {
+// Page-level loading is a shimmering skeleton; compact keeps the small inline spinner for
+// loading that happens inside a page that is already on screen.
+export function Loading({ what = "stories", compact = false }) {
+  if (!compact) return <Skeleton what={what} />;
   return (
     <div className="endless" role="status" aria-live="polite" style={{ paddingTop: 64 }}>
       <div className="endless-load"><i className="spin"></i><span>Loading {what}{"…"}</span></div>

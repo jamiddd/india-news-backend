@@ -15,7 +15,7 @@ from typing import Any, Literal, Optional, List, Dict
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, BackgroundTasks, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -592,6 +592,14 @@ class CachedStaticFiles(StaticFiles):
 
 
 app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    """Browsers ask for /favicon.ico regardless of the <link> tags (and the SPA
+    catch-all treats dotted paths as 404s), so serve the multi-size icon here."""
+    return FileResponse(STATIC_DIR / "favicon.ico", media_type="image/x-icon",
+                        headers={"Cache-Control": "public, max-age=86400"})
 app.mount("/admin/assets", admin_assets, name="admin_assets")
 _web_assets = web_spa.make_assets()
 if _web_assets is not None:

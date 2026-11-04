@@ -20,7 +20,7 @@ export default function Context() {
           <Link key={t} role="tab" aria-selected={t === tab} className={"ctx-tab" + (t === tab ? " on" : "")} to={"/context?t=" + t}>{t === "timelines" ? "Timelines" : "Explainers"}</Link>
         ))}
       </div>
-      {q.error ? <LoadError error={q.error} onRetry={q.retry} what={tab} /> : !data ? <Loading what={tab} /> : list.length ? (
+      {q.error ? <LoadError error={q.error} onRetry={q.retry} what={tab} /> : !data ? <Loading what={tab} compact /> : list.length ? (
         <div className="ctx-grid">{list.map((x) => (tab === "timelines" ? <TimelineCard key={x.id} t={x} /> : <ExplainerCard key={x.id} x={x} />))}</div>
       ) : <p className="empty">No {tab} yet.</p>}
     </main>
