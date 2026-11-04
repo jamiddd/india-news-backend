@@ -65,7 +65,8 @@ describe("adaptCluster", () => {
     ]);
     expect(s.topics.map((t) => t.label + "/" + t.kind)).toEqual(["Monetary policy/topic", "Inflation/topic", "Narendra Modi/person", "RBI/organisation", "Mumbai/place"]);
     expect(s.media.map((m) => m.kind)).toEqual(["video", "image", "image"]);
-    expect(s.video).toEqual({ outlet: "The Hindu", duration: 75, article_id: 21, src: "https://v/1.m3u8" });
+    expect(s.video).toEqual({ outlet: "The Hindu", duration: 75, article_id: 21, src: "https://v/1.m3u8", poster: "https://img/a.jpg" });
+    expect(s.media[0]).toMatchObject({ kind: "video", poster: "https://img/a.jpg", article_id: 21 });
     expect(s.framing_pending).toBe(false);
   });
   it("degrades on a cluster with no articles, summary or category", () => {
@@ -227,6 +228,18 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
   it("loadHome rejects when the feed itself fails", async () => {
     vi.stubGlobal("fetch", F.fakeFetch({}));
     await expect(api.loadHome({})).rejects.toMatchObject({ status: 404 });
+  });
+  it("adaptMedia keeps a late video even when earlier articles already have 8+ images", () => {
+    const arts = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, image_url: "https://img/" + i + ".jpg" }));
+    arts.push({ id: 99, image_url: "https://img/v.jpg", has_pending_video: true });
+    const m = api.adaptMedia(arts);
+    expect(m).toHaveLength(8);
+    expect(m[0]).toMatchObject({ kind: "video", article_id: 99, src: null, poster: "https://img/v.jpg" });
+  });
+  it("resolveVideoUrl returns the fresh URL, or null when none is available", async () => {
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/articles/7/video-url": { video_url: "https://m/x.m3u8" }, "/api/v1/articles/8/video-url": { video_url: null } }));
+    expect(await api.resolveVideoUrl(7)).toBe("https://m/x.m3u8");
+    expect(await api.resolveVideoUrl(8)).toBeNull();
   });
   it("loadStory returns the story then related, and [] for an unknown id", async () => {
     const d = await api.loadStory(2);
