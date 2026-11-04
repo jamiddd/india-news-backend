@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { Link } from "react-router-dom";
 import css from "../components/ProfileStyles.js";
 import { ago } from "../components/ContextShared.jsx";
+import AboutLinks from "../components/AboutLinks.jsx";
 
 import { Loading, LoadError, useData } from "../components/Status.jsx";
 import { loadStoriesByIds } from "../api.js";
@@ -97,6 +98,7 @@ export default function Profile() {
       <main className="wide pr" id="page">{style}
         <div className="pr-guest"><div className="pr-av guest" style={{ margin: "0 auto" }} aria-hidden="true"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" /></svg></div>
           <h1>Welcome, Reader</h1><p>Sign in to save stories, follow sources and sync across devices.</p><button type="button" className="btn btn-primary" id="pr-login" onClick={openLogin}><span>Sign in or create an account</span></button></div>
+        <AboutLinks />
       </main>
     );
   }
@@ -130,6 +132,7 @@ export default function Profile() {
         {fol.length ? <div className="pr-chips">{fol.map((k) => { const s = k.split(":"); return <Link key={k} className="pr-chip" to={"/" + s[0] + "/" + s[1]}>{label(k)}<small>{s[0]}</small></Link>; })}</div>
           : <p className="pr-empty">You aren&rsquo;t following anything yet. Follow a source or topic and its stories will show up first.</p>}</section>
       <section className="pr-sec"><h2>Account</h2><div className="pr-links"><button type="button" className="pr-out" id="pr-out" onClick={signOut}>Sign out</button><Link className="pr-del" to="/delete-account">Delete account</Link></div></section>
+      <AboutLinks />
     </main>
   );
 }
