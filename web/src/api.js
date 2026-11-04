@@ -16,6 +16,8 @@
 
 const ENV = (typeof import.meta !== "undefined" && import.meta.env) || {};
 export const USE_SAMPLE = ENV.VITE_USE_SAMPLE === "1" || ENV.VITE_USE_SAMPLE === "true";
+import { bestFirst } from "./imageQuality.js";
+
 const V1 = "/api/v1";
 
 // ---- client -----------------------------------------------------------------
@@ -172,7 +174,7 @@ export function adaptMedia(articles) {
     imgs.forEach((u) => { if (u && !seen[u] && !(hasVideo && u === a.image_url)) { seen[u] = 1; images.push({ kind: "image", label: "image", src: u }); } });
   });
   const tail = videos.slice(0, 3);
-  return images.slice(0, 8 - tail.length).concat(tail);
+  return bestFirst(images, (m) => m.src).slice(0, 8 - tail.length).concat(tail);   // sharpest first, then the cap
 }
 
 export function adaptFraming(fc) {
@@ -187,7 +189,7 @@ export function adaptCluster(c, { sources = EMPTY_SOURCES, now = Date.now(), cat
   const outletCount = Object.keys(outlets).length || c.article_count || 0;
   const lead = arts.filter((a) => a.snippet)[0];
   const video = arts.filter((a) => a.video_url || a.has_pending_video)[0];
-  const imageArt = arts.filter((a) => a.image_url)[0];
+  const imageArt = bestFirst(arts.filter((a) => a.image_url), (a) => a.image_url)[0];   // the sharpest lead
   return {
     id: c.id,
     headline: c.headline || (arts[0] && arts[0].title) || "Untitled story",
@@ -245,7 +247,7 @@ export function adaptTimeline(item, detail, { sources = EMPTY_SOURCES, now = Dat
   const anchorArts = (item && item.anchor_cluster && item.anchor_cluster.articles) || [];
   const beatArts = (d.beats || []).reduce((a, b) => a.concat(...(b.clusters || []).map((c) => c.articles || [])), []);
   const context = base.context || d.context || "";
-  const anchorImg = anchorArts.filter((a) => a.image_url)[0] || beatArts.filter((a) => a.image_url)[0];   // else the first story's
+  const anchorImg = bestFirst(anchorArts.filter((a) => a.image_url), (a) => a.image_url)[0] || bestFirst(beatArts.filter((a) => a.image_url), (a) => a.image_url)[0];   // else the first story's
   return {
     id: base.id,
     title: base.title || d.title || "",
