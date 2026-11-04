@@ -12,6 +12,7 @@ import Notify from "./components/shell/Notify.jsx";
 import { AppBar, TabBar } from "./components/shell/AppChrome.jsx";
 import OinMark from "./components/OinMark.jsx";
 import { MediaFullscreen } from "./components/shell/MediaViewer.jsx";
+import ScrollManager from "./components/shell/ScrollManager.jsx";
 import GlobalActions from "./components/shell/GlobalActions.jsx";
 
 const THEME_KEY = "oin-theme", NOADS_KEY = "oin-noads-dismissed";
@@ -63,6 +64,7 @@ function Shell() {
   const ann = useData(loadAnnouncements), sh = useShell();   // optional: a failure just shows none
   return (
     <>
+      <ScrollManager />
       <Announcements items={ann.data} />
       <header className="masthead"><div className="wrap">
         <Link className="brand" to="/">
