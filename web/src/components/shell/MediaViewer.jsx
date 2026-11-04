@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import VideoPlayer from "../VideoPlayer.jsx";
+import OinMark from "../OinMark.jsx";
 
 // One viewer item: the real video/image when there is a source, else the labelled placeholder.
 function Stage({ it }) {
   const [bad, setBad] = useState(false);
   if (it.video && (it.src || it.articleId)) return <div className="mvw-media"><VideoPlayer src={it.src} articleId={it.articleId} poster={it.poster} /></div>;
   if (!it.video && it.src && !bad) return <div className="mvw-media ph has-img"><img className="ph-img" src={it.src} alt="" referrerPolicy="no-referrer" onError={() => setBad(true)} /></div>;
-  return <div className="mvw-media ph">{it.video && <span className="car-play big"><svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z" /></svg></span>}{it.label}</div>;
+  return <div className="mvw-media ph">{it.video && <span className="car-play big"><svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 5v14l11-7z" /></svg></span>}{it.video ? it.label : <OinMark className="ph-mark" size={56} />}</div>;
 }
 
 // Fullscreen media viewer (previous/next, counter, close, arrows + Esc).

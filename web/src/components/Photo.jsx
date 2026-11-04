@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { faviconFor } from "../api.js";
+import OinMark from "./OinMark.jsx";
 
 // A picture that failed to show must not stay in the service worker's image cache.
 const dropCached = (u) => { try { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ evict: u }); } catch (e) { /* no worker */ } };
 
-// The grey `.ph` box, filled with a real picture when there is a URL. A missing URL or a
-// failed load leaves the placeholder (and its label) in place, so layout never shifts.
+// The grey `.ph` box, filled with a real picture when there is a URL. A missing URL or a failed
+// load leaves a placeholder in place, so layout never shifts: our own mark on a muted tile, or the
+// label when one is given (e.g. "video 1" for a video with no thumbnail).
 export function Ph({ r, t, style, src, alt = "", round, children, ...rest }) {
   const [bad, setBad] = useState(false);
   useEffect(() => setBad(false), [src]);
@@ -13,7 +15,7 @@ export function Ph({ r, t, style, src, alt = "", round, children, ...rest }) {
   return (
     <div {...rest} className={"ph" + (show ? " has-img" : "") + (round ? " round" : "") + (rest.className ? " " + rest.className : "")}
       style={{ aspectRatio: r, ...style }}>
-      {show ? <img className="ph-img" src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => { setBad(true); dropCached(src); }} /> : (t === undefined ? "image" : t)}
+      {show ? <img className="ph-img" src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => { setBad(true); dropCached(src); }} /> : (t ? t : <OinMark className="ph-mark" size={40} />)}
       {children}
     </div>
   );

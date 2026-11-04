@@ -1448,3 +1448,7 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
 .ctx-past .ctx-grid{padding-top:20px}
 .cx-past h3{opacity:.72}
 .cx-past .meta .cat{color:var(--ink-3)}
+
+/* Fallback picture: our mark, muted, on the placeholder tile */
+.ph-mark{width:42%; height:auto; min-width:14px; max-width:96px; opacity:.4}
+.mvw-media .ph-mark{max-width:140px}
