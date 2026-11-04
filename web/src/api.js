@@ -343,15 +343,22 @@ async function feedStories(c) {
   return page.items.map((x) => adaptCluster(x, cx));
 }
 
-async function timelinesFull(cx) {
-  const list = (await getJSON(V1 + "/timelines")).timelines || [];
-  const details = await mapLimit(list, 3, (t) => getJSON(V1 + "/timelines/" + t.id).catch(() => null));
-  return { list, details };
+// ---- Context teaser ------------------------------------------------------------------
+// Timelines and Explainers are Premium in the app. The website shows one of each (GET /teaser: the top
+// tracked timeline and the newest explainer) and never requests the full lists. This is presentation:
+// the list endpoints themselves are still open to anyone who calls them directly.
+const teaser = () => getJSON(V1 + "/teaser", { ttl: 5 * 60 * 1000 }).catch(() => ({ timeline: null, explainer: null }));
+
+async function teaserTimelines() {
+  const t = (await teaser()).timeline;
+  if (!t) return { list: [], details: [] };
+  const d = await getJSON(V1 + "/timelines/" + t.id).catch(() => null);
+  return { list: [t], details: [d] };
 }
 
-async function explainerList(cx) {
-  const r = await getJSON(V1 + "/explainers");
-  return (r.explainers || []).map((x) => adaptExplainerItem(x, cx));
+async function teaserExplainers(cx) {
+  const x = (await teaser()).explainer;
+  return x ? [adaptExplainerItem(x, cx)] : [];
 }
 
 // ---- page loaders --------------------------------------------------------------------
@@ -364,8 +371,8 @@ export async function loadHome({ category } = {}) {
   const [page, catPage, tl, exs] = await Promise.all([
     feedPage(),
     isTab ? feedPage({ category: category.toLowerCase() }).catch(() => null) : null,
-    timelinesFull(cx).catch(() => ({ list: [], details: [] })),
-    explainerList(cx).catch(() => []),
+    teaserTimelines().catch(() => ({ list: [], details: [] })),
+    teaserExplainers(cx).catch(() => []),
   ]);
   const byId = {};
   let stories = [];
@@ -475,60 +482,43 @@ export async function loadSourcesPage() {
   return { sources, stories };
 }
 
-// Timelines list: sample timelines[].
+// Timelines list: the one teaser timeline.
 export async function loadTimelines() {
   if (USE_SAMPLE) return (await sample()).timelines;
   const cx = await ctx();
-  const tl = await timelinesFull(cx);
+  const tl = await teaserTimelines();
   return tl.list.map((t, i) => adaptTimeline(t, tl.details[i], cx));
 }
 
-// Timelines no longer actively tracked ("Past stories"), newest-dropped first. They follow the
-// tracked list. Never fails the page: a missing list just means no section.
-export async function loadPastTimelines() {
-  if (USE_SAMPLE) return [];
-  try {
-    const cx = await ctx();
-    const r = await getJSON(V1 + "/timelines/archived");
-    return (r.timelines || []).map((t) => adaptTimeline(t, null, cx));
-  } catch (e) { return []; }
-}
-
-// One timeline: { timelines, stories } with the beats' stories.
+// One timeline: { timelines, stories } with the beats' stories. Only the teaser timeline opens;
+// any other id comes back { locked: true } and the page says it is in the Android app.
 export async function loadTimelinePage(id) {
   if (USE_SAMPLE) return sample();
   const cx = await ctx();
-  const [tl, own] = await Promise.all([
-    timelinesFull(cx).catch(() => ({ list: [], details: [] })),
-    getJSON(V1 + "/timelines/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; }),
-  ]);
-  const timelines = tl.list.map((t, i) => adaptTimeline(t, tl.details[i], cx));
-  if (own && !timelines.some((t) => t.id === own.id)) {
-    // Not tracked any more (a "Past story" or a direct link). The detail has no picture; the archived
-    // list carries the anchor story whose image the card shows, so use that entry too.
-    const past = await getJSON(V1 + "/timelines/archived").then((r) => (r.timelines || []).find((x) => x.id === own.id) || null).catch(() => null);
-    timelines.unshift(adaptTimeline(past, own, cx));
-  }
-  return { timelines, stories: own ? timelineStories(own, cx) : [] };
+  const t = (await teaser()).timeline;
+  if (!t || String(t.id) !== String(id)) return { locked: true, timelines: [], stories: [] };
+  const own = await getJSON(V1 + "/timelines/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; });
+  if (!own) return { locked: true, timelines: [], stories: [] };
+  return { timelines: [adaptTimeline(t, own, cx)], stories: timelineStories(own, cx) };
 }
 
-// Explainers list: sample explainers[].
+// Explainers list: the one teaser explainer.
 export async function loadExplainers() {
   if (USE_SAMPLE) return (await sample()).explainers;
-  return explainerList(await ctx());
+  return teaserExplainers(await ctx());
 }
 
-// One explainer: { explainers, stories } with its source stories.
+// One explainer: { explainers, stories } with its source stories. Only the teaser explainer opens;
+// any other id comes back { locked: true }.
 export async function loadExplainerPage(id) {
   if (USE_SAMPLE) return sample();
   const cx = await ctx();
-  const [list, own] = await Promise.all([
-    explainerList(cx).catch(() => []),
-    getJSON(V1 + "/explainers/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; }),
-  ]);
-  if (!own) return { explainers: list, stories: [] };
+  const x0 = (await teaser()).explainer;
+  if (!x0 || String(x0.id) !== String(id)) return { locked: true, explainers: [], stories: [] };
+  const own = await getJSON(V1 + "/explainers/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; });
+  if (!own) return { locked: true, explainers: [], stories: [] };
   const x = adaptExplainerDetail(own, cx);
-  return { explainers: [x].concat(list.filter((e) => e.id !== x.id)), stories: explainerSourceStories(own, x.category) };
+  return { explainers: [x], stories: explainerSourceStories(own, x.category) };
 }
 
 // Context tabs: { timelines, explainers }.

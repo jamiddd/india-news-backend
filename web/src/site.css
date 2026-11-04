@@ -1441,13 +1441,14 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
 .feed-h.ctx-h{flex-direction:column; align-items:flex-start; gap:8px}
 .feed-h.ctx-h p{font-size:13px}
 
-/* Past stories: timelines no longer tracked, after the tracked ones */
-.ctx-past{margin-top:44px; padding-top:28px; border-top:1px solid var(--line)}
-.ctx-past h2{margin:0; font-size:22px; font-weight:800; letter-spacing:-0.02em}
-.ctx-past > p{margin:6px 0 0; font-size:13px; color:var(--ink-3)}
-.ctx-past .ctx-grid{padding-top:20px}
-.cx-past h3{opacity:.72}
-.cx-past .meta .cat{color:var(--ink-3)}
+/* The Android app panel: Timelines and Explainers are Premium in the app, the website shows a taste */
+.pnote{margin-top:44px; padding:28px; border:1px solid var(--line); border-radius:18px; background:var(--surface); max-width:760px}
+.pnote-k{font:600 11px var(--mono); letter-spacing:.1em; color:var(--hue-context)}
+.pnote h2{margin:10px 0 8px; font-size:26px; font-weight:900; letter-spacing:-0.03em; line-height:1.1}
+.pnote p{margin:0 0 20px; color:var(--ink-2); font-size:15px; line-height:1.55; max-width:56ch}
+.pnote-full{margin:72px auto}
+.pnote-back{display:inline-block; margin-left:18px; font-weight:600; font-size:14px; color:var(--ink)}
+@media (max-width:700px){ .pnote{padding:22px 20px; margin-top:32px} .pnote h2{font-size:22px} .pnote-full{margin:36px 0} }
 
 /* Fallback picture: our mark, muted, on the placeholder tile */
 .ph{container-type:inline-size}

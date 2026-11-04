@@ -305,7 +305,7 @@ export default function Home() {
         <div className="colB">{mid}</div>
         <div className="colC">{O(Thumb, S[9])}{O(Img, S[10])}{rank}{O(Txt, S[11])}{O(Thumb, S[12])}</div>
       </div>
-      {TLS.length && EXS.length >= 4 ? <Band TLS={TLS} EXS={EXS} /> : null}
+      {TLS.length && EXS.length ? <Band TLS={TLS} EXS={EXS} /> : null}
       {sections}
       {c === "All" ? <EndlessAll d={d} ALL={ALL} /> : null}
     </>

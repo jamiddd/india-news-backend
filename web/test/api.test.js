@@ -188,6 +188,7 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     "/api/v1/clusters/2": F.detailCluster(2, { updated: 90, arts: F.feedPage.items[1].articles }),
     "/api/v1/clusters/2/related?limit=6": { items: [F.detailCluster(5, { arts: F.feedPage.items[4].articles })], actor: "RBI" },
     "/api/v1/timelines": F.timelinesList,
+    "/api/v1/teaser": { timeline: F.timelinesList.timelines[0], explainer: F.explainersList.explainers[0] },
     "/api/v1/timelines/7": F.timelineDetail7,
     "/api/v1/timelines/8": 500,
     "/api/v1/timelines/99": F.timelineDetail99Archived,
@@ -208,9 +209,18 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     expect(d.stories[0].category).toBe("National");
     expect(d.stories.slice(1).map((s) => s.id)).toEqual([3, 4, 1, 5]);
     expect(d.categories[0]).toBe("All");
-    expect(d.timelines.map((t) => t.points.length)).toEqual([2, 0]);   // timeline 8's detail failed: degrades
-    expect(d.explainers[0].excerpt).toBeTruthy();            // featured explainer hydrated
-    expect(d.explainers[1].excerpt).toBe("");
+    expect(d.timelines.map((t) => t.points.length)).toEqual([2]);     // one teaser timeline, its beats loaded
+    expect(d.explainers.map((x) => x.id)).toEqual([3]);                // one teaser explainer
+    expect(d.explainers[0].excerpt).toBeTruthy();                      // the teaser explainer itself is hydrated
+  });
+  it("the website never requests the full Timelines or Explainers lists", async () => {
+    await api.loadHome({ category: "All" });
+    await api.loadContext();
+    await api.loadTimelines(); await api.loadExplainers();
+    expect(f.calls).not.toContain("/api/v1/timelines");
+    expect(f.calls).not.toContain("/api/v1/explainers");
+    expect(f.calls).not.toContain("/api/v1/timelines/archived");
+    expect(f.calls.filter((c) => /^\/api\/v1\/timelines\/\d+$/.test(c))).toEqual(["/api/v1/timelines/7"]);   // only the teaser's own detail
   });
   it("loadHome for a category tab merges that tab's own feed", async () => {
     const d = await api.loadHome({ category: "Northeast" });
@@ -238,24 +248,6 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     expect(m[7]).toMatchObject({ kind: "video", article_id: 99, src: null, poster: "https://img/v.jpg" });
     // fewer images than the cap: all of them, then the video
     expect(api.adaptMedia(arts.slice(8)).map((x) => x.kind)).toEqual(["image", "image", "video"]);
-  });
-  it("loadPastTimelines lists timelines no longer tracked, and is empty rather than failing", async () => {
-    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": { timelines: [{ id: 108, title: "Texas", context: "A Senate seat. More.", story_count: 24, narrative_generated_at: "2026-11-03T00:34:33Z", dropped_from_top_at: "2026-11-04T00:39:29Z", anchor_cluster: null }] } }));
-    const past = await api.loadPastTimelines();
-    expect(past).toHaveLength(1);
-    expect(past[0]).toMatchObject({ id: 108, title: "Texas", archived: true, story_count: 24 });
-    api.clearCache();
-    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": new TypeError("offline") }));
-    expect(await api.loadPastTimelines()).toEqual([]);
-  });
-  it("a past timeline's page gets the picture its card shows, or the first story's", async () => {
-    const detail = { id: 9, title: "Old", context: "x", beats: [{ date_label: "1 Oct", label: "a", narration: "n", clusters: [{ id: 5, articles: [{ id: 1, image_url: "https://img/beat.jpg" }] }] }], narrative_generated_at: "2026-10-01T00:00:00Z", dropped_from_top_at: "2026-10-05T00:00:00Z" };
-    const archived = { id: 9, title: "Old", context: "x", story_count: 3, dropped_from_top_at: "2026-10-05T00:00:00Z", anchor_cluster: { id: 5, articles: [{ id: 1, image_url: "https://img/anchor.jpg" }] } };
-    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines": { timelines: [] }, "/api/v1/timelines/9": detail, "/api/v1/timelines/archived": { timelines: [archived] } }));
-    expect((await api.loadTimelinePage(9)).timelines[0]).toMatchObject({ id: 9, archived: true, image: "https://img/anchor.jpg" });
-    api.clearCache();
-    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines": { timelines: [] }, "/api/v1/timelines/9": detail, "/api/v1/timelines/archived": new TypeError("offline") }));
-    expect((await api.loadTimelinePage(9)).timelines[0].image).toBe("https://img/beat.jpg");
   });
   it("resolveVideoUrl returns the fresh URL, or null when none is available", async () => {
     vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/articles/7/video-url": { video_url: "https://m/x.m3u8" }, "/api/v1/articles/8/video-url": { video_url: null } }));
@@ -287,19 +279,34 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     expect(d.sources.map((s) => s.key)).toEqual(["the-hindu", "mint", "sportstar", "nagaland-post"]);
     expect(d.sources[3]).toMatchObject({ region: "Northeast", lang: "EN" });
   });
-  it("loadTimelinePage includes an archived timeline reached by direct link", async () => {
-    const d = await api.loadTimelinePage(99);
-    expect(d.timelines[0].id).toBe(99);
-    expect(d.timelines[0].archived).toBe(true);
+  it("loadTimelinePage opens only the teaser timeline", async () => {
     const d7 = await api.loadTimelinePage(7);
+    expect(d7.locked).toBeUndefined();
+    expect(d7.timelines.map((t) => t.id)).toEqual([7]);
     expect(d7.stories.map((s) => s.id)).toEqual([2, 5]);
   });
-  it("loadExplainerPage puts the detail first with its source stories", async () => {
+  it("any other timeline is locked and its detail is never requested", async () => {
+    const d = await api.loadTimelinePage(99);
+    expect(d).toMatchObject({ locked: true, timelines: [], stories: [] });
+    expect(f.calls).not.toContain("/api/v1/timelines/99");
+  });
+  it("loadExplainerPage opens only the teaser explainer", async () => {
     const d = await api.loadExplainerPage(3);
+    expect(d.locked).toBeUndefined();
+    expect(d.explainers.map((x) => x.id)).toEqual([3]);
     expect(d.explainers[0].sections.length).toBe(2);
-    expect(d.explainers.map((x) => x.id)).toEqual([3, 4]);
     expect(d.stories.map((s) => s.id)).toEqual([2, 5]);
-    expect((await api.loadExplainerPage(404)).stories).toEqual([]);
+  });
+  it("any other explainer is locked and its detail is never requested", async () => {
+    const d = await api.loadExplainerPage(4);
+    expect(d).toMatchObject({ locked: true, explainers: [], stories: [] });
+    expect(f.calls).not.toContain("/api/v1/explainers/4");
+    expect((await api.loadExplainerPage(404)).locked).toBe(true);
+  });
+  it("with no teaser the Context lists are empty and every detail is locked", async () => {
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/teaser": { timeline: null, explainer: null } }));
+    expect(await api.loadContext()).toEqual({ timelines: [], explainers: [] });
+    expect((await api.loadTimelinePage(7)).locked).toBe(true);
   });
   it("loadStoriesByIds drops ids that no longer resolve", async () => {
     const s = await api.loadStoriesByIds([2, 999]);

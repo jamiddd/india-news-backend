@@ -27,14 +27,18 @@ export function TimelineCard({ t }) {
   );
 }
 
-// Timelines we've stopped tracking, after the tracked ones (as in the app).
-export function PastTimelines({ list }) {
-  if (!list || !list.length) return null;
+export const PLAY_URL = "https://play.google.com/store/apps/details?id=com.jamid.news";
+
+// Timelines and Explainers are Premium in the app. The website shows one of each as a taste and points
+// to the app for the rest. full: the whole-page version for a timeline or explainer that isn't the taste.
+export function GetTheApp({ full }) {
   return (
-    <section className="ctx-past" aria-labelledby="ctx-past-h">
-      <h2 id="ctx-past-h">Past stories</h2>
-      <p>Timelines we{"\u2019"}re no longer actively tracking.</p>
-      <div className="ctx-grid">{list.map((t) => <TimelineCard key={"past" + t.id} t={t} />)}</div>
+    <section className={"pnote" + (full ? " pnote-full" : "")} aria-labelledby="pnote-h">
+      <span className="pnote-k">PREMIUM &middot; ANDROID APP</span>
+      <h2 id="pnote-h">{full ? "This one is in the Android app" : "The full Context experience is on Android"}</h2>
+      <p>Every tracked timeline and every explainer, with audio narration, are part of Premium in the Open Indian News app. Start with a free 7-day trial in the app.</p>
+      <a className="btn btn-primary" href={PLAY_URL} target="_blank" rel="noopener"><span>Get it on Google Play</span></a>
+      {full ? <Link className="pnote-back" to="/context">&larr; Back to Context</Link> : null}
     </section>
   );
 }

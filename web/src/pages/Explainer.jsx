@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Ph, Fav } from "../components/Photo.jsx";
 import { Link, useParams } from "react-router-dom";
-import { AiBadge, AudioPlayer } from "../components/ContextShared.jsx";
+import { AiBadge, AudioPlayer, GetTheApp } from "../components/ContextShared.jsx";
 
 import { useData, statusView } from "../components/Status.jsx";
 import { loadExplainerPage } from "../api.js";
@@ -22,6 +22,7 @@ export default function Explainer() {
   useEffect(() => { if (x) document.title = x.title + " — Open Indian News"; }, [x]);
   const wait = statusView(q, "this explainer", ({ children }) => <main className="wide" style={{ paddingBottom: 72 }}>{children}</main>);
   if (wait) return wait;
+  if (d && d.locked) return <main className="wide" style={{ paddingBottom: 72, minHeight: "70vh" }}><GetTheApp full /></main>;
   if (!x) return <main className="wide" style={{ paddingBottom: 72 }}><p className="empty" style={{ paddingTop: 48 }}>Explainer not found. <Link to="/">Back to top stories</Link></p></main>;
 
   const byId = {}; d.stories.forEach((s) => { byId[s.id] = s; });

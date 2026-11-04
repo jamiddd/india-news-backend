@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Ph } from "../components/Photo.jsx";
 import { Link, useParams } from "react-router-dom";
-import { AiBadge, AudioPlayer, ago } from "../components/ContextShared.jsx";
+import { AiBadge, AudioPlayer, GetTheApp, ago } from "../components/ContextShared.jsx";
 
 import { useData, statusView } from "../components/Status.jsx";
 import { loadTimelinePage } from "../api.js";
@@ -14,6 +14,7 @@ export default function Timeline() {
   useEffect(() => { if (t) document.title = t.title + " — Open Indian News"; }, [t]);
   const wait = statusView(q, "this timeline", ({ children }) => <main className="wide" style={{ paddingBottom: 72 }}>{children}</main>);
   if (wait) return wait;
+  if (d && d.locked) return <main className="wide" style={{ paddingBottom: 72, minHeight: "70vh" }}><GetTheApp full /></main>;
   if (!t) return <main className="wide" style={{ paddingBottom: 72 }}><p className="empty" style={{ paddingTop: 48 }}>Timeline not found. <Link to="/">Back to top stories</Link></p></main>;
 
   const byId = {}; d.stories.forEach((s) => { byId[s.id] = s; });
