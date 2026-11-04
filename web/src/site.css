@@ -1459,3 +1459,5 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
 .mvw-media .ph-msg{color:#9A9AA3; font-size:14px}
 .vp-fail{display:flex; align-items:center; gap:8px}
 .vp-fail .ph-mark{width:26px; min-width:26px; opacity:1}
+
+.vp-cover{object-fit:cover}

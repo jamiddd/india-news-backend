@@ -12,7 +12,9 @@ const YT = /(?:youtube(?:-nocookie)?\.com\/embed\/|youtube\.com\/watch\?v=|youtu
 export const youTubeId = (u) => { const m = u && YT.exec(u); return m ? m[1] : null; };
 export const isHls = (u) => /\.m3u8(\?|$)/i.test(u || "");
 
-export default function VideoPlayer({ src, articleId, poster, autoPlay = true, muted = false, loop = false, onEnded, label = "Video" }) {
+// controls={false}: no player chrome (the Swipe feed, like the app's Shorts). cover: fill the box and crop
+// (the Watch tab's pinned player), instead of fitting inside it.
+export default function VideoPlayer({ src, articleId, poster, autoPlay = true, muted = false, loop = false, controls = true, cover = false, onEnded, label = "Video" }) {
   const [url, setUrl] = useState(src || null);
   const [state, setState] = useState(src ? "ready" : "resolving");   // resolving | ready | failed
   const ref = useRef(null);
@@ -60,7 +62,7 @@ export default function VideoPlayer({ src, articleId, poster, autoPlay = true, m
   if (yt) {
     return <iframe className="vp" title={label} loading="lazy" allowFullScreen referrerPolicy="strict-origin-when-cross-origin"
       allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-      src={"https://www.youtube-nocookie.com/embed/" + yt + "?playsinline=1&rel=0&modestbranding=1" + (autoPlay ? "&autoplay=1" : "")} />;
+      src={"https://www.youtube-nocookie.com/embed/" + yt + "?playsinline=1&rel=0&modestbranding=1" + (controls ? "" : "&controls=0&cc_load_policy=0") + (loop ? "&loop=1&playlist=" + yt : "") + (autoPlay ? "&autoplay=1" : "")} />;
   }
-  return <video className="vp" ref={ref} poster={poster || undefined} controls playsInline muted={muted} loop={loop} preload="metadata" onEnded={onEnded} onError={(e) => { const er = e.currentTarget.error; console.warn("[video] element error:", er && er.code, er && er.message); setState("failed"); }} />;
+  return <video className={"vp" + (cover ? " vp-cover" : "")} ref={ref} poster={poster || undefined} controls={controls} playsInline muted={muted} loop={loop} preload="metadata" onEnded={onEnded} onError={(e) => { const er = e.currentTarget.error; console.warn("[video] element error:", er && er.code, er && er.message); setState("failed"); }} />;
 }
