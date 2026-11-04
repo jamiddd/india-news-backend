@@ -10,6 +10,7 @@ import DonationThanks from "./pages/DonationThanks.jsx";
 import Download from "./pages/Download.jsx";
 import Explainer from "./pages/Explainer.jsx";
 import Explainers from "./pages/Explainers.jsx";
+import FallbackPreview from "./pages/FallbackPreview.jsx";
 import Feedback from "./pages/Feedback.jsx";
 import Home from "./pages/Home.jsx";
 import List from "./pages/List.jsx";
@@ -33,6 +34,7 @@ export default function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
+        {import.meta.env.DEV ? <Route path="/fallback-preview" element={<FallbackPreview />} /> : null}
         <Route path="/story/:id" element={<Story />} />
         <Route path="/source/:id" element={<List />} />
         <Route path="/topic/:id" element={<List />} />
