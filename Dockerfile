@@ -1,3 +1,13 @@
+# Build the React single page app (web/) into static files. Only the final
+# `app` stage copies the result in (as /app/web/dist, which app/web_spa.py
+# serves), so the test image and the Python layers don't depend on Node.
+FROM node:22-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.11-slim AS base
 
 WORKDIR /app
@@ -42,6 +52,8 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 CMD ["python3", "-m", "pytest", "tests/", "-q"]
 
 FROM base AS app
+
+COPY --from=web /web/dist /app/web/dist
 
 EXPOSE 8000
 

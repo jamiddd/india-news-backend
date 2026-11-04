@@ -1,0 +1,272 @@
+export default function Privacy() {
+  return (
+    <main className="wrap doc">
+      <h1>Privacy Policy</h1>
+      <p className="updated">Open Indian News · Last updated: 2 October 2026</p>
+      
+      <p>
+        This policy explains what information Open Indian News ("the app", "we", "us") collects, why,
+        and how you can have it deleted. We've written it to describe exactly what the app actually
+        does — not a generic template.
+      </p>
+      
+      <h2>Information we collect</h2>
+      <p>When you sign in (with Google, or with an email and password) via Firebase Authentication, we store:</p>
+      <ul>
+        <li><strong>Your email address and display name</strong>, as provided by your sign-in method.</li>
+        <li><strong>A stable account identifier</strong> (Firebase's user ID) and which sign-in method you used.</li>
+        <li><strong>Your app preferences</strong> — theme, accent color, language filter, which news
+            categories you've enabled or added, sources you have boosted, your chosen zodiac sign for the
+            horoscope, and your notification choices — so they carry over if you sign in on another
+            device.</li>
+        <li><strong>Your profile photo</strong>, if you have one. If you sign in with Google, the photo
+            address from your Google account is stored; if you upload your own, the image file is stored
+            in our file storage (see Third parties) under a name that includes your account identifier.</li>
+      </ul>
+      <p>We also store, once you are signed in:</p>
+      <ul>
+        <li><strong>What you follow</strong> &mdash; the stories, topics and news sources you follow, and
+            the sources you have blocked &mdash; so we can notify you about them and shape your feed.</li>
+        <li><strong>Daily-game progress</strong> &mdash; which daily games you have played on which dates,
+            and how far you got.</li>
+        <li><strong>A log of notifications we have sent you</strong> (which kind, and when), so we never
+            send the same one twice or exceed the daily limits.</li>
+        <li><strong>Which timelines you have opened</strong> (a one-time count per timeline), and a record
+            of which stories were shown to you in the feed's &ldquo;explore&rdquo; slot, used to learn
+            which suggestions are useful.</li>
+        <li><strong>Stories you save</strong>, so they follow you to another device (see below).</li>
+        <li><strong>Which stories you have opened</strong> — along with roughly how long you spent on
+            each, how far down you scrolled, and whether you opened the media-framing panel or expanded
+            a summary — to rank the "For You" feed. This never leaves our server and is not sold or
+            shared.</li>
+        <li><strong>A push notification token</strong> for each device you enable notifications on, so
+            we can deliver them. It is issued by Firebase Cloud Messaging, identifies the app install
+            rather than you or your hardware, and is deleted as soon as you turn every notification off
+            again — or, along with everything else, when you delete your account.</li>
+      </ul>
+      <p>We do not collect your location, contacts, advertising ID, hardware or phone identifiers, or
+         your browsing history outside the app. (The app does create two random, anonymous identifiers
+         that are not hardware identifiers: the push-notification token above, and the daily-poll
+         identifier described under Daily poll.)</p>
+      
+      <h2>Notifications</h2>
+      <p>
+        Notifications are opt-in and each kind has its own switch in Settings &rarr; Notifications.
+        Depending on what you turn on, the app can send: breaking news, a daily digest at times you
+        choose, updates on stories and topics you follow, a Morning Brief (about 6:30 AM IST), a
+        Late-Night Wrap-up (about 8 PM IST), and a daily horoscope (about 7 AM IST). Turning every
+        switch off deletes your push token from our server.
+      </p>
+      
+      <h2>Premium purchases</h2>
+      <p>
+        Premium (Monthly or All-Time) is bought through <strong>Google Play</strong>, which handles your
+        payment and billing under Google's own privacy terms; we never see your card or payment details.
+        Premium status is kept on your device and is tied to your Google account through Google Play, not
+        to your Open Indian News account &mdash; <em>Restore purchases</em> in the app asks Google Play
+        to confirm it again. When you buy or restore, the app sends the Google Play purchase token to our
+        server, which checks it with Google to confirm it is genuine and currently paid for. We do not
+        store the token or keep a record of your purchases, and it is not linked to your account.
+      </p>
+      
+      <h2>Donations</h2>
+      <p>
+        The app is free to read. It accepts an optional donation, which unlocks nothing and is separate
+        from Premium — see our
+        <a href="/refunds">Refund &amp; Cancellation Policy</a>.
+      </p>
+      <p>
+        <strong>We never see or store your card, UPI ID, or any other payment details.</strong> Payment
+        is handled entirely by Razorpay on their own page; we only receive confirmation from them that a
+        payment happened, its amount, and its transaction ID. If you were signed in when you donated, we
+        store that transaction alongside your account ID so we can find it if you ask for a refund.
+        Donating while signed out is possible, and then we hold no link to you at all.
+      </p>
+      
+      <h2>Saved stories</h2>
+      <p>
+        Stories you save are kept on your device, and — <strong>if you are signed in</strong> — also
+        synced to our server so they appear on any device you sign in to. If you are not signed in, they
+        stay on your device only, and uninstalling the app or clearing its data loses them permanently.
+      </p>
+      <p>
+        Deleting your account (Settings &rarr; Delete Account) removes the server-side copy along with
+        everything else.
+      </p>
+      
+      <h2>Daily poll</h2>
+      <p>
+        The daily poll can be answered without an account. To stop one device voting twice, the app
+        generates a random identifier for the installation, and our server stores your vote together
+        with a one-way (HMAC) hash of that identifier &mdash; not the identifier itself. It is not linked
+        to your account, email or name, so deleting your account does <strong>not</strong> remove it, and
+        your vote stays in the poll's totals. Uninstalling the app or clearing its data creates a new,
+        unrelated identifier.
+      </p>
+      
+      <h2>Reports you send us</h2>
+      <p>
+        If you report a story, timeline or explainer from inside the app (signed in), we store the item
+        you reported, the reason you chose, any note you wrote, and your account identifier, so the report
+        can be reviewed. If you delete your account, the report is <strong>kept</strong> for moderation.
+        The account identifier on it then points to an account that no longer exists, but anything you
+        typed in the note remains, so please do not put personal details in it. You can ask us to delete a
+        report you sent at any time.
+      </p>
+      
+      <h2>Feedback you send us</h2>
+      <p>
+        If you use the <a href="/feedback">feedback form</a> on this website, we store what you typed:
+        your message, the category you picked, and your name and email address <strong>if</strong> you
+        chose to give them. Both are optional, and leaving them blank is a normal way to use the form —
+        we would rather have an anonymous report than no report.
+      </p>
+      <p>
+        We do not store your IP address with your message, set a cookie, or attach any identifier to what
+        you send. (Our server does see your IP address when you connect, as every server does, and uses it
+        briefly to limit abuse, for example to cap how many messages one connection can send per hour.)
+        An email address is used only to reply to you about that message, and for nothing else — not a
+        mailing list, not an account. Feedback is kept while it is useful for fixing what it describes,
+        and you can ask us to delete yours at any time.
+      </p>
+      
+      <h2>Crash reporting</h2>
+      <p>
+        The app includes <strong>Firebase Crashlytics</strong>, so that when it crashes or freezes we
+        find out and can fix it. A report is sent only when something actually goes wrong. It contains
+        the technical details of the failure &mdash; where in the code it happened, your device model and
+        Android version, and the state of the device at that moment, such as free memory and storage
+        &mdash; together with a random identifier for the app installation.
+      </p>
+      <p>
+        That identifier is not your account, and we do not attach your name, email or user ID to a crash
+        report. Crash reporting is on in the published app and off in development builds. It is the only
+        automatic reporting <em>sent from the app</em>, and there is no way for us to use it to watch what
+        you read. Separately, our servers record technical errors in their own operation (for example a
+        failed request) through <strong>Sentry</strong>, an error-tracking service; this concerns how the
+        server behaved, not your reading.
+      </p>
+      
+      <h2>What we don't do</h2>
+      <div className="box">
+        The app has <strong>no advertising SDK and no third-party analytics or attribution SDK</strong>
+        &mdash; no Google Analytics, no Facebook SDK, no ad network, no data broker, nothing that follows
+        you between apps or across the web. We do not sell or share your information with anyone for
+        advertising or profiling, and there is nothing integrated that could. What we record about your
+        reading is listed above, stays on our own server, and exists to order your feed.
+      </div>
+      
+      <h2>Third parties</h2>
+      <p>
+        We use three services from Google, all part of Firebase, and each processes data under
+        <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google's own privacy terms</a>:
+      </p>
+      <ul>
+        <li><strong>Firebase Authentication</strong> handles sign-in. Google processes your email,
+            display name and authentication credentials in order to provide it.</li>
+        <li><strong>Firebase Cloud Messaging</strong> delivers push notifications, and issues the device
+            token described above.</li>
+        <li><strong>Firebase Crashlytics</strong> receives crash and freeze reports, as described above.</li>
+      </ul>
+      <p>
+        We also use <strong>Google Play</strong> to process Premium purchases (see Premium purchases above)
+        and <strong>Razorpay</strong> to process donations, only if you make one (see Donations above).
+      </p>
+      <p><strong>Hosting.</strong> Our servers run on DigitalOcean, and our database and file storage
+         (including profile photos, and images and audio used in the app) are hosted by
+         <strong>Supabase</strong>. They store and serve data on our behalf; we do not give them any use of
+         it beyond that.</p>
+      <p><strong>Content and image services your device contacts.</strong> To show a story, a source logo
+         or a video, your phone connects directly to services that necessarily see your IP address and
+         device details, and the address being fetched:</p>
+      <ul>
+        <li>Google's favicon service and <code>logo.clearbit.com</code>, for the logos of news sources
+            shown in the feed.</li>
+        <li><strong>YouTube</strong> (Google), when you play a video in the Watch or Shorts screens,
+            which uses YouTube's embedded player and its thumbnails; YouTube's own privacy terms apply.
+            Some videos play from the publisher's own video host instead.</li>
+        <li>Wikipedia / Wikimedia, for some images shown in the app.</li>
+        <li>The publishers' own image servers and CDNs, for story pictures.</li>
+      </ul>
+      <p><strong>Services that process content, not your data.</strong> <strong>Anthropic</strong>
+         (Claude) generates story summaries, framing analysis, and the scripts for the Daily Brief,
+         timelines and explainers, and <strong>Sarvam AI</strong> turns those scripts into spoken audio.
+         They receive news content, not your personal information. <strong>Sentry</strong> receives
+         technical error reports from our server (see Crash reporting). <strong>Brevo</strong> sends us
+         internal alert emails.</p>
+      <p>
+        Apart from the services above, we don't share your data with any third party.
+      </p>
+      
+      <h2>Android backup</h2>
+      <p>
+        The Android app allows Android's automatic backup, which is on by default. If you have backup
+        turned on in your phone's settings, Android may copy the app's local data &mdash; including your
+        saved stories, preferences, Premium status on the device, the daily-poll identifier and your
+        signed-in state &mdash; to your Google account, and restore it onto a new phone. That copy is held
+        by Google under your Google account, not by us. You can turn it off in your phone's backup
+        settings.
+      </p>
+      
+      <h2>This website</h2>
+      <p>
+        The website loads its fonts from Google Fonts, so Google receives your IP address and browser
+        details when you open a page. We set no cookies of our own; the only thing stored in your browser
+        is your light/dark choice, on your device. If you donate on this site you are sent to Razorpay's
+        page (see Donations).
+      </p>
+      
+      <h2>News content</h2>
+      <p>
+        The app displays headlines, short snippets, images, and links to original articles from
+        third-party news publishers. <strong>The app does not display full article text</strong> and we do
+        not republish it — every story links back to the original publisher's site and is attributed to
+        its source. Reading full articles happens on the publisher's own site, subject to their own
+        privacy policy.
+      </p>
+      <p>
+        To group coverage, summarise it and compare framing, our servers fetch publicly accessible
+        article pages and retain the text extracted from them, together with images and metadata such as
+        the preview image. We do not access paywalled or login-restricted content. That article text is
+        used internally and is sent to an AI provider (Anthropic's Claude) to generate summaries and
+        framing; it is not shown to you as an article and it contains no information about you.
+      </p>
+      
+      <h2>How long we keep your data</h2>
+      <p>
+        We keep your account information for as long as your account exists. If you delete your account
+        (Settings → Delete Account, in the app), your account row and preferences are permanently removed
+        from our database, and your Firebase Authentication identity is deleted — immediately, not after
+        a delay.
+      </p>
+      
+      <h2>Your rights</h2>
+      <ul>
+        <li><strong>Access</strong> — you can see your current preferences at any time in the app's Settings screen.</li>
+        <li><strong>Correction</strong> — update your display name/preferences directly in the app.</li>
+        <li><strong>Deletion</strong> — delete your account and its associated server-side data at any time via Settings → Delete Account. This is immediate and permanent, apart from the few things listed as kept. See <a href="/delete-account">Delete your account</a> for exactly what is removed, what is kept for tax purposes, and how to request deletion if you can no longer sign in.</li>
+      </ul>
+      <p>
+        If you're in India, these rights are consistent with the Digital Personal Data Protection Act,
+        2023. If you have any question about your data that isn't covered by the in-app controls above,
+        contact us at the address below.
+      </p>
+      
+      <h2>Children's privacy</h2>
+      <p>
+        Open Indian News is a general-audience news app and is not directed at children. We don't
+        knowingly collect information from children under 18. If you believe a child has created an
+        account, contact us and we'll delete it.
+      </p>
+      
+      <h2>Changes to this policy</h2>
+      <p>
+        If this policy changes, we'll update the "Last updated" date above. Material changes will be
+        reflected here before they take effect.
+      </p>
+      
+      <h2>Contact</h2>
+      <p>Questions about this policy or your data: <a href="mailto:jamiddeka1@gmail.com">jamiddeka1@gmail.com</a></p>
+    </main>
+  );
+}

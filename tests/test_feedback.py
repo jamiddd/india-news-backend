@@ -151,7 +151,10 @@ class TestHoneypot:
 
 
 class TestPage:
-    async def test_serves_the_form(self, client):
+    async def test_serves_the_form(self, client, monkeypatch, tmp_path):
+        # Legacy page: pin "no SPA build" so a built web/dist doesn't replace it.
+        from app import web_spa
+        monkeypatch.setattr(web_spa, "DIST_DIR", tmp_path / "missing")
         r = await client.get("/feedback")
         assert r.status_code == 200
         assert 'id="feedback-form"' in r.text

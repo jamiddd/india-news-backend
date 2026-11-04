@@ -1,0 +1,186 @@
+export default function Credits() {
+  return (
+    <main className="wrap doc">
+      <h1>Credits</h1>
+      <p className="updated">Open Indian News · Last updated: 2 October 2026</p>
+      
+      <p>
+        Open Indian News aggregates other people&rsquo;s work. None of the reporting is ours, and much of
+        what the app and this site are made of &mdash; the dictionary behind the puzzles, the typefaces,
+        the libraries &mdash; was given away freely by the people who made it. This page names them. The
+        same credits appear in the app under Settings &rsaquo; Credits.
+      </p>
+      
+      <h2>Content &amp; data</h2>
+      <ul>
+        <li>
+          <strong>Indian news publishers.</strong> Every story in the feed is reported, written and owned
+          by the outlet it links to. We cluster and summarise; we do not report. Headlines, short snippets
+          and images are shown with each story linking back to the publisher; the app does not display
+          full article text.
+        </li>
+        <li>
+          <strong>Wikipedia</strong> &mdash; Wikimedia Foundation and its contributors. On This Day
+          historical events, under
+          <a href="https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License" rel="noopener">CC BY-SA 4.0</a>.
+        </li>
+        <li>
+          <strong><a href="https://commons.wikimedia.org/" rel="noopener">Wikimedia Commons</a></strong>
+          &mdash; photographers and contributors, credited on each card. Photos on On This Day cards; each
+          shows its author and licence (public domain, CC BY or CC BY-SA).
+        </li>
+        <li><strong><a href="https://apiverve.com" rel="noopener">APIVerve</a></strong> &mdash; daily quotations and crossword grids.</li>
+        <li><strong><a href="https://astrojson.com" rel="noopener">AstroJSON</a></strong> &mdash; daily horoscopes.</li>
+        <li>
+          <strong><a href="https://www.anthropic.com" rel="noopener">Claude</a></strong>, by Anthropic &mdash;
+          story summaries and framing analysis, which are generated automatically without per-story human
+          review; and the Context tab (Daily Brief, timelines and explainers), which is reviewed by a human
+          before publication.
+        </li>
+        <li>
+          <strong><a href="https://www.sarvam.ai" rel="noopener">Sarvam AI</a></strong> &mdash; Bulbul
+          text-to-speech, which voices the Daily Brief, timelines and explainers.
+        </li>
+        <li>
+          <strong><a href="https://www.youtube.com/t/terms" rel="noopener">YouTube</a></strong>, by Google
+          &mdash; the embedded player for publishers&rsquo; YouTube video reports. YouTube&rsquo;s Terms of
+          Service apply to videos played through it.
+        </li>
+      </ul>
+      
+      <h2>Words &amp; puzzles</h2>
+      <p>
+        Daily Word, Spelling Bee, Word Ladder and Word Search are computed from a dictionary rather than
+        generated. That dictionary is
+        <strong><a href="http://wordlist.aspell.net/" rel="noopener">SCOWL</a></strong> &mdash; Spell
+        Checker Oriented Word Lists, by Kevin Atkinson. Copyright 2000&ndash;2018 Kevin Atkinson, used
+        and redistributed under SCOWL&rsquo;s attribution-only terms. SCOWL itself draws on the 12Dicts
+        package and the ENABLE word list (Alan Beale), Moby Words II (public domain), and Brian
+        Kelk&rsquo;s UK English Wordlist with Frequency Classification.
+      </p>
+      
+      <h2>Typefaces</h2>
+      <p>
+        Nine of the ten ship under the SIL Open Font License 1.1, which asks that their notices travel
+        with them. Roboto Mono ships under the Apache License 2.0.
+      </p>
+      <ul>
+        <li><strong><a href="https://www.brailleinstitute.org/freefont/" rel="noopener">Atkinson Hyperlegible Next</a></strong> &mdash; Braille Institute of America.</li>
+        <li><strong><a href="https://production.type.land/fonts/newsreader" rel="noopener">Newsreader</a></strong> &mdash; Production Type.</li>
+        <li><strong><a href="https://github.com/impallari/Libre-Caslon" rel="noopener">Libre Caslon</a></strong> &mdash; Pablo Impallari and Rodrigo Fuenzalida.</li>
+        <li><strong><a href="https://www.paratype.com/fonts/pt/pt-serif" rel="noopener">PT Serif</a></strong> &mdash; ParaType.</li>
+        <li><strong><a href="https://github.com/googlefonts/robotomono" rel="noopener">Roboto Mono</a></strong> &mdash; The Roboto Mono Project Authors (Apache License 2.0).</li>
+        <li><strong><a href="https://github.com/JetBrains/JetBrainsMono" rel="noopener">JetBrains Mono</a></strong> &mdash; JetBrains.</li>
+        <li><strong><a href="https://github.com/IBM/plex" rel="noopener">IBM Plex Mono and IBM Plex Sans</a></strong> &mdash; IBM Corp.</li>
+        <li><strong><a href="https://github.com/undercasetype/Fraunces" rel="noopener">Fraunces</a></strong> &mdash; Undercase Type.</li>
+        <li><strong><a href="https://github.com/adobe-fonts/source-serif" rel="noopener">Source Serif 4</a></strong> &mdash; Adobe.</li>
+      </ul>
+      <p>
+        Source Serif 4 carries the notice: Copyright 2014&ndash;2023 Adobe, with Reserved Font Name
+        &lsquo;Source&rsquo;.
+      </p>
+      
+      <h2>Illustration &amp; animation</h2>
+      <p>The animated artwork across onboarding, the support screen and the games.</p>
+      <ul>
+        <li><strong>Onboarding — the newspaper</strong> &mdash; <a href="https://lottiefiles.com/suhayrasarwar" rel="noopener">Suhayra Sarwar</a>.</li>
+        <li><strong>Onboarding — comparing coverage</strong> &mdash; <a href="https://lottiefiles.com/y9qu7yublbyanx3z" rel="noopener">Marian Regan</a>.</li>
+        <li><strong>Onboarding — the games</strong> &mdash; <a href="https://lottiefiles.com/Akasha" rel="noopener">Mohmmed Akasha</a>.</li>
+        <li><strong>Support — ad-free feeds</strong> &mdash; <a href="https://lottiefiles.com/dnm_design" rel="noopener">Diego Morrongiello</a>.</li>
+        <li><strong>Support — framing analysis</strong> &mdash; <a href="https://lottiefiles.com" rel="noopener">LottieFiles</a>.</li>
+        <li><strong>Support — daily games</strong> &mdash; <a href="https://lottiefiles.com/user393171" rel="noopener">shivani bai</a>.</li>
+        <li><strong>Support — reader-first design</strong> &mdash; <a href="https://lottiefiles.com/mohan.designs" rel="noopener">mohan</a>.</li>
+        <li><strong>Puzzle solved</strong> &mdash; <a href="https://lottiefiles.com/pgzj1ggsyy" rel="noopener">Yoon Ju K</a>.</li>
+      </ul>
+      
+      <h2>Sound</h2>
+      <ul>
+        <li>
+          <strong>Receipt printer</strong> &mdash; Freesound Community, via
+          <a href="https://pixabay.com/sound-effects/" rel="noopener">Pixabay</a>, under the Pixabay
+          Content License. The printing sound on the daily briefing.
+        </li>
+      </ul>
+      
+      <h2>Photography</h2>
+      <p>
+        Every Quote of the Day background, and the photographer who took it. Licensed under the
+        <a href="https://www.pexels.com/license/" rel="noopener">Pexels licence</a>, which asks for no
+        attribution &mdash; these are named anyway.
+      </p>
+      <ul className="credits-photos">
+        <li><a href="https://www.pexels.com/photo/brown-trees-during-sunset-414035/" rel="noopener">Pixabay</a></li>
+        <li><a href="https://www.pexels.com/photo/bokeh-photography-of-different-colored-lights-1903584/" rel="noopener">wendel moretti</a></li>
+        <li><a href="https://www.pexels.com/photo/hilly-terrain-in-overcast-weather-in-daytime-3599171/" rel="noopener">Callum Hilton</a></li>
+        <li><a href="https://www.pexels.com/photo/dark-clouds-in-the-sky-3888585/" rel="noopener">Ale Conchillos</a></li>
+        <li><a href="https://www.pexels.com/photo/green-textile-in-close-up-photography-4863013/" rel="noopener">https://kaboompics.com/</a></li>
+        <li><a href="https://www.pexels.com/photo/close-up-photo-of-water-in-the-ocean-5444426/" rel="noopener">Rishabh Parange</a></li>
+        <li><a href="https://www.pexels.com/photo/a-foggy-mountain-top-5820306/" rel="noopener">Nico Becker</a></li>
+        <li><a href="https://www.pexels.com/photo/diamonds-in-a-dark-cave-6485524/" rel="noopener">Eva Bronzini</a></li>
+        <li><a href="https://www.pexels.com/photo/silhouette-of-a-person-standing-on-a-sand-dunes-during-sunset-7436043/" rel="noopener">Maria Camila Castaño</a></li>
+        <li><a href="https://www.pexels.com/photo/reflection-from-a-dark-liquid-surface-7505924/" rel="noopener">Eva Bronzini</a></li>
+        <li><a href="https://www.pexels.com/photo/black-cloth-in-close-up-photography-7641148/" rel="noopener">Eva Bronzini</a></li>
+        <li><a href="https://www.pexels.com/photo/cityscape-of-los-angeles-at-night-9808163/" rel="noopener">Skyler Sion</a></li>
+        <li><a href="https://www.pexels.com/photo/silhouette-of-a-forest-10160144/" rel="noopener">Anna Belousova</a></li>
+        <li><a href="https://www.pexels.com/photo/a-foggy-mountain-10596346/" rel="noopener">Alexey Demidov</a></li>
+        <li><a href="https://www.pexels.com/photo/mountains-and-field-in-valley-11061449/" rel="noopener">urtimud.89</a></li>
+        <li><a href="https://www.pexels.com/photo/a-body-of-water-11588930/" rel="noopener">Tuğçe Açıkyürek</a></li>
+        <li><a href="https://www.pexels.com/photo/sunlight-on-the-wall-12121995/" rel="noopener">Dmitry Alexandrovich</a></li>
+        <li><a href="https://www.pexels.com/photo/blurred-motion-of-traffic-in-the-city-12317907/" rel="noopener">Famitsay Tamayo</a></li>
+        <li><a href="https://www.pexels.com/photo/a-camel-in-desert-12643027/" rel="noopener">Oziel Gómez</a></li>
+        <li><a href="https://www.pexels.com/photo/photo-of-forest-uring-dawn-14697134/" rel="noopener">Johanna</a></li>
+        <li><a href="https://www.pexels.com/photo/shadow-of-a-person-s-hand-holding-a-flower-14990178/" rel="noopener">Kadir Akman</a></li>
+        <li><a href="https://www.pexels.com/photo/silhouetted-trees-on-a-field-under-a-cloudy-sky-15506782/" rel="noopener">Amel Uzunovic</a></li>
+        <li><a href="https://www.pexels.com/photo/stars-on-night-sky-15983269/" rel="noopener">Maria Laura Catalogna</a></li>
+        <li><a href="https://www.pexels.com/photo/shadow-covering-a-wall-with-a-rectangular-window-16494345/" rel="noopener">aboodi vesakaran</a></li>
+        <li><a href="https://www.pexels.com/photo/people-on-hilltop-on-desert-at-sunset-16881314/" rel="noopener">Alexander Paul</a></li>
+        <li><a href="https://www.pexels.com/photo/a-pink-and-purple-sky-with-clouds-17722209/" rel="noopener">Prashant pacific</a></li>
+        <li><a href="https://www.pexels.com/photo/stars-on-night-sky-17954395/" rel="noopener">Ademir Mattos</a></li>
+        <li><a href="https://www.pexels.com/photo/foamy-waves-on-the-sea-18415767/" rel="noopener">Adrien Olichon</a></li>
+        <li><a href="https://www.pexels.com/photo/close-up-of-plant-with-long-leaves-19203710/" rel="noopener">Diana ✨</a></li>
+        <li><a href="https://www.pexels.com/photo/view-of-an-asphalt-street-at-night-19286395/" rel="noopener">Gonzalo Carlos Novillo Lapeyra</a></li>
+        <li><a href="https://www.pexels.com/photo/dark-sea-waves-20125592/" rel="noopener">iramezatil</a></li>
+        <li><a href="https://www.pexels.com/photo/buildings-in-downtown-at-night-20716167/" rel="noopener">Andres Idda Bianchi</a></li>
+        <li><a href="https://www.pexels.com/photo/a-forest-with-mist-and-trees-in-the-background-27459539/" rel="noopener">Samar Mourya</a></li>
+        <li><a href="https://www.pexels.com/photo/dark-ocean-waves-with-natural-foam-patterns-30204590/" rel="noopener">Oguz Kagan Cevik</a></li>
+        <li><a href="https://www.pexels.com/photo/serene-sunlit-forest-with-tall-pine-trees-30534648/" rel="noopener">ksoptics_</a></li>
+        <li><a href="https://www.pexels.com/photo/dramatic-storm-clouds-overhead-in-tn-31902176/" rel="noopener">Gavin Young</a></li>
+        <li><a href="https://www.pexels.com/photo/misty-mountain-landscape-with-dense-fog-31940928/" rel="noopener">Kevyn Costa</a></li>
+        <li><a href="https://www.pexels.com/photo/minimalist-shadows-on-yellow-wall-with-sticks-33085145/" rel="noopener">Glenn Franklin</a></li>
+        <li><a href="https://www.pexels.com/photo/dramatic-dark-clouds-at-sunset-33175915/" rel="noopener">Vladimir Gladkov</a></li>
+        <li><a href="https://www.pexels.com/photo/dramatic-dark-clouds-with-a-hint-of-light-33175916/" rel="noopener">Vladimir Gladkov</a></li>
+        <li><a href="https://www.pexels.com/photo/dramatic-coastal-rocks-at-dusk-in-portugal-33702566/" rel="noopener">Francesco Ungaro</a></li>
+        <li><a href="https://www.pexels.com/photo/misty-swiss-valley-landscape-in-dramatic-weather-33737129/" rel="noopener">Alan Jeeson</a></li>
+        <li><a href="https://www.pexels.com/photo/stunning-view-of-the-milky-way-galaxy-at-night-34117099/" rel="noopener">Kiks</a></li>
+        <li><a href="https://www.pexels.com/photo/silhouetted-trees-against-a-colorful-sunset-sky-35257793/" rel="noopener">neslihan ໒꒱</a></li>
+        <li><a href="https://www.pexels.com/photo/solitary-figure-by-tree-in-nigerian-desert-37912834/" rel="noopener">MADUGU Abdullahi</a></li>
+        <li><a href="https://www.pexels.com/photo/starry-night-sky-with-milky-way-38173710/" rel="noopener">Abbas Zaidi</a></li>
+        <li><a href="https://www.pexels.com/photo/stunning-view-of-the-milky-way-galaxy-38947445/" rel="noopener">Bagas Putra</a></li>
+        <li><a href="https://www.pexels.com/photo/vast-desert-landscape-at-sunset-38951919/" rel="noopener">ABDULMAJEED</a></li>
+        <li><a href="https://www.pexels.com/photo/dramatic-storm-clouds-over-serene-lake-at-twilight-39291352/" rel="noopener">Kris Møklebust</a></li>
+        <li><a href="https://www.pexels.com/photo/minimalist-abstract-concrete-art-image-39317594/" rel="noopener">Kamil Čičila</a></li>
+      </ul>
+      
+      <h2>Open source software</h2>
+      <p>The app and its backend stand on a great deal of freely given work.</p>
+      <ul>
+        <li><strong>Jetpack Compose, AndroidX and Material 3</strong> &mdash; The Android Open Source Project (Apache 2.0). The entire interface, navigation, storage (Room), background work and the home screen widget (Glance).</li>
+        <li><strong>Kotlin, Coroutines and kotlinx.serialization</strong> &mdash; JetBrains (Apache 2.0).</li>
+        <li><strong>Ktor and OkHttp</strong> &mdash; JetBrains and Square (Apache 2.0).</li>
+        <li><strong>Coil</strong> &mdash; Coil Contributors (Apache 2.0). Image loading and caching.</li>
+        <li><strong>Lottie for Android</strong> &mdash; Airbnb (Apache 2.0). Plays the animated artwork.</li>
+        <li><strong>Media3 / ExoPlayer</strong> &mdash; The Android Open Source Project (Apache 2.0).</li>
+        <li><strong>Haze</strong> &mdash; Chris Banes (Apache 2.0). The frosted-glass blur effects.</li>
+        <li><strong>Firebase and Google Play services</strong> &mdash; Google. Sign-in (Authentication), push notifications (Cloud Messaging), crash reports (Crashlytics), Google sign-in (Credentials / Identity) and Premium purchases (Play Billing), under Google&rsquo;s terms; client libraries are Apache 2.0 where open source.</li>
+        <li><strong>FastAPI, SQLAlchemy, httpx, PostgreSQL and Redis</strong> &mdash; MIT, BSD and PostgreSQL licences. The backend that reads the feeds, clusters the stories and serves this site.</li>
+        <li><strong>Pillow, trafilatura, feedparser, curl_cffi, firebase-admin, slowapi, simhash and sentry-sdk</strong> &mdash; open source (MIT, BSD, Apache 2.0 and HPND licences). Backend libraries for reading image sizes, extracting article pages and feeds, verifying sign-in, rate limiting, grouping near-duplicate stories and error tracking.</li>
+      </ul>
+      
+      <h2>Something missing?</h2>
+      <p>
+        If something of yours appears here without a credit, or is credited wrongly, please
+        <a href="/contact">write to us</a> and we will fix it or take it down.
+      </p>
+    </main>
+  );
+}

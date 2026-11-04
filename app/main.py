@@ -147,6 +147,7 @@ from app.quiz_bank_admin import router as quiz_bank_admin_router
 from app.poll_bank_admin import router as poll_bank_admin_router
 from app.admin_api import router as admin_api_router
 from app.admin_spa import assets as admin_assets, router as admin_spa_router
+from app import web_spa
 from app.story_reports_admin import router as story_reports_admin_router
 from app.feedback_admin import router as feedback_admin_router
 from app.admin_donations import router as admin_donations_router
@@ -592,6 +593,9 @@ class CachedStaticFiles(StaticFiles):
 
 app.mount("/static", CachedStaticFiles(directory=str(STATIC_DIR)), name="static")
 app.mount("/admin/assets", admin_assets, name="admin_assets")
+_web_assets = web_spa.make_assets()
+if _web_assets is not None:
+    app.mount("/app-assets/assets", _web_assets, name="web_assets")
 
 # Every JSON response — cluster lists especially, with full article bodies
 # and JSON columns — was going out uncompressed end to end (confirmed: no
@@ -953,7 +957,7 @@ async def home(request: Request):
     evidence a product existed. The JSON moved to /status; /health (below) was
     already the real health check and is unchanged.
     """
-    return static_page("home.html")
+    return web_spa.render_shell(title="Open Indian News") or static_page("home.html")
 
 @app.get("/status")
 @limiter.exempt
@@ -1248,7 +1252,7 @@ async def reveal_daily_crossword(
 async def about(request: Request):
     """About Us. One of the pages Razorpay's activation check looks for by URL:
     a section anchored on the landing page does not reliably satisfy it."""
-    return static_page("about.html")
+    return web_spa.render_shell(title="About") or static_page("about.html")
 
 
 @app.get("/pricing", response_class=HTMLResponse)
@@ -1257,7 +1261,7 @@ async def pricing(request: Request):
     """Pricing details, likewise required as its own URL. States that the app
     is free and that a donation unlocks nothing -- the same wording as / and
     /refunds, which was written for the activation reviewer."""
-    return static_page("pricing.html")
+    return web_spa.render_shell(title="Pricing") or static_page("pricing.html")
 
 
 @app.get("/donate", response_class=HTMLResponse)
@@ -1270,7 +1274,7 @@ async def donate_page(request: Request):
     return, for the reason stated above the donation endpoints: the moment a
     donation unlocks app functionality it stops being a donation.
     """
-    return static_page("donate.html")
+    return web_spa.render_shell(title="Donate") or static_page("donate.html")
 
 
 def _default_apk_url() -> str:
@@ -1360,6 +1364,9 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
     cluster = result.scalar_one_or_none()
 
     if not cluster:
+        spa = web_spa.render_shell(status_code=404, title="Story not found")
+        if spa is not None:
+            return spa
         return HTMLResponse(
             status_code=404,
             content=(
@@ -1381,6 +1388,14 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
     image_url = next((a.image_url for a in cluster.articles if a.image_url), None)
     page_url = f"https://openindiannews.com/story/{cluster.id}"
     image_tag = f'<meta property="og:image" content="{html_escape(image_url)}">' if image_url else ""
+
+    spa = web_spa.render_shell(
+        title=cluster.headline,
+        description=" ".join(summary_bullets)[:280] or "Read the full multi-outlet coverage on Open Indian News.",
+        url=page_url, image=image_url, og_type="article",
+    )
+    if spa is not None:
+        return spa
 
     return (
         "<!DOCTYPE html>\n"
@@ -1412,6 +1427,9 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
 def _deep_link_not_found_page(title: str, message: str) -> HTMLResponse:
     """Shared 404 body for the /timelines/{id} and /explainers/{id} web
     fallbacks below — same shape as story_deep_link's inline 404 above."""
+    spa = web_spa.render_shell(status_code=404, title=title)
+    if spa is not None:
+        return spa
     return HTMLResponse(
         status_code=404,
         content=(
@@ -1432,6 +1450,12 @@ def _deep_link_page(*, title: str, description: str, page_url: str, image_url: O
     """Shared og:*-tagged HTML shell for the /timelines/{id} and
     /explainers/{id} web fallbacks — same shape as story_deep_link's own
     inline template above, factored out since both new routes need it too."""
+    spa = web_spa.render_shell(
+        title=title, description=description, url=page_url, image=image_url, og_type="article",
+    )
+    if spa is not None:
+        return spa
+    title, description = html_escape(title), html_escape(description)
     image_tag = f'<meta property="og:image" content="{html_escape(image_url)}">' if image_url else ""
     return (
         "<!DOCTYPE html>\n"
@@ -1485,8 +1509,8 @@ async def timeline_deep_link(request: Request, timeline_id: int, db: AsyncSessio
         next((a.image_url for a in hero_cluster.articles if a.image_url), None) if hero_cluster else None
     )
 
-    title = html_escape(row.title)
-    description = html_escape((row.context or "").strip()[:280] or "Follow this story's full timeline on Open Indian News.")
+    title = row.title
+    description = ((row.context or "").strip()[:280] or "Follow this story's full timeline on Open Indian News.")
     page_url = f"https://openindiannews.com/timelines/{row.id}"
 
     return _deep_link_page(
@@ -1519,8 +1543,8 @@ async def explainer_deep_link(request: Request, explainer_id: int, db: AsyncSess
     if row is None or row.status != "published":
         return _deep_link_not_found_page("Explainer not found", "This explainer may have been removed.")
 
-    title = html_escape(row.question)
-    description = html_escape((row.quick_answer or "").strip()[:280] or "Read the full explainer on Open Indian News.")
+    title = row.question
+    description = (row.quick_answer or "").strip()[:280] or "Read the full explainer on Open Indian News."
     page_url = f"https://openindiannews.com/explainers/{row.id}"
 
     return _deep_link_page(
@@ -1544,7 +1568,7 @@ async def download_page(request: Request):
     testing needs production access first. So the build is hosted directly
     and this page is the link that gets submitted.
     """
-    return static_page("download.html")
+    return web_spa.render_shell(title="Download the app") or static_page("download.html")
 
 
 @app.get("/download/apk")
@@ -1570,12 +1594,12 @@ async def download_apk(request: Request):
 @app.get("/privacy", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def privacy_policy(request: Request):
-    return static_page("privacy.html")
+    return web_spa.render_shell(title="Privacy Policy") or static_page("privacy.html")
 
 @app.get("/terms", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def terms_of_service(request: Request):
-    return static_page("terms.html")
+    return web_spa.render_shell(title="Terms of Service") or static_page("terms.html")
 
 # Both pages below are required for Razorpay merchant activation, which checks
 # that the business website publishes a refund/cancellation policy and
@@ -1585,7 +1609,7 @@ async def terms_of_service(request: Request):
 @app.get("/refunds", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def refund_policy(request: Request):
-    return static_page("refunds.html")
+    return web_spa.render_shell(title="Refunds") or static_page("refunds.html")
 
 # Attribution for everything the app is built on. Not merely courtesy: SCOWL's
 # terms and the SIL Open Font Licence both require their notices to travel with
@@ -1595,12 +1619,12 @@ async def refund_policy(request: Request):
 @app.get("/credits", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def credits(request: Request):
-    return static_page("credits.html")
+    return web_spa.render_shell(title="Credits") or static_page("credits.html")
 
 @app.get("/contact", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def contact_us(request: Request):
-    return static_page("contact.html")
+    return web_spa.render_shell(title="Contact") or static_page("contact.html")
 
 # Feedback is deliberately separate from /contact. /contact publishes an email
 # address and a postal address because Razorpay and Play require them to be
@@ -1610,7 +1634,7 @@ async def contact_us(request: Request):
 @app.get("/feedback", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def feedback_page(request: Request):
-    return static_page("feedback.html")
+    return web_spa.render_shell(title="Feedback") or static_page("feedback.html")
 
 # Play requires a publicly reachable account-deletion URL in the Data safety
 # form, reachable without installing the app — the in-app Danger Zone flow
@@ -1622,7 +1646,7 @@ async def feedback_page(request: Request):
 @app.get("/delete-account", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def delete_account_info(request: Request):
-    return static_page("delete-account.html")
+    return web_spa.render_shell(title="Delete your account") or static_page("delete-account.html")
 
 @app.get("/account-deletion", response_class=HTMLResponse)
 @limiter.limit("60/minute")
@@ -4315,3 +4339,7 @@ async def list_subscribed_sources(
 # the last route registered: anything under /admin added after it would be
 # shadowed by the shell.
 app.include_router(admin_spa_router)
+
+# The public web app's catch-all GET fallback (app/web_spa.py). Must come after
+# every other route, including the admin SPA's.
+app.include_router(web_spa.router)

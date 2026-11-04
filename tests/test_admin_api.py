@@ -121,9 +121,16 @@ class TestShell:
         # Anything under /admin registered after the catch-all would be shadowed
         # by the shell. Newer FastAPI wraps included routers lazily, older
         # versions flatten them into plain routes; accept either shape.
+        # The public web app's catch-all (app/web_spa.py) is the very last route;
+        # the admin shell must be the one right before it.
         from app.admin_spa import router as spa_router
-        last = app.routes[-1]
-        assert getattr(last, "original_router", None) is spa_router or getattr(last, "path", "") == "/admin/{path:path}"
+        from app.web_spa import router as web_router
+
+        def is_(route, router, path):
+            return getattr(route, "original_router", None) is router or getattr(route, "path", "") == path
+
+        assert is_(app.routes[-1], web_router, "/{path:path}")
+        assert is_(app.routes[-2], spa_router, "/admin/{path:path}")
 
 
 class TestReports:
