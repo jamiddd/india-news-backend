@@ -1380,3 +1380,9 @@ header.masthead .ph{background:#2A2A31; border-color:#3A3A43; color:#9A9AA3}
 .sk-beats{display:flex; flex-direction:column; gap:26px; margin-top:6px}
 .sk-beat{display:grid; grid-template-columns:78px 14px minmax(0,1fr); gap:14px; align-items:start}
 .sk-beat .sk-dot{width:12px; height:12px; margin-top:3px}
+
+/* Home: top timeline / explainer are trimmed, with "See more" for the rest */
+.ex-clamp{display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:5; line-clamp:5; overflow:hidden}
+.see-more{display:inline-block; margin-top:8px; font-size:13px; font-weight:700; color:var(--hue-context)}
+.see-more:hover{text-decoration:underline}
+.tl-more{margin-left:14px}

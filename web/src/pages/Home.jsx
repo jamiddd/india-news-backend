@@ -15,6 +15,24 @@ export const loadHome = (category) => fetchHome({ category });
 function ago(m) { return m < 60 ? m + "m" : Math.round(m / 60) + "h"; }
 function Meta({ s }) { return <div className="meta"><span className="cat">{s.category}</span><span>{ago(s.minutes_ago)} ago</span></div>; }
 function SLink({ s }) { return <Link to={"/story/" + s.id}>{s.headline}</Link>; }
+// Top timeline on Home: first few dates only, the rest behind "See more".
+const TL_SHOWN = 4;
+
+// Explainer excerpt clamped to a few lines; "See more" only appears when text is actually cut.
+function ExBody({ text, to }) {
+  const ref = useRef(null), [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    addEventListener("resize", measure);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+    return () => removeEventListener("resize", measure);
+  }, [text]);
+  return <><p className="ex-body ex-clamp" ref={ref}>{text}</p>{cut ? <Link className="see-more" to={to}>See more</Link> : null}</>;
+}
+
 function Card({ s }) { return <div className="c"><Ph r="3/2" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
 function SmallHead({ s }) { return <Link to={"/story/" + s.id}><small>{s.category.toUpperCase()} &middot; {ago(s.minutes_ago)} ago</small>{s.headline}</Link>; }
 
@@ -80,14 +98,15 @@ function Band({ TLS, EXS }) {
         ) : (
           <div className="tl tl-top" key={t.id}><Ph r="3/2" src={t.image} /><h3 style={{ marginTop: 12 }}><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><div className="meta"><span>{t.updated}</span></div>
             {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} src={t.audio.src} /> : null}
-            <ol>{t.points.map((p, j) => <li key={j}><b>{p.date}</b><span>{p.text}</span></li>)}</ol></div>
+            <ol>{t.points.slice(0, TL_SHOWN).map((p, j) => <li key={j}><b>{p.date}</b><span>{p.text}</span></li>)}</ol>
+            {t.points.length > TL_SHOWN ? <Link className="see-more tl-more" to={"/timeline/" + t.id}>See more &middot; {t.points.length - TL_SHOWN} more event{t.points.length - TL_SHOWN === 1 ? "" : "s"}</Link> : null}</div>
         ))}
       </div>
       <div><h2 className="sec-h"><span>Explainers</span><Link to="/explainers">See all &rarr;</Link></h2>
         <div className="exs">{EXS.map((x, i) => (
           // The first explainer is the featured one: an excerpt and three key points.
           <div className="ex" key={x.id}><Ph r="3/2" src={x.image} /><div className="meta"><span className="cat">{x.category}</span><span>{x.read}</span></div><h3><Link to={"/explainer/" + x.id}>{x.title}</Link></h3><p>{x.dek}</p>
-            {i ? null : <><p className="ex-body">{x.excerpt || ""}</p><div className="ex-pts"><b>In brief</b><ul>{(x.points || []).map((t, j) => <li key={j}>{t}</li>)}</ul></div><Link className="ex-more" to={"/explainer/" + x.id}>Read the explainer &rarr;</Link></>}
+            {i ? null : <><ExBody text={x.excerpt || ""} to={"/explainer/" + x.id} /><div className="ex-pts"><b>In brief</b><ul>{(x.points || []).map((t, j) => <li key={j}>{t}</li>)}</ul></div><Link className="ex-more" to={"/explainer/" + x.id}>Read the explainer &rarr;</Link></>}
           </div>
         ))}</div>
       </div>
