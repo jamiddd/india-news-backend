@@ -80,7 +80,7 @@ export default function List() {
         name = t0.label;
         list = S.filter((s) => (s.topics || []).some((t) => slug(t.label) === key));
         head = (
-          <div className="lh-top"><div><span className="kind">{t0.kind}</span><h1>{name}</h1><p className="lh-meta">{list.length} stories</p></div><div className="lh-act"><FollowBtn k={"topic:" + key} /></div></div>
+          <div className="lh-top"><div><span className="kind">{t0.kind}</span><h1>{name}</h1><p className="lh-meta">{list.length} stories</p></div><div className="lh-act"><FollowBtn k={"topic:" + key} name={name} /></div></div>
         );
         const seen = {}, rel = [];
         list.forEach((s) => s.topics.forEach((t) => { const k = slug(t.label); if (k !== key && !seen[k]) { seen[k] = 1; rel.push(t); } }));

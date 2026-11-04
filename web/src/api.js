@@ -327,7 +327,8 @@ export function adaptDaily(word, quote, poll) {
 
 const sample = () => getJSON("/api/sample");
 const sourcesStrict = () => getJSON(V1 + "/sources", { ttl: 10 * 60 * 1000 });
-const sourcesRaw = () => sourcesStrict().catch(() => []);   // categories are optional: degrade to "News"
+const sourcesRaw = () => sourcesStrict().catch(() => []);
+export const sourceList = () => sourcesRaw();   // categories are optional: degrade to "News"
 async function ctx() { return { sources: indexSources(await sourcesRaw()), now: Date.now() }; }
 const feedPage = (o = {}) => getJSON(V1 + "/clusters?" + qs({ limit: 50, ...o }));
 

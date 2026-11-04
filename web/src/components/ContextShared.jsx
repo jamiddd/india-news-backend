@@ -2,6 +2,7 @@ import { useState } from "react";
 import { shareStory } from "./shell/toast.js";
 import { Link } from "react-router-dom";
 import { Ph as PhBox, Fav } from "./Photo.jsx";
+import { push } from "../userData.js";
 
 export const ago = (m) => (m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d");
 
@@ -54,6 +55,7 @@ export function SrcRow({ s, onChange }) {
     if (next) list.push(s.id); else list.splice(i, 1);
     try { localStorage.setItem("oin-saved", JSON.stringify(list)); } catch (x) {}
     setOn(next);
+    try { if (JSON.parse(localStorage.getItem("oin-session"))) push({ k: "save", id: s.id, on: next }); } catch (x) { /* signed out */ }
     if (onChange) onChange();
   }
   function share() {

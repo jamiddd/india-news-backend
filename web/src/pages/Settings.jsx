@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import css from "../components/SettingsStyles.js";
+import { clearLocal } from "../userData.js";
 
 // No story data here. Preferences stay in localStorage: the web has no signed-in API
 // session, and PUT /api/v1/users/{id}/preferences needs a real user id.
@@ -86,7 +87,7 @@ export default function Settings() {
     redraw();
   }
   function signOut() {
-    const finish = () => { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
+    const finish = () => { clearLocal(); try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
     import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
   }
 

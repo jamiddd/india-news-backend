@@ -8,6 +8,7 @@ import { Viewer } from "../shell/MediaViewer.jsx";
 import { Ph, Fav } from "../Photo.jsx";
 import VideoPlayer from "../VideoPlayer.jsx";
 import { shareStory } from "../shell/toast.js";
+import { push } from "../../userData.js";
 
 export function ago(m) { return m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d"; }
 export function slug(n) { return String(n).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); }
@@ -25,6 +26,7 @@ const subs = new Set();
 function emit() { subs.forEach((f) => f()); }
 function sub(f) { subs.add(f); return () => subs.delete(f); }
 function snap(k) { try { return localStorage.getItem(k) || "[]"; } catch (e) { return "[]"; } }
+addEventListener("oin:data", emit);   // a sync changed the lists
 function useList(k) { return JSON.parse(useSyncExternalStore(sub, () => snap(k))); }
 
 export function signedIn() { return !!load("oin-session", null); }
@@ -33,13 +35,15 @@ export function openLogin() { dispatchEvent(new Event("oin:login")); }
 
 // ---- follows -------------------------------------------------------------
 const FK = "oin-follow";
-export function FollowBtn({ k, label }) {
+// name: the display name (topics are sent to the server by name, e.g. "Monetary Policy").
+export function FollowBtn({ k, label, name }) {
   const on = useList(FK).indexOf(k) > -1;
   function click() {
     if (!signedIn()) { openLogin(); return; }
     const l = load(FK, []), i = l.indexOf(k);
     if (i < 0) l.push(k); else l.splice(i, 1);
     save(FK, l); emit();
+    push({ k: "follow", key: k, on: i < 0, name });
   }
   return <button type="button" className={"fbtn" + (on ? " on" : "")} aria-pressed={on} onClick={click}>{on ? "Following" : "Follow"}{label ? " " + label : ""}</button>;
 }
@@ -52,6 +56,7 @@ export function toggleSaved(id) {
   const list = load(SV, []), i = list.indexOf(+id), now = i < 0;
   if (now) list.push(+id); else list.splice(i, 1);
   save(SV, list); emit(); toast(now ? "Saved" : "Removed from saved");
+  if (signedIn()) push({ k: "save", id: +id, on: now });
 }
 export function Acts({ id }) {
   const on = useSaved(id);

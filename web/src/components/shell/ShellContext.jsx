@@ -2,6 +2,7 @@
 // PROTO.openLogin, PROTO.signedIn). Pages use useShell() to start narration or open sign-in.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { load, save } from "./toast.js";
+import { syncNow, clearLocal } from "../../userData.js";
 
 const PKEY = "oin-player", SESSION = "oin-session", SPEEDS = [1, 1.25, 1.5, 2];
 const Ctx = createContext(null);
@@ -21,6 +22,11 @@ export function ShellProvider({ children }) {
   const [, tick] = useState(0);
   const [session, setSession] = useState(() => load(SESSION, null));
   const [loginOpen, setLoginOpen] = useState(false);
+  const [epoch, setEpoch] = useState(0);   // bumps when a sync changed saved/followed lists, to refresh the page
+  // Pull the account's saved stories and follows; tell listeners and refresh if anything changed.
+  const runSync = useCallback(() => {
+    syncNow().then((changed) => { if (changed) { dispatchEvent(new Event("oin:data")); setEpoch((n) => n + 1); } });
+  }, []);
   const pRef = useRef(P);
   pRef.current = P;
   const audio = useRef(null);
@@ -82,7 +88,8 @@ export function ShellProvider({ children }) {
   useEffect(() => {
     if (!load(SESSION, null)) return;
     import("../../auth.js").then((m) => m.restoredUser()).then((u) => {
-      if (!u) { try { localStorage.removeItem(SESSION); } catch (e) {} setSession(null); }
+      if (!u) { try { localStorage.removeItem(SESSION); } catch (e) {} clearLocal(); setSession(null); }
+      else runSync();
     }).catch(() => {});
   }, []);
 
@@ -116,22 +123,23 @@ export function ShellProvider({ children }) {
       closePlayer() { if (audio.current) audio.current.pause(); commit(null); },
       session,
       signedIn: !!session,
+      dataEpoch: epoch,
       setSession(u) {
-        if (u) save(SESSION, u);
-        else { try { localStorage.removeItem(SESSION); } catch (e) {} import("../../auth.js").then((m) => m.signOutEverywhere()).catch(() => {}); }
+        if (u) { save(SESSION, u); runSync(); }
+        else { try { localStorage.removeItem(SESSION); } catch (e) {} clearLocal(); import("../../auth.js").then((m) => m.signOutEverywhere()).catch(() => {}); }
         setSession(u);
       },
       loginOpen,
       openLogin() { setLoginOpen(true); },
       closeLogin() { setLoginOpen(false); },
     };
-  }, [P, session, loginOpen, commit, P && P.playing ? Date.now() : 0]);
+  }, [P, session, loginOpen, epoch, runSync, commit, P && P.playing ? Date.now() : 0]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 const FALLBACK = {
   player: null, position: 0, isMine: () => false, start() {}, toggle() {}, seek() {}, cycleSpeed() {}, closePlayer() {},
-  session: null, signedIn: false, setSession() {}, loginOpen: false, openLogin() { dispatchEvent(new Event("oin:login")); }, closeLogin() {},
+  session: null, signedIn: false, dataEpoch: 0, setSession() {}, loginOpen: false, openLogin() { dispatchEvent(new Event("oin:login")); }, closeLogin() {},
 };
 export function useShell() { return useContext(Ctx) || FALLBACK; }

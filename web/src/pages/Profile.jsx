@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import css from "../components/ProfileStyles.js";
 import { ago } from "../components/ContextShared.jsx";
 import AboutLinks from "../components/AboutLinks.jsx";
+import { push, clearLocal } from "../userData.js";
 
 import { Loading, LoadError, useData } from "../components/Status.jsx";
 import { loadStoriesByIds } from "../api.js";
@@ -69,11 +70,12 @@ export default function Profile() {
   function unsave(id) {
     const l = ls("oin-saved").filter((x) => x !== id);
     try { localStorage.setItem("oin-saved", JSON.stringify(l)); } catch (x) {}
+    push({ k: "save", id, on: false });
     redraw();
   }
   function clearHistory() { try { localStorage.removeItem("oin-read"); } catch (x) {} redraw(); }
   function signOut() {
-    const finish = () => { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
+    const finish = () => { clearLocal(); try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
     import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
   }
   function toggleEdit() { const u = sess(); setName((u && u.name) || ""); setEditing(!editing); setFlash(false); }

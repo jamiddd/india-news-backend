@@ -78,7 +78,7 @@ function Shell() {
       </div></header>
       <AppBar brand={brand} onTheme={toggleTheme} />
       <NoAds />
-      <Outlet key={sh.session ? sh.session.email : ""} />
+      <Outlet key={(sh.session ? sh.session.email : "") + ":" + sh.dataEpoch} />
       <footer><div className="wrap">
         <span>&copy; {new Date().getFullYear()} {brand.name}</span>
         <nav><NavLinks list={footer} /></nav>
