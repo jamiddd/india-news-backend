@@ -41,7 +41,8 @@ export function AppBar({ brand, onTheme }) {
   const dark = useDark(), nav = useNavigate();
   const now = new Date(), day = now.toLocaleDateString("en-IN", { weekday: "long" }), dm = now.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
   useEffect(() => {
-    const t = setTimeout(() => setShowDate(true), 5000);
+    // The app name and the day take turns every 5 seconds (not while the tab is in the background).
+    const t = setInterval(() => { if (!document.hidden) setShowDate((d) => !d); }, 5000);
     let last = scrollY;
     const onScroll = () => {
       const y = scrollY, down = y > last + 6, up = y < last - 6;
@@ -49,7 +50,7 @@ export function AppBar({ brand, onTheme }) {
       if (down || up) last = y;
     };
     addEventListener("scroll", onScroll, { passive: true });
-    return () => { clearTimeout(t); removeEventListener("scroll", onScroll); };
+    return () => { clearInterval(t); removeEventListener("scroll", onScroll); };
   }, []);
   function search() { const so = document.getElementById("search-open"); if (so) so.click(); else nav("/?s=1"); }
   return (
