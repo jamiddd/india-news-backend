@@ -71,7 +71,10 @@ export default function Profile() {
     redraw();
   }
   function clearHistory() { try { localStorage.removeItem("oin-read"); } catch (x) {} redraw(); }
-  function signOut() { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); }
+  function signOut() {
+    const finish = () => { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
+    import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
+  }
   function toggleEdit() { const u = sess(); setName((u && u.name) || ""); setEditing(!editing); setFlash(false); }
   function submit(e) {
     e.preventDefault();

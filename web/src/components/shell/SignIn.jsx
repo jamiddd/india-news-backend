@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useShell } from "./ShellContext.jsx";
-import { load, save, toast } from "./toast.js";
+import { toast } from "./toast.js";
+import * as auth from "../../auth.js";
 
 // Sign-in modal, after the Android LoginScreen. Pages: choose (Google / email) -> email
-// (sign in or create account) -> verify. Accounts live in localStorage (oin-accounts) and
-// the session in oin-session; nothing is sent anywhere. "taken@example.com" is always taken.
-const AK = "oin-accounts";
+// (sign in or create account) -> verify. Real accounts: Firebase Auth (src/auth.js) signs
+// people in, then the backend's /auth/login turns the Firebase token into our account.
 const FRESH = { page: "choose", signUp: false, name: "", email: "", pw: "", showPw: false, err: null, busy: "", resend: 0 };
 const validEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
@@ -52,54 +52,43 @@ export default function SignIn() {
   function done(user) { sh.setSession(user); close(true); toast("Welcome!"); }
   function goVerify(email) { set({ page: "verify", busy: "", err: null, resend: 30, email }); }
 
+  // Runs one auth step with a spinner; a closed Google window is not an error.
+  async function run(busy, step, ok) {
+    set({ err: null, busy });
+    try {
+      const r = await step();
+      if (alive.current) ok(r);
+    } catch (e) {
+      if (!alive.current) return;
+      if (auth.cancelled(e)) { set({ busy: "" }); return; }
+      const x = auth.explain(e); fail(x.message, x.field);
+    }
+  }
+
   function submit(e) {
     e.preventDefault();
-    const email = st.email.trim().toLowerCase(), accounts = load(AK, []), acc = accounts.filter((a) => a.email === email)[0];
+    const email = st.email.trim().toLowerCase();
     if (!email) return fail("Enter your email.", "email");
     if (!st.pw) return fail("Enter your password.", "pw");
     if (!validEmail(email)) return fail("That doesn't look like an email address.", "email");
-    if (st.signUp) {
-      if (st.pw.length < 6) return fail("Use at least 6 characters.", "pw");
-      if (acc || email === "taken@example.com") return fail("That email already has an account. Sign in instead.", "email");
-    } else {
-      if (!acc) return fail("No account uses that email. Create one instead.", "email");
-      if (acc.pw !== st.pw) return fail("That email and password don't match.", "pw");
-    }
-    set({ err: null, busy: "email" });
-    setTimeout(() => {
-      if (!alive.current) return;
-      if (st.signUp) {
-        accounts.push({ name: st.name.trim() || email.split("@")[0], email, pw: st.pw, verified: false });
-        save(AK, accounts); goVerify(email);
-      } else if (!acc.verified) goVerify(email);
-      else done({ name: acc.name, email: acc.email });
-    }, 700);
+    if (st.signUp && st.pw.length < 6) return fail("Use at least 6 characters.", "pw");
+    if (st.signUp) run("email", () => auth.signUpWithEmail(st.name.trim(), email, st.pw), (r) => goVerify(r.email || email));
+    else run("email", () => auth.signInWithEmail(email, st.pw), (r) => (r.verified ? done(r.session) : goVerify(r.email || email)));
   }
 
   function forgot() {
     const em = st.email.trim().toLowerCase();
     if (!em) return fail("Enter your email, then tap Forgot password.", "email");
     if (!validEmail(em)) return fail("That doesn't look like an email address.", "email");
-    if (!load(AK, []).some((x) => x.email === em)) return fail("No account uses that email. Create one instead.", "email");
-    set({ err: null }); toast("Password reset link sent to " + em);
+    run("", () => auth.sendReset(em), () => { set({ busy: "" }); toast("Password reset link sent to " + em); });
   }
-  function confirmed() {
-    set({ busy: "confirmed" });
-    setTimeout(() => {
-      if (!alive.current) return;
-      const accounts = load(AK, []), acc = accounts.filter((x) => x.email === st.email)[0];
-      if (!acc) return fail("Something went wrong. Try again.");
-      acc.verified = true; save(AK, accounts); done({ name: acc.name, email: acc.email });
-    }, 700);
-  }
+  function confirmed() { run("confirmed", () => auth.finishVerification(), (u) => done(u)); }
+  function resend() { run("", () => auth.resendVerification(), () => { goVerify(st.email); toast("Confirmation email sent again"); }); }
   function other() {
-    save(AK, load(AK, []).filter((x) => !(x.email === st.email && !x.verified)));
+    auth.abandonSignUp().catch(() => {});
     set({ page: "email", signUp: true, email: "", pw: "", err: null });
   }
-  function google() {
-    set({ busy: "google", err: null });
-    setTimeout(() => { if (alive.current) done({ name: "Sample Reader", email: "reader@example.com" }); }, 900);
-  }
+  function google() { run("google", () => auth.signInWithGoogle(), (u) => done(u)); }
 
   const bad = (id) => st.err && st.err.field === id;
   const line = st.err && !st.err.field ? <div className="af-err gen" role="alert">{st.err.msg}</div> : null;
@@ -160,7 +149,7 @@ export default function SignIn() {
         <div className="auth-btns"><a className="ab" href={"mailto:" + st.email}><span>Open email app</span></a>
           <button type="button" className="ab filled" disabled={!!st.busy} onClick={confirmed}>{st.busy === "confirmed" ? <i className="spin"></i> : null}<span>I've confirmed, continue</span></button></div>
         <div className="auth-foot"><button type="button" className="auth-link" onClick={other}>Use a different email</button>
-          <button type="button" className="auth-link" disabled={st.resend > 0} onClick={() => { goVerify(st.email); toast("Confirmation email sent again"); }}>{st.resend ? "Resend in " + mmss(st.resend) : "Resend email"}</button></div>
+          <button type="button" className="auth-link" disabled={st.resend > 0} onClick={resend}>{st.resend ? "Resend in " + mmss(st.resend) : "Resend email"}</button></div>
       </>
     );
   }

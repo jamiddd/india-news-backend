@@ -85,7 +85,10 @@ export default function Settings() {
     } else setPref(k, on);
     redraw();
   }
-  function signOut() { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); }
+  function signOut() {
+    const finish = () => { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
+    import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
+  }
 
   const sw = (
     <div className="pf-sws" role="group" aria-label="Accent colour">

@@ -77,6 +77,15 @@ export function ShellProvider({ children }) {
     } else a.pause();
   }, [playing, speed, src, commit]);
 
+  // A saved session is only trusted while Firebase still has the user: if they signed out
+  // elsewhere (or the session was a leftover), clear it. Firebase loads lazily, only here.
+  useEffect(() => {
+    if (!load(SESSION, null)) return;
+    import("../../auth.js").then((m) => m.restoredUser()).then((u) => {
+      if (!u) { try { localStorage.removeItem(SESSION); } catch (e) {} setSession(null); }
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key === PKEY) setP(readPlayer());
@@ -107,7 +116,11 @@ export function ShellProvider({ children }) {
       closePlayer() { if (audio.current) audio.current.pause(); commit(null); },
       session,
       signedIn: !!session,
-      setSession(u) { if (u) save(SESSION, u); else { try { localStorage.removeItem(SESSION); } catch (e) {} } setSession(u); },
+      setSession(u) {
+        if (u) save(SESSION, u);
+        else { try { localStorage.removeItem(SESSION); } catch (e) {} import("../../auth.js").then((m) => m.signOutEverywhere()).catch(() => {}); }
+        setSession(u);
+      },
       loginOpen,
       openLogin() { setLoginOpen(true); },
       closeLogin() { setLoginOpen(false); },
