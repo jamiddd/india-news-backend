@@ -248,6 +248,15 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": new TypeError("offline") }));
     expect(await api.loadPastTimelines()).toEqual([]);
   });
+  it("a past timeline's page gets the picture its card shows, or the first story's", async () => {
+    const detail = { id: 9, title: "Old", context: "x", beats: [{ date_label: "1 Oct", label: "a", narration: "n", clusters: [{ id: 5, articles: [{ id: 1, image_url: "https://img/beat.jpg" }] }] }], narrative_generated_at: "2026-10-01T00:00:00Z", dropped_from_top_at: "2026-10-05T00:00:00Z" };
+    const archived = { id: 9, title: "Old", context: "x", story_count: 3, dropped_from_top_at: "2026-10-05T00:00:00Z", anchor_cluster: { id: 5, articles: [{ id: 1, image_url: "https://img/anchor.jpg" }] } };
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines": { timelines: [] }, "/api/v1/timelines/9": detail, "/api/v1/timelines/archived": { timelines: [archived] } }));
+    expect((await api.loadTimelinePage(9)).timelines[0]).toMatchObject({ id: 9, archived: true, image: "https://img/anchor.jpg" });
+    api.clearCache();
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines": { timelines: [] }, "/api/v1/timelines/9": detail, "/api/v1/timelines/archived": new TypeError("offline") }));
+    expect((await api.loadTimelinePage(9)).timelines[0].image).toBe("https://img/beat.jpg");
+  });
   it("resolveVideoUrl returns the fresh URL, or null when none is available", async () => {
     vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/articles/7/video-url": { video_url: "https://m/x.m3u8" }, "/api/v1/articles/8/video-url": { video_url: null } }));
     expect(await api.resolveVideoUrl(7)).toBe("https://m/x.m3u8");

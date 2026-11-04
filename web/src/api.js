@@ -245,7 +245,7 @@ export function adaptTimeline(item, detail, { sources = EMPTY_SOURCES, now = Dat
   const anchorArts = (item && item.anchor_cluster && item.anchor_cluster.articles) || [];
   const beatArts = (d.beats || []).reduce((a, b) => a.concat(...(b.clusters || []).map((c) => c.articles || [])), []);
   const context = base.context || d.context || "";
-  const anchorImg = anchorArts.filter((a) => a.image_url)[0];
+  const anchorImg = anchorArts.filter((a) => a.image_url)[0] || beatArts.filter((a) => a.image_url)[0];   // else the first story's
   return {
     id: base.id,
     title: base.title || d.title || "",
@@ -493,7 +493,12 @@ export async function loadTimelinePage(id) {
     getJSON(V1 + "/timelines/" + encodeURIComponent(id)).catch((e) => { if (notFound(e)) return null; throw e; }),
   ]);
   const timelines = tl.list.map((t, i) => adaptTimeline(t, tl.details[i], cx));
-  if (own && !timelines.some((t) => t.id === own.id)) timelines.unshift(adaptTimeline(null, own, cx)); // archived / direct link
+  if (own && !timelines.some((t) => t.id === own.id)) {
+    // Not tracked any more (a "Past story" or a direct link). The detail has no picture; the archived
+    // list carries the anchor story whose image the card shows, so use that entry too.
+    const past = await getJSON(V1 + "/timelines/archived").then((r) => (r.timelines || []).find((x) => x.id === own.id) || null).catch(() => null);
+    timelines.unshift(adaptTimeline(past, own, cx));
+  }
   return { timelines, stories: own ? timelineStories(own, cx) : [] };
 }
 
