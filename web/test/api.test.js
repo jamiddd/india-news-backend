@@ -236,6 +236,15 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     expect(m).toHaveLength(8);
     expect(m[0]).toMatchObject({ kind: "video", article_id: 99, src: null, poster: "https://img/v.jpg" });
   });
+  it("loadPastTimelines lists timelines no longer tracked, and is empty rather than failing", async () => {
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": { timelines: [{ id: 108, title: "Texas", context: "A Senate seat. More.", story_count: 24, narrative_generated_at: "2026-11-03T00:34:33Z", dropped_from_top_at: "2026-11-04T00:39:29Z", anchor_cluster: null }] } }));
+    const past = await api.loadPastTimelines();
+    expect(past).toHaveLength(1);
+    expect(past[0]).toMatchObject({ id: 108, title: "Texas", archived: true, story_count: 24 });
+    api.clearCache();
+    vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": new TypeError("offline") }));
+    expect(await api.loadPastTimelines()).toEqual([]);
+  });
   it("resolveVideoUrl returns the fresh URL, or null when none is available", async () => {
     vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/articles/7/video-url": { video_url: "https://m/x.m3u8" }, "/api/v1/articles/8/video-url": { video_url: null } }));
     expect(await api.resolveVideoUrl(7)).toBe("https://m/x.m3u8");

@@ -17,12 +17,25 @@ export function AiBadge() {
 }
 
 export function TimelineCard({ t }) {
+  const past = !!t.archived, events = past ? t.story_count : t.points.length;
   return (
-    <article className="cx"><Link className="cx-img" to={"/timeline/" + t.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" src={t.image} /></Link><div className="cx-b">
-      <div className="meta"><span className="cat" style={{ color: "var(--hue-context)" }}>{t.category}</span><span>{t.updated}</span></div>
+    <article className={"cx" + (past ? " cx-past" : "")}><Link className="cx-img" to={"/timeline/" + t.id} tabIndex={-1} aria-hidden="true"><Ph ratio="3/2" src={t.image} /></Link><div className="cx-b">
+      <div className="meta"><span className="cat" style={past ? undefined : { color: "var(--hue-context)" }}>{t.category}</span><span>{past ? "No longer tracked" : t.updated}</span></div>
       <h3><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><p>{t.dek || ""}</p>
-      <div className="cx-f"><span>{t.points.length} events</span>{t.audio ? <span className="cx-au"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg> Audio</span> : null}</div>
+      <div className="cx-f"><span>{events} events</span>{t.audio ? <span className="cx-au"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg> Audio</span> : null}</div>
     </div></article>
+  );
+}
+
+// Timelines we've stopped tracking, after the tracked ones (as in the app).
+export function PastTimelines({ list }) {
+  if (!list || !list.length) return null;
+  return (
+    <section className="ctx-past" aria-labelledby="ctx-past-h">
+      <h2 id="ctx-past-h">Past stories</h2>
+      <p>Timelines we{"\u2019"}re no longer actively tracking.</p>
+      <div className="ctx-grid">{list.map((t) => <TimelineCard key={"past" + t.id} t={t} />)}</div>
+    </section>
   );
 }
 

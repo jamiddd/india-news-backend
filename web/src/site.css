@@ -1440,3 +1440,11 @@ a,button,[role="button"],[role="tab"],summary,label,input,select{touch-action:ma
 /* Context: the tagline sits under the title like a subtitle */
 .feed-h.ctx-h{flex-direction:column; align-items:flex-start; gap:8px}
 .feed-h.ctx-h p{font-size:13px}
+
+/* Past stories: timelines no longer tracked, after the tracked ones */
+.ctx-past{margin-top:44px; padding-top:28px; border-top:1px solid var(--line)}
+.ctx-past h2{margin:0; font-size:22px; font-weight:800; letter-spacing:-0.02em}
+.ctx-past > p{margin:6px 0 0; font-size:13px; color:var(--ink-3)}
+.ctx-past .ctx-grid{padding-top:20px}
+.cx-past h3{opacity:.72}
+.cx-past .meta .cat{color:var(--ink-3)}

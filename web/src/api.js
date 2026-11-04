@@ -470,6 +470,17 @@ export async function loadTimelines() {
   return tl.list.map((t, i) => adaptTimeline(t, tl.details[i], cx));
 }
 
+// Timelines no longer actively tracked ("Past stories"), newest-dropped first. They follow the
+// tracked list. Never fails the page: a missing list just means no section.
+export async function loadPastTimelines() {
+  if (USE_SAMPLE) return [];
+  try {
+    const cx = await ctx();
+    const r = await getJSON(V1 + "/timelines/archived");
+    return (r.timelines || []).map((t) => adaptTimeline(t, null, cx));
+  } catch (e) { return []; }
+}
+
 // One timeline: { timelines, stories } with the beats' stories.
 export async function loadTimelinePage(id) {
   if (USE_SAMPLE) return sample();
