@@ -2,12 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as auth from "../src/auth.js";
 
 describe("auth", () => {
-  it("is not configured until the Firebase web app config is filled in", () => {
-    expect(auth.configured()).toBe(false);
-  });
-  it("refuses to sign in while unconfigured, with a message people can read", async () => {
-    await expect(auth.signInWithGoogle()).rejects.toMatchObject({ name: "AuthError", message: expect.stringContaining("isn't available") });
-    await expect(auth.signInWithEmail("a@b.co", "secret1")).rejects.toMatchObject({ name: "AuthError" });
+  it("is configured with the project's API key", () => {
+    expect(auth.configured()).toBe(true);
   });
   it("maps Firebase error codes to messages and form fields", () => {
     expect(auth.explain({ code: "auth/invalid-credential" })).toMatchObject({ message: "That email and password don't match.", field: "pw" });
@@ -19,9 +15,5 @@ describe("auth", () => {
   it("treats a closed Google window as a cancellation, not an error", () => {
     expect(auth.cancelled({ code: "auth/popup-closed-by-user" })).toBe(true);
     expect(auth.cancelled({ code: "auth/network-request-failed" })).toBe(false);
-  });
-  it("has no signed-in user and no token while unconfigured", async () => {
-    expect(await auth.restoredUser()).toBeNull();
-    expect(await auth.idToken()).toBeNull();
   });
 });

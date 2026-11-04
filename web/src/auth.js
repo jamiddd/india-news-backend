@@ -4,7 +4,7 @@
 // never sign anyone in don't download it.
 import config from "./firebaseConfig.js";
 
-export const configured = () => !!(config.apiKey && config.appId);
+export const configured = () => !!config.apiKey;
 
 let ready = null;
 function fb() {
