@@ -158,8 +158,8 @@ export function adaptTopics(topics, entities) {
 }
 
 export function adaptMedia(articles) {
-  // Videos come first: a big story can have a dozen articles' images, and the cap below used
-  // to cut off a video that happened to sit later in the article order.
+  // Images lead and videos come last, but the cap reserves room at the end for them: a big story
+  // can have a dozen articles' images, which used to push a later video out of the list.
   const videos = [], images = [], seen = {};
   (articles || []).forEach((a) => {
     if (a.video_url || a.has_pending_video) {
@@ -167,9 +167,12 @@ export function adaptMedia(articles) {
       if (!seen[key]) { seen[key] = 1; videos.push({ kind: "video", label: "video", src: a.video_url || null, poster: a.image_url || null, article_id: a.id, duration: a.video_duration_seconds || null, short: !!a.video_is_short }); }
     }
     const imgs = (a.image_urls && a.image_urls.length ? a.image_urls : a.image_url ? [a.image_url] : []);
-    imgs.forEach((u) => { if (u && !seen[u]) { seen[u] = 1; images.push({ kind: "image", label: "image", src: u }); } });
+    // A video article's own thumbnail is the video's poster, not a separate picture.
+    const hasVideo = !!(a.video_url || a.has_pending_video);
+    imgs.forEach((u) => { if (u && !seen[u] && !(hasVideo && u === a.image_url)) { seen[u] = 1; images.push({ kind: "image", label: "image", src: u }); } });
   });
-  return videos.slice(0, 3).concat(images).slice(0, 8);
+  const tail = videos.slice(0, 3);
+  return images.slice(0, 8 - tail.length).concat(tail);
 }
 
 export function adaptFraming(fc) {

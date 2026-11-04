@@ -64,9 +64,9 @@ describe("adaptCluster", () => {
       { outlet: "Mint", angle: "Leads with market reaction", tag: "" },
     ]);
     expect(s.topics.map((t) => t.label + "/" + t.kind)).toEqual(["Monetary policy/topic", "Inflation/topic", "Narendra Modi/person", "RBI/organisation", "Mumbai/place"]);
-    expect(s.media.map((m) => m.kind)).toEqual(["video", "image", "image"]);
+    expect(s.media.map((m) => m.kind)).toEqual(["image", "video"]);   // the video article's thumbnail is its poster, not a slide
     expect(s.video).toEqual({ outlet: "The Hindu", duration: 75, article_id: 21, src: "https://v/1.m3u8", poster: "https://img/a.jpg" });
-    expect(s.media[0]).toMatchObject({ kind: "video", poster: "https://img/a.jpg", article_id: 21 });
+    expect(s.media[1]).toMatchObject({ kind: "video", poster: "https://img/a.jpg", article_id: 21 });
     expect(s.framing_pending).toBe(false);
   });
   it("degrades on a cluster with no articles, summary or category", () => {
@@ -229,12 +229,15 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
     vi.stubGlobal("fetch", F.fakeFetch({}));
     await expect(api.loadHome({})).rejects.toMatchObject({ status: 404 });
   });
-  it("adaptMedia keeps a late video even when earlier articles already have 8+ images", () => {
+  it("adaptMedia puts images first and the video last, and a late video survives the cap", () => {
     const arts = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, image_url: "https://img/" + i + ".jpg" }));
     arts.push({ id: 99, image_url: "https://img/v.jpg", has_pending_video: true });
     const m = api.adaptMedia(arts);
     expect(m).toHaveLength(8);
-    expect(m[0]).toMatchObject({ kind: "video", article_id: 99, src: null, poster: "https://img/v.jpg" });
+    expect(m.slice(0, 7).every((x) => x.kind === "image")).toBe(true);
+    expect(m[7]).toMatchObject({ kind: "video", article_id: 99, src: null, poster: "https://img/v.jpg" });
+    // fewer images than the cap: all of them, then the video
+    expect(api.adaptMedia(arts.slice(8)).map((x) => x.kind)).toEqual(["image", "image", "video"]);
   });
   it("loadPastTimelines lists timelines no longer tracked, and is empty rather than failing", async () => {
     vi.stubGlobal("fetch", F.fakeFetch({ "/api/v1/sources": [], "/api/v1/timelines/archived": { timelines: [{ id: 108, title: "Texas", context: "A Senate seat. More.", story_count: 24, narrative_generated_at: "2026-11-03T00:34:33Z", dropped_from_top_at: "2026-11-04T00:39:29Z", anchor_cluster: null }] } }));
@@ -268,7 +271,7 @@ describe("page loaders against the real endpoints (fake fetch)", () => {
   it("loadWatch carries the video's outlet and length", async () => {
     const d = await api.loadWatch();
     expect(d.stories[0].video).toMatchObject({ outlet: "Sportstar", duration: 42 });
-    expect(d.stories[0].media[0].kind).toBe("video");
+    expect(d.stories[0].media.map((m) => m.kind)).toContain("video");
   });
   it("loadSourcesPage lists active publishers with real region/language", async () => {
     const d = await api.loadSourcesPage();
