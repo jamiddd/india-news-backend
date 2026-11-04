@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ago, useSaved, toast, toggleSaved } from "../components/home/shared.jsx";
 import { Fav } from "../components/Photo.jsx";
 import VideoPlayer from "../components/VideoPlayer.jsx";
 import { useData, statusView } from "../components/Status.jsx";
-import { loadWatch } from "../api.js";
+import { loadWatch, loadShorts } from "../api.js";
 
 // Watch: always dark, like the app's Watch tab, whatever the site theme.
 const CSS = `
@@ -51,6 +51,10 @@ header.masthead,.appbar{display:none !important}
 .wt-card{background-size:cover; background-position:center; position:relative; height:100%; scroll-snap-align:start; scroll-snap-stop:always; background:linear-gradient(160deg,#2a2e36,#0d0f12); display:flex; flex-direction:column; justify-content:flex-end; padding:18px 76px 96px 16px; box-sizing:border-box}
 .wt-card::after{content:""; position:absolute; inset:45% 0 0 0; z-index:1; background:linear-gradient(transparent,rgba(0,0,0,.85)); pointer-events:none}
 .wt-card > *{position:relative; z-index:1}
+.wt-card > .vp{position:absolute; inset:0 0 72px 0; width:100%; height:calc(100% - 72px); z-index:0; background:#000}
+/* while a video plays it carries its own title and controls: drop our text, keep the side buttons clear of its control bar */
+.wt-card.playing > .wt-src,.wt-card.playing > h2,.wt-card.playing::after{display:none}
+.wt-card.playing .wt-rail{bottom:auto; top:42%; transform:translateY(-50%)}
 .wt-card h2{margin:8px 0 0; font-size:21px; line-height:1.28; font-weight:700}
 .wt-rail{position:absolute; right:10px; bottom:96px; z-index:2; display:flex; flex-direction:column; gap:14px; align-items:center}
 .wt-rail .wt-pill{width:48px; height:48px; padding:0; justify-content:center; border-radius:50%; background:rgba(0,0,0,.45)}
@@ -76,6 +80,7 @@ function videoStories(d) {
       s, id: s.id, outlet: vd.outlet || (s.coverage[0] ? s.coverage[0].outlet : ""),
       dur: vd.duration || m.duration || null,
       src: vd.src || m.src || null, articleId: vd.article_id || m.article_id, poster: vd.poster || m.poster || s.image || null,
+      short: !!m.short,                       // the backend's flag for a real vertical short
     };
   });
 }
@@ -117,12 +122,9 @@ export default function Watch() {
     </div></div>
   );
   let body;
-  if (!V.length) body = <p className="wt-empty">No videos yet.</p>;
-  else if (mode === "swipe") {
-    body = (
-      <div className="wt-feed" id="feed">{V.map((v, i) => <SwipeCard key={v.id} v={v} />)}</div>
-    );
-  } else {
+  if (mode === "swipe") body = <SwipeFeed />;
+  else if (!V.length) body = <p className="wt-empty">No videos yet.</p>;
+  else {
     const v = V[cur];
     body = (
       <>
@@ -147,10 +149,27 @@ export default function Watch() {
   return <main className="wt" id="page"><style>{CSS}</style>{switcher}{body}</main>;
 }
 
+// Swipe: vertical videos only (the backend's "shorts" list, as in the app), one per screen. Horizontal
+// videos belong to the Watch tab, so anything not flagged as a real short is left out.
+function SwipeFeed() {
+  const q = useData(loadShorts, [], { cacheKey: "shorts" });
+  if (!q.data) return <p className="wt-empty">{q.error ? "Couldn\u2019t load videos. Try again in a moment." : "Loading\u2026"}</p>;
+  const V = videoStories(q.data).filter((v) => v.short);
+  if (!V.length) return <p className="wt-empty">No vertical videos right now.</p>;
+  return <div className="wt-feed" id="feed">{V.map((v) => <SwipeCard key={v.id} v={v} />)}</div>;
+}
+
 function SwipeCard({ v }) {
-  const [on, setOn] = useState(false);
+  const [on, setOn] = useState(false), ref = useRef(null);
+  // A video stops once its card is swiped away.
+  useEffect(() => {
+    if (!on || !ref.current) return undefined;
+    const io = new IntersectionObserver(([e]) => { if (e.intersectionRatio < 0.6) setOn(false); }, { threshold: [0, 0.6, 1] });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [on]);
   return (
-    <section className={"wt-card" + (on ? " playing" : "")} style={v.poster ? { backgroundImage: "url(" + v.poster + ")" } : undefined}>
+    <section ref={ref} className={"wt-card" + (on ? " playing" : "")} style={v.poster ? { backgroundImage: "url(" + v.poster + ")" } : undefined}>
       {on ? <VideoPlayer src={v.src} articleId={v.articleId} poster={v.poster} /> : <button type="button" className="wt-play" aria-label="Play" onClick={() => setOn(true)}>{PLAY}</button>}
       <Src v={v} /><h2>{v.s.headline}</h2><Pills v={v} rail />
     </section>

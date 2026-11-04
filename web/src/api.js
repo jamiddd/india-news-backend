@@ -449,6 +449,14 @@ export async function loadWatch() {
   return { stories: r.items.map((x) => adaptCluster(x, cx)) };
 }
 
+// Vertical videos (YouTube Shorts and unknown-shape YouTube) for the Swipe feed, as in the app.
+export async function loadShorts() {
+  if (USE_SAMPLE) return sample();
+  const cx = await ctx();
+  const r = await getJSON(V1 + "/clusters/videos?" + qs({ kind: "shorts", limit: 30 }));
+  return { stories: r.items.map((x) => adaptCluster(x, cx)) };
+}
+
 // Sources directory: { sources: [{key,name,region,lang,homepage}], stories }.
 export async function loadSourcesPage() {
   if (USE_SAMPLE) return sample();
