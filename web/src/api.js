@@ -158,16 +158,18 @@ export function adaptTopics(topics, entities) {
 }
 
 export function adaptMedia(articles) {
-  const out = [], seen = {};
+  // Videos come first: a big story can have a dozen articles' images, and the cap below used
+  // to cut off a video that happened to sit later in the article order.
+  const videos = [], images = [], seen = {};
   (articles || []).forEach((a) => {
     if (a.video_url || a.has_pending_video) {
       const key = a.video_url || "pending:" + a.id;
-      if (!seen[key]) { seen[key] = 1; out.push({ kind: "video", label: "video", src: a.video_url || null, article_id: a.id, duration: a.video_duration_seconds || null, short: !!a.video_is_short }); }
+      if (!seen[key]) { seen[key] = 1; videos.push({ kind: "video", label: "video", src: a.video_url || null, poster: a.image_url || null, article_id: a.id, duration: a.video_duration_seconds || null, short: !!a.video_is_short }); }
     }
     const imgs = (a.image_urls && a.image_urls.length ? a.image_urls : a.image_url ? [a.image_url] : []);
-    imgs.forEach((u) => { if (u && !seen[u]) { seen[u] = 1; out.push({ kind: "image", label: "image", src: u }); } });
+    imgs.forEach((u) => { if (u && !seen[u]) { seen[u] = 1; images.push({ kind: "image", label: "image", src: u }); } });
   });
-  return out.slice(0, 8);
+  return videos.slice(0, 3).concat(images).slice(0, 8);
 }
 
 export function adaptFraming(fc) {
@@ -200,7 +202,7 @@ export function adaptCluster(c, { sources = EMPTY_SOURCES, now = Date.now(), cat
     topics: adaptTopics(c.topics, c.entities),
     media: adaptMedia(arts),
     image: imageArt ? imageArt.image_url : null,
-    video: video ? { outlet: video.source_name, duration: video.video_duration_seconds || null, article_id: video.id, src: video.video_url || null } : null,
+    video: video ? { outlet: video.source_name, duration: video.video_duration_seconds || null, article_id: video.id, src: video.video_url || null, poster: video.image_url || (imageArt && imageArt.image_url) || null } : null,
   };
 }
 
@@ -544,4 +546,11 @@ export async function loadDaily() {
     getJSON(V1 + "/polls/daily").catch(() => null),
   ]);
   return adaptDaily(w, q, p);
+}
+
+// A fresh playable URL for a story video that had none at scrape time (Brightcove manifests
+// are short-lived, so the backend resolves them on demand). null when unavailable.
+export async function resolveVideoUrl(articleId) {
+  const r = await getJSON(V1 + "/articles/" + encodeURIComponent(articleId) + "/video-url", { ttl: 30 * 1000 });
+  return (r && r.video_url) || null;
 }

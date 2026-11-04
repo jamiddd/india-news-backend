@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Ph } from "../Photo.jsx";
+import { Ph, Fav } from "../Photo.jsx";
 import { Link } from "react-router-dom";
 import { searchStories } from "../../api.js";
 
@@ -89,7 +89,7 @@ export default function Search({ d, S, state, onClose }) {
       );
       if (tab === "Timelines") return <Link className="spot-card" key={x.id} to={"/timeline/" + x.id}><span className="spot-badge">TIMELINE</span><div className="spot-hd"><Hl text={x.title} n={n} /></div><div className="spot-sn">{x.points.length} events &middot; {x.updated}{x.audio ? " · Has audio" : ""}</div></Link>;
       if (tab === "Explainers") return <Link className="spot-card" key={x.id} to={"/explainer/" + x.id}><span className="spot-badge">EXPLAINER</span><div className="spot-hd"><Hl text={x.title} n={n} /></div><div className="spot-sn">{x.read}</div></Link>;
-      return <Link className="spot-row src" key={x.name} to="/?c=All" onClick={onClose}><span className="ph round" style={{ width: 28, height: 28, padding: 0 }}></span><div className="spot-hd"><Hl text={x.name} n={n} /></div><div className="spot-sn" style={{ marginLeft: "auto" }}>{x.count} stories</div></Link>;
+      return <Link className="spot-row src" key={x.name} to="/?c=All" onClick={onClose}><Fav name={x.name} /><div className="spot-hd"><Hl text={x.name} n={n} /></div><div className="spot-sn" style={{ marginLeft: "auto" }}>{x.count} stories</div></Link>;
     });
   }
   return createPortal(

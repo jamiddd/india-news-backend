@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { TimelineCard, ExplainerCard } from "../components/ContextShared.jsx";
 
-import { Loading, LoadError, useData } from "../components/Status.jsx";
+import { LoadError, useData } from "../components/Status.jsx";
+import { ContextSkeleton } from "../components/Skeleton.jsx";
 import { loadContext } from "../api.js";
 
 // Context: the timelines and explainers behind the stories.
@@ -20,7 +21,7 @@ export default function Context() {
           <Link key={t} role="tab" aria-selected={t === tab} className={"ctx-tab" + (t === tab ? " on" : "")} to={"/context?t=" + t}>{t === "timelines" ? "Timelines" : "Explainers"}</Link>
         ))}
       </div>
-      {q.error ? <LoadError error={q.error} onRetry={q.retry} what={tab} /> : !data ? <Loading what={tab} compact /> : list.length ? (
+      {q.error ? <LoadError error={q.error} onRetry={q.retry} what={tab} /> : !data ? <div className="skel sk-in" role="status" aria-label={"Loading " + tab}><ContextSkeleton /></div> : list.length ? (
         <div className="ctx-grid">{list.map((x) => (tab === "timelines" ? <TimelineCard key={x.id} t={x} /> : <ExplainerCard key={x.id} x={x} />))}</div>
       ) : <p className="empty">No {tab} yet.</p>}
     </main>

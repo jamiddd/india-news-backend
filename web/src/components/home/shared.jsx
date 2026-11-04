@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Viewer } from "../shell/MediaViewer.jsx";
 import { Ph, Fav } from "../Photo.jsx";
+import VideoPlayer from "../VideoPlayer.jsx";
 import { shareStory } from "../shell/toast.js";
 
 export function ago(m) { return m < 60 ? m + "m" : m < 1440 ? Math.round(m / 60) + "h" : Math.round(m / 1440) + "d"; }
@@ -144,16 +145,19 @@ export function Carousel({ s }) {
   const m = s.media || [];
   const track = useRef(null), car = useRef(null), idle = useRef(null);
   const [i, setI] = useState(0), [moving, setMoving] = useState(false), [view, setView] = useState(null);
+  const [vp, setVp] = useState(null);   // index of the slide whose video is playing inline
+  useEffect(() => { if (vp !== null && vp !== i) setVp(null); }, [i]);
   const calm = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (m.length < 2) {
-    const v = m[0] && m[0].kind === "video", label = (m[0] && m[0].label) || "image";
+    const x = m[0], v = x && x.kind === "video", label = (x && x.label) || "image";
     return (
       <>
-        <Ph className="mv" r="16/9" src={!v && m[0] ? m[0].src : null} t={label} role="button" tabIndex={0} aria-label="Open media fullscreen"
-          onClick={(e) => { e.preventDefault(); setView(true); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setView(true); } }}>
-          {v && <span className="car-play">{PLAY_SVG}</span>}
+        <Ph className="mv" r="16/9" src={x ? (v ? x.poster : x.src) : null} t={label} role="button" tabIndex={0} aria-label={v ? "Play video" : "Open media fullscreen"}
+          onClick={(e) => { e.preventDefault(); if (v) setVp(0); else setView(true); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (v) setVp(0); else setView(true); } }}>
+          {v && vp !== 0 && <span className="car-play">{PLAY_SVG}</span>}
+          {v && vp === 0 && <VideoPlayer src={x.src} articleId={x.article_id} poster={x.poster} />}
         </Ph>
-        {view && <Viewer items={[{ video: v, src: m[0] && m[0].src, label }]} start={0} onClose={() => setView(null)} />}
+        {view && <Viewer items={[{ video: false, src: x && x.src, label }]} start={0} onClose={() => setView(null)} />}
       </>
     );
   }
@@ -171,17 +175,22 @@ export function Carousel({ s }) {
         onPointerMove={wake} onPointerDown={wake} onPointerOut={(e) => { if (!car.current.contains(e.relatedTarget)) { clearTimeout(idle.current); setMoving(false); } }}
         onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); go(idx() + (e.key === "ArrowRight" ? 1 : -1)); } }}>
         <div className="car-track" ref={track} onScroll={() => setI(idx())}>
-          {m.map((x, j) => (
-            <Ph key={j} className="car-slide" r="16/9" src={x.kind === "video" ? null : x.src} t={x.label + " " + (j + 1)} role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length} onClick={(e) => { e.preventDefault(); setView(j); }}>
-              {x.kind === "video" && <span className="car-play">{PLAY_SVG}</span>}
-            </Ph>
-          ))}
+          {m.map((x, j) => {
+            const v = x.kind === "video";
+            return (
+              <Ph key={j} className="car-slide" r="16/9" src={v ? x.poster : x.src} t={x.label + " " + (j + 1)} role="group" aria-roledescription="slide" aria-label={(j + 1) + " of " + m.length}
+                onClick={(e) => { e.preventDefault(); if (v) setVp(j); else setView(j); }}>
+                {v && vp !== j && <span className="car-play">{PLAY_SVG}</span>}
+                {v && vp === j && <VideoPlayer src={x.src} articleId={x.article_id} poster={x.poster} />}
+              </Ph>
+            );
+          })}
         </div>
         <button type="button" className="car-btn prev" aria-label="Previous media" disabled={i <= 0} onClick={() => go(idx() - 1)}>{chev("M15 5l-7 7 7 7")}</button>
         <button type="button" className="car-btn next" aria-label="Next media" disabled={i >= m.length - 1} onClick={() => go(idx() + 1)}>{chev("M9 5l7 7-7 7")}</button>
         <div className="car-dots">{m.map((x, j) => <button key={j} type="button" className={"car-dot" + (j === i ? " on" : "")} aria-label={"Go to media " + (j + 1)} aria-current={j === i ? "true" : undefined} onClick={() => go(j)}></button>)}</div>
       </div>
-      {view !== null && <Viewer items={m.map((x, j) => ({ video: x.kind === "video", src: x.src, label: x.label + " " + (j + 1) }))} start={view} onClose={() => setView(null)} />}
+      {view !== null && <Viewer items={m.map((x, j) => ({ video: x.kind === "video", src: x.src, articleId: x.article_id, poster: x.poster, label: x.label + " " + (j + 1) }))} start={view} onClose={() => setView(null)} />}
     </>
   );
 }

@@ -11,6 +11,7 @@
     "dev:sample": "VITE_USE_SAMPLE=1 vite"
   },
   "dependencies": {
+    "hls.js": "^1.7.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5"

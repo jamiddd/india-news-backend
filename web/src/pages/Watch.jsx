@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ago, useSaved, toast, toggleSaved } from "../components/home/shared.jsx";
 import { Fav } from "../components/Photo.jsx";
+import VideoPlayer from "../components/VideoPlayer.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadWatch } from "../api.js";
 
@@ -19,7 +20,7 @@ header.masthead,.appbar{display:none !important}
 .wt-sw.swipe i{transform:translateX(72px)}
 .wt-sw button{position:relative; width:72px; height:30px; border:0; background:none; border-radius:15px; color:var(--wf2); font:600 13px var(--sans,Inter,sans-serif); cursor:pointer}
 .wt-sw button.on{color:#fff}
-.wt-pl{position:sticky; top:0; z-index:10; box-shadow:0 8px 20px -10px rgba(0,0,0,.8); aspect-ratio:16/9; margin-top:10px; background:linear-gradient(135deg,#23262d,#14161a); display:grid; place-items:center; cursor:pointer; overflow:hidden}
+.wt-pl{background-size:cover !important; background-position:center !important; position:sticky; top:0; z-index:10; box-shadow:0 8px 20px -10px rgba(0,0,0,.8); aspect-ratio:16/9; margin-top:10px; background:linear-gradient(135deg,#23262d,#14161a); display:grid; place-items:center; cursor:pointer; overflow:hidden}
 .wt-pl .lbl{position:absolute; left:12px; top:10px; font:600 11px var(--mono); letter-spacing:.08em; color:var(--wf2); text-transform:uppercase}
 .wt-play{width:64px; height:64px; border-radius:50%; border:0; display:grid; place-items:center; background:rgba(0,0,0,.55); color:#fff; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer}
 .wt-bar{position:absolute; left:0; right:0; bottom:0; height:4px; background:rgba(255,255,255,.2)}
@@ -28,7 +29,9 @@ header.masthead,.appbar{display:none !important}
 .wt-now{padding:14px 16px}
 .wt-now h1{margin:0 0 8px; font-size:21px; line-height:1.28; font-weight:600; letter-spacing:-.01em}
 .wt-src{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--wf2)}
-.wt-src .fv{flex:0 0 auto}
+.wt-src .fv,.wt-tx small .fv{flex:0 0 auto; display:inline-block; border-radius:50%}
+.wt-src .fv{width:24px; height:24px}
+.wt-tx small .fv{width:27px; height:27px}
 .wt-pills{display:flex; gap:8px; margin-top:12px; overflow-x:auto; scrollbar-width:none}
 .wt-pill{flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 14px; border-radius:18px; border:0; background:rgba(255,255,255,.12); color:#fff; font:600 13px var(--sans,Inter,sans-serif); cursor:pointer; text-decoration:none}
 .wt-pill:hover{text-decoration:none; background:rgba(255,255,255,.2)}
@@ -37,7 +40,7 @@ header.masthead,.appbar{display:none !important}
 .wt-h{padding:8px 16px 10px; margin:6px 0 0; border-top:1px solid var(--wl); padding-top:16px; font-size:15px; font-weight:700}
 .wt-row{display:flex; gap:12px; padding:8px 16px; cursor:pointer; text-align:left; width:100%; border:0; background:none; color:inherit; font:inherit}
 .wt-row:hover{background:rgba(255,255,255,.05)}
-.wt-th{position:relative; flex:0 0 168px; aspect-ratio:16/9; border-radius:10px; background:linear-gradient(135deg,#2a2e36,#171a1f); overflow:hidden}
+.wt-th{background-size:cover; background-position:center; position:relative; flex:0 0 168px; aspect-ratio:16/9; border-radius:10px; background:linear-gradient(135deg,#2a2e36,#171a1f); overflow:hidden}
 .wt-th em{position:absolute; right:6px; bottom:6px; font:700 11px var(--mono); font-style:normal; background:rgba(0,0,0,.78); padding:2px 6px; border-radius:5px}
 .wt-row.cur .wt-th{outline:2px solid #1976D2; outline-offset:-2px}
 .wt-tx{min-width:0; display:flex; flex-direction:column; gap:5px}
@@ -45,8 +48,8 @@ header.masthead,.appbar{display:none !important}
 .wt-tx small{font-size:12.5px; color:var(--wf2); display:flex; align-items:center; gap:6px}
 .wt-feed{height:calc(100dvh - 64px); overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none}
 .wt-feed::-webkit-scrollbar{display:none}
-.wt-card{position:relative; height:100%; scroll-snap-align:start; scroll-snap-stop:always; background:linear-gradient(160deg,#2a2e36,#0d0f12); display:flex; flex-direction:column; justify-content:flex-end; padding:18px 76px 96px 16px; box-sizing:border-box}
-.wt-card::after{content:""; position:absolute; inset:45% 0 0 0; background:linear-gradient(transparent,rgba(0,0,0,.85)); pointer-events:none}
+.wt-card{background-size:cover; background-position:center; position:relative; height:100%; scroll-snap-align:start; scroll-snap-stop:always; background:linear-gradient(160deg,#2a2e36,#0d0f12); display:flex; flex-direction:column; justify-content:flex-end; padding:18px 76px 96px 16px; box-sizing:border-box}
+.wt-card::after{content:""; position:absolute; inset:45% 0 0 0; z-index:1; background:linear-gradient(transparent,rgba(0,0,0,.85)); pointer-events:none}
 .wt-card > *{position:relative; z-index:1}
 .wt-card h2{margin:8px 0 0; font-size:21px; line-height:1.28; font-weight:700}
 .wt-rail{position:absolute; right:10px; bottom:96px; z-index:2; display:flex; flex-direction:column; gap:14px; align-items:center}
@@ -67,10 +70,14 @@ const RD = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="c
 // Data access for this page: loadWatch (src/api.js, GET /clusters/videos). Real stories carry
 // `video` (the playing outlet and its length); the sample has neither, so both fall back.
 function videoStories(d) {
-  return d.stories.filter((s) => s.media.some((m) => m.kind === "video")).map((s) => ({
-    s, id: s.id, outlet: (s.video && s.video.outlet) || (s.coverage[0] ? s.coverage[0].outlet : ""),
-    dur: (s.video && s.video.duration) || 45 + (s.id * 37) % 200,
-  }));
+  return d.stories.filter((s) => s.media.some((m) => m.kind === "video")).map((s) => {
+    const m = s.media.filter((x) => x.kind === "video")[0], vd = s.video || {};
+    return {
+      s, id: s.id, outlet: vd.outlet || (s.coverage[0] ? s.coverage[0].outlet : ""),
+      dur: vd.duration || m.duration || null,
+      src: vd.src || m.src || null, articleId: vd.article_id || m.article_id, poster: vd.poster || m.poster || s.image || null,
+    };
+  });
 }
 
 function Pills({ v, rail }) {
@@ -95,27 +102,18 @@ function Src({ v }) { return <span className="wt-src"><Fav name={v.outlet} /><sp
 
 export default function Watch() {
   const q = useData(loadWatch), d = q.data;
-  const [cur, setCur] = useState(0), [playing, setPlaying] = useState(false), [mode, setMode] = useState("watch"), [pos, setPos] = useState(0);
+  const [cur, setCur] = useState(0), [playing, setPlaying] = useState(false), [mode, setMode] = useState("watch");
   const V = d ? videoStories(d) : [];
 
-  useEffect(() => {
-    if (!playing || !V.length) return;
-    const t = setInterval(() => {
-      setPos((p) => {
-        const dur = V[cur].dur;
-        if (p + 1 >= dur) { if (mode === "watch") { setCur((c) => (c + 1) % V.length); } return 0; }
-        return p + 1;
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, [playing, cur, mode, V.length]);
+  // Moving on when a video ends (Watch mode plays the list in order).
+  const next = () => { if (mode === "watch" && V.length > 1) { setCur((c) => (c + 1) % V.length); setPlaying(true); } else setPlaying(false); };
 
   const wait = statusView(q, "videos", ({ children }) => <main className="wt" id="page"><style>{CSS}</style>{children}</main>);
   if (wait) return wait;
 
   const switcher = (
     <div className="wt-top"><div className={"wt-sw" + (mode === "swipe" ? " swipe" : "")} role="tablist"><i></i>
-      {["watch", "swipe"].map((m) => <button key={m} type="button" className={mode === m ? "on" : ""} role="tab" onClick={() => { setMode(m); setPlaying(false); setPos(0); }}>{m === "watch" ? "Watch" : "Swipe"}</button>)}
+      {["watch", "swipe"].map((m) => <button key={m} type="button" className={mode === m ? "on" : ""} role="tab" onClick={() => { setMode(m); setPlaying(false); }}>{m === "watch" ? "Watch" : "Swipe"}</button>)}
     </div></div>
   );
   let body;
@@ -128,17 +126,18 @@ export default function Watch() {
     const v = V[cur];
     body = (
       <>
-        <div className="wt-pl" id="pl" onClick={(e) => { if (!e.target.closest(".wt-play")) setPlaying(!playing); }}>
-          <span className="lbl">Video</span>
-          <button type="button" className="wt-play" aria-label={playing ? "Pause" : "Play"} onClick={() => setPlaying(!playing)}>{playing ? PAUSE : PLAY}</button>
-          <span className="wt-time">{mmss(pos)} / {mmss(v.dur)}</span>
-          <div className="wt-bar"><b style={{ width: (pos / v.dur * 100) + "%" }}></b></div>
+        <div className="wt-pl" id="pl" style={v.poster ? { backgroundImage: "url(" + v.poster + ")" } : undefined}>
+          {playing
+            ? <VideoPlayer key={v.id} src={v.src} articleId={v.articleId} poster={v.poster} onEnded={next} />
+            : <><span className="lbl">Video</span>
+              <button type="button" className="wt-play" aria-label="Play" onClick={() => setPlaying(true)}>{PLAY}</button>
+              {v.dur ? <span className="wt-time">{mmss(v.dur)}</span> : null}</>}
         </div>
         <div className="wt-now"><h1>{v.s.headline}</h1><Src v={v} /><Pills v={v} /></div>
         <h2 className="wt-h">Up next</h2>
         {V.map((x, i) => i === cur ? null : (
-          <button type="button" className="wt-row" key={x.id} onClick={() => { setCur(i); setPos(0); setPlaying(true); window.scrollTo(0, 0); }}>
-            <span className="wt-th"><em>{mmss(x.dur)}</em></span>
+          <button type="button" className="wt-row" key={x.id} onClick={() => { setCur(i); setPlaying(true); window.scrollTo(0, 0); }}>
+            <span className="wt-th" style={x.poster ? { backgroundImage: "url(" + x.poster + ")" } : undefined}>{x.dur ? <em>{mmss(x.dur)}</em> : null}</span>
             <span className="wt-tx"><b>{x.s.headline}</b><small><Fav name={x.outlet} />{x.outlet} &middot; {ago(x.s.minutes_ago)}</small></span>
           </button>
         ))}
@@ -151,8 +150,8 @@ export default function Watch() {
 function SwipeCard({ v }) {
   const [on, setOn] = useState(false);
   return (
-    <section className={"wt-card" + (on ? " playing" : "")}>
-      <button type="button" className="wt-play" aria-label="Play" onClick={() => setOn(!on)}>{PLAY}</button>
+    <section className={"wt-card" + (on ? " playing" : "")} style={v.poster ? { backgroundImage: "url(" + v.poster + ")" } : undefined}>
+      {on ? <VideoPlayer src={v.src} articleId={v.articleId} poster={v.poster} /> : <button type="button" className="wt-play" aria-label="Play" onClick={() => setOn(true)}>{PLAY}</button>}
       <Src v={v} /><h2>{v.s.headline}</h2><Pills v={v} rail />
     </section>
   );

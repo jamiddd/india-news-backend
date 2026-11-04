@@ -1386,3 +1386,12 @@ header.masthead .ph{background:#2A2A31; border-color:#3A3A43; color:#9A9AA3}
 .see-more{display:inline-block; margin-top:8px; font-size:13px; font-weight:700; color:var(--hue-context)}
 .see-more:hover{text-decoration:underline}
 .tl-more{margin-left:14px}
+
+/* Video player (components/VideoPlayer.jsx): fills the box it is placed in */
+.vp{position:absolute; inset:0; width:100%; height:100%; border:0; background:#000; object-fit:contain; z-index:3}
+.vp-msg{display:grid; place-items:center; background:#111 center/cover no-repeat; color:#fff; font-size:13px; font-weight:600; text-align:center; padding:12px}
+.vp-msg span{background:rgba(0,0,0,.6); padding:6px 12px; border-radius:999px}
+.skel.sk-in{min-height:calc(100vh - 260px); padding-top:8px}
+.sk-ctx{padding-top:0}
+.spot-row.src .fv{display:inline-block; flex:0 0 auto; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,.14)}
+.spot-row.src .fv img{background:#fff}

@@ -76,6 +76,11 @@ export function RelatedSkeleton() {
   );
 }
 
+// Context tab (timelines / explainers): the same card grid the list uses.
+export function ContextSkeleton() {
+  return <div className="ctx-grid sk-ctx">{[0, 1, 2, 3, 4, 5].map((i) => <Card key={i} />)}</div>;
+}
+
 export function GridSkeleton() {
   return <div className="sk-grid sk-top">{[0, 1, 2, 3, 4, 5].map((i) => <Card key={i} />)}</div>;
 }
