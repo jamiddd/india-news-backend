@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useShell } from "./ShellContext.jsx";
+import OinMark from "../OinMark.jsx";
 import Mplay, { useMplayRoot } from "./Mplay.jsx";
 
 // Phone chrome after the Android app: a top app bar (logo, a title that swaps to today's date
@@ -53,7 +54,7 @@ export function AppBar({ brand, onTheme }) {
   function search() { const so = document.getElementById("search-open"); if (so) so.click(); else nav("/?s=1"); }
   return (
     <header className={"appbar" + (showDate ? " show-date" : "") + (hide ? " hide" : "")}>
-      <Link className="ab-brand" to="/" aria-label="Open Indian News, top of the feed"><span className="ph round ab-logo" aria-hidden="true"></span>
+      <Link className="ab-brand" to="/" aria-label="Open Indian News, top of the feed"><OinMark size={26} />
         <span className="ab-title"><span className="ab-t1"><b>{brand.name}</b><small>Multi-Outlet Clustered Feed &amp; Framing Intelligence</small></span>
           <span className="ab-t2"><b>{day}</b><small>{dm}</small></span></span></Link>
       <div className="ab-act">

@@ -10,6 +10,8 @@ export function fmt(n) { n = Math.max(0, Math.floor(n)); return Math.floor(n / 6
 function readPlayer() {
   const p = load(PKEY, null);
   if (p && p.playing && posOf(p) >= p.dur) { p.playing = false; p.pos = 0; p.at = Date.now(); }
+  // A page load can't resume real audio on its own (autoplay rules): come back paused where it was.
+  else if (p && p.playing && p.src) { p.pos = posOf(p); p.playing = false; p.at = Date.now(); }
   return p;
 }
 function posOf(P) { return !P ? 0 : P.playing ? Math.min(P.dur, P.pos + (Date.now() - P.at) / 1000 * P.speed) : P.pos; }
@@ -21,6 +23,7 @@ export function ShellProvider({ children }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const pRef = useRef(P);
   pRef.current = P;
+  const audio = useRef(null);
 
   const commit = useCallback((next) => {
     pRef.current = next; setP(next);
@@ -37,6 +40,42 @@ export function ShellProvider({ children }) {
     }, 250);
     return () => clearInterval(t);
   }, [!!P, commit]);
+
+  // Real audio: one <audio> element lives here, so narration keeps playing across pages.
+  // Items without a source (no audio file yet) fall back to the timestamp clock above.
+  const src = P && P.src ? P.src : "";
+  useEffect(() => {
+    if (!src) { if (audio.current) { audio.current.pause(); audio.current.removeAttribute("src"); } return undefined; }
+    if (!audio.current) audio.current = new Audio();
+    const a = audio.current;
+    a.preload = "metadata";
+    const onEnd = () => { const c = pRef.current; if (c) commit({ ...c, playing: false, pos: 0, at: Date.now() }); };
+    const onMeta = () => { const c = pRef.current; if (c && isFinite(a.duration) && a.duration > 0 && Math.abs(a.duration - c.dur) > 1) commit({ ...c, dur: a.duration }); };
+    // Keep the clock anchored to the real playhead (buffering, seeking, tab throttling).
+    const onSync = () => { const c = pRef.current; if (c && c.playing) pRef.current = { ...c, pos: a.currentTime, at: Date.now() }; };
+    const onFail = () => { const c = pRef.current; if (c && c.playing) commit({ ...c, pos: posOf(c), playing: false, at: Date.now() }); };
+    a.addEventListener("ended", onEnd); a.addEventListener("loadedmetadata", onMeta);
+    a.addEventListener("timeupdate", onSync); a.addEventListener("error", onFail);
+    if (a.getAttribute("src") !== src) {
+      a.src = src;
+      const c = pRef.current;
+      if (c && c.pos) a.addEventListener("loadedmetadata", () => { try { a.currentTime = c.pos; } catch (e) {} }, { once: true });
+    }
+    return () => {
+      a.removeEventListener("ended", onEnd); a.removeEventListener("loadedmetadata", onMeta);
+      a.removeEventListener("timeupdate", onSync); a.removeEventListener("error", onFail);
+    };
+  }, [src, commit]);
+  const playing = !!(P && P.playing), speed = P ? P.speed : 1;
+  useEffect(() => {
+    const a = audio.current;
+    if (!a || !src) return;
+    a.playbackRate = speed;
+    if (playing) {
+      const r = a.play();
+      if (r && r.catch) r.catch(() => { const c = pRef.current; if (c && c.playing) commit({ ...c, pos: posOf(c), playing: false, at: Date.now() }); });
+    } else a.pause();
+  }, [playing, speed, src, commit]);
 
   useEffect(() => {
     const onStorage = (e) => {
@@ -55,12 +94,17 @@ export function ShellProvider({ children }) {
       position: posOf(P),
       isMine,
       start(item) {
-        commit({ id: item.id, kind: item.kind, title: item.title, url: item.url, dur: item.dur, pos: 0, playing: true, at: Date.now(), speed: P ? P.speed : 1 });
+        commit({ id: item.id, kind: item.kind, title: item.title, url: item.url, src: item.src || null, dur: item.dur, pos: 0, playing: true, at: Date.now(), speed: P ? P.speed : 1 });
       },
       toggle() { const c = pRef.current; if (c) commit({ ...c, pos: posOf(c), playing: !c.playing, at: Date.now() }); },
-      seek(frac) { const c = pRef.current; if (c) commit({ ...c, pos: Math.max(0, Math.min(1, frac)) * c.dur, at: Date.now() }); },
+      seek(frac) {
+        const c = pRef.current; if (!c) return;
+        const pos = Math.max(0, Math.min(1, frac)) * c.dur;
+        if (c.src && audio.current) { try { audio.current.currentTime = pos; } catch (e) {} }
+        commit({ ...c, pos, at: Date.now() });
+      },
       cycleSpeed() { const c = pRef.current; if (c) commit({ ...c, pos: posOf(c), at: Date.now(), speed: SPEEDS[(SPEEDS.indexOf(c.speed) + 1) % SPEEDS.length] }); },
-      closePlayer() { commit(null); },
+      closePlayer() { if (audio.current) audio.current.pause(); commit(null); },
       session,
       signedIn: !!session,
       setSession(u) { if (u) save(SESSION, u); else { try { localStorage.removeItem(SESSION); } catch (e) {} } setSession(u); },

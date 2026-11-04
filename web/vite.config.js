@@ -38,7 +38,9 @@ export default defineConfig(({ command, mode }) => {
     // app from / so the router's clean URLs (/story/12, /timelines, ...) resolve.
     base: command === "build" ? "/app-assets/" : "/",
     plugins: [react(), sampleData()],
-    build: { outDir: "dist" },
+    // cssTarget: the default (safari14) makes the minifier keep only -webkit-backdrop-filter and
+    // drop the standard property, which removes every frosted-glass blur in Chrome/Android.
+    build: { outDir: "dist", cssTarget: ["chrome105", "safari16", "firefox110"] },
     server: { proxy: { "/api": env.API_PROXY_TARGET || "http://127.0.0.1:8000" } },
     test: { environment: "node", include: ["test/**/*.test.js"] },
   };

@@ -6,7 +6,7 @@ const PLAY = "▶", PAUSE = "❚❚";
 // Inline narration player (PROTO.player). Pressing play makes this item the site-wide
 // current narration, which the persistent mini player (Mplay) then keeps going.
 // id/kind/title/url identify the item; they default from the label and the current page.
-export function AudioPlayer({ label, duration, id, kind, title, url }) {
+export function AudioPlayer({ label, duration, id, kind, title, url, src }) {
   const sh = useShell(), loc = useLocation();
   const k = kind || loc.pathname.split("/").filter(Boolean)[0] || "timeline";
   const i = id != null ? id : loc.pathname.split("/")[2] || label;
@@ -14,7 +14,7 @@ export function AudioPlayer({ label, duration, id, kind, title, url }) {
   const x = mine ? sh.position : 0;
   function press() {
     if (mine) sh.toggle();
-    else sh.start({ id: i, kind: k, title: title || label, url: url || loc.pathname + loc.search, dur: duration });
+    else sh.start({ id: i, kind: k, title: title || label, url: url || loc.pathname + loc.search, src, dur: duration });
   }
   return (
     <div className="ap" data-id={i} data-kind={k}>

@@ -28,7 +28,7 @@ export default function Timeline() {
         <h1>{t.title}</h1>
         <div className="sty-media"><Ph className="mv" r="16/9" src={t.image} role="button" tabIndex={0} aria-label="Open media fullscreen" /></div>
         <p className="dek" style={{ marginTop: 14 }}>{t.context || t.dek || ""}</p>
-        {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} /> : null}
+        {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} src={t.audio.src} /> : null}
         <section className="sty-sec"><h2 className="sec-h"><span>The story so far</span><span className="sec-n">{beats.length} entries</span></h2><ol className="beats">
           {beats.map((b, i) => {
             const last = i === beats.length - 1;

@@ -79,7 +79,7 @@ function Band({ TLS, EXS }) {
           <div className="tl tl-plain" key={t.id}><div><div className="meta"><span>{t.updated}</span><span>{t.points.length} events</span></div><h3><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><p>{t.dek || ""}</p></div></div>
         ) : (
           <div className="tl tl-top" key={t.id}><Ph r="3/2" src={t.image} /><h3 style={{ marginTop: 12 }}><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><div className="meta"><span>{t.updated}</span></div>
-            {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} /> : null}
+            {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} src={t.audio.src} /> : null}
             <ol>{t.points.map((p, j) => <li key={j}><b>{p.date}</b><span>{p.text}</span></li>)}</ol></div>
         ))}
       </div>

@@ -35,7 +35,7 @@ export default function Explainer() {
         <p className="meta crumb"><Link to="/">&larr; Top stories</Link><span className="cat" style={{ color: "var(--hue-context)" }}>Explainer</span><Link className="cat" to={"/?c=" + encodeURIComponent(x.category)}>{x.category}</Link><span>{x.updated || "Updated 4h ago"}</span><AiBadge /></p>
         <h1>{x.title}</h1>
         <div className="sty-media"><Ph className="mv" r="16/9" src={x.image} role="button" tabIndex={0} aria-label="Open media fullscreen" /></div>
-        <div style={{ marginTop: 14 }}>{x.audio || !("audio" in x) ? <AudioPlayer id={x.id} kind="explainer" title={x.title} url={"/explainer/" + x.id} label="Listen to this explainer" duration={(x.audio && x.audio.duration) || 150 + (x.id % 7) * 20} /> : null}</div>
+        <div style={{ marginTop: 14 }}>{x.audio || !("audio" in x) ? <AudioPlayer id={x.id} kind="explainer" title={x.title} url={"/explainer/" + x.id} src={x.audio && x.audio.src} label="Listen to this explainer" duration={(x.audio && x.audio.duration) || 150 + (x.id % 7) * 20} /> : null}</div>
         <div className="quick"><b>QUICK ANSWER</b><p>{x.quick || x.dek}</p></div>
         {(x.sections || []).map((sec, i) => (
           <section key={i} className="ex-sec"><h2>{sec.heading}</h2>{sec.body.map((p, j) => <p key={j}>{p}</p>)}</section>

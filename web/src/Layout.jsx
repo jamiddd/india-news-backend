@@ -10,6 +10,7 @@ import Announcements from "./components/shell/Announcements.jsx";
 import Cookie from "./components/shell/Cookie.jsx";
 import Notify from "./components/shell/Notify.jsx";
 import { AppBar, TabBar } from "./components/shell/AppChrome.jsx";
+import OinMark from "./components/OinMark.jsx";
 import { MediaFullscreen } from "./components/shell/MediaViewer.jsx";
 import GlobalActions from "./components/shell/GlobalActions.jsx";
 
@@ -65,7 +66,7 @@ function Shell() {
       <Announcements items={ann.data} />
       <header className="masthead"><div className="wrap">
         <Link className="brand" to="/">
-          <span className="ph round mark" aria-hidden="true" style={{ width: 32, height: 32, padding: 0 }}></span>
+          <OinMark size={30} />
           <span className="brand-text">
             <span className="wordmark">{brand.name}<span className="stop">.</span></span>
             <span className="brand-sub">{brand.tagline}</span>

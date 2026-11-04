@@ -219,6 +219,10 @@
   font-family:var(--mono); font-size:12px; text-align:center; padding:8px; border:1px solid #C4C4CB}
 :root[data-theme="dark"] .ph{background:#2A2A31; color:#9A9AA3; border-color:#3A3A43}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .ph{background:#2A2A31; color:#9A9AA3; border-color:#3A3A43} }
+:root{--oin-body:#111111; --oin-i:#1976D2}
+:root[data-theme="dark"]{--oin-body:#FFFFFF; --oin-i:#64B5F6}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){--oin-body:#FFFFFF; --oin-i:#64B5F6} }
+.oin-mark{display:block; flex:0 0 auto}
 .fv{overflow:hidden}
 .fv img{width:100%; height:100%; object-fit:cover; display:block; background:#fff; border-radius:50%}
 .ph.round{border-radius:50%}
@@ -300,7 +304,7 @@
 .latest a{display:block; padding:12px 0; border-bottom:1px solid var(--line); color:var(--ink); font-weight:700; font-size:15px; line-height:1.3}
 .latest a:hover{text-decoration:none; color:var(--accent)}
 .latest small{display:block; font-family:var(--mono); font-weight:400; font-size:11px; color:var(--ink-3); margin-bottom:3px}
-.hero-s h1{font-size:clamp(34px,4.2vw,60px); font-weight:900; letter-spacing:-0.045em; line-height:.98; margin:12px 0 12px}
+.hero-s h1{font-size:clamp(29px,3.57vw,51px); font-weight:900; letter-spacing:-0.045em; line-height:.98; margin:12px 0 12px}
 .hero-s h1 a{color:var(--ink)}
 .hero-s .bullets{font-size:16px; margin:14px 0 0}
 .mini{display:grid; grid-template-columns:150px 1fr; gap:10px; margin-top:16px; border-top:1px solid var(--line)}
@@ -406,7 +410,7 @@ header.masthead .btn-primary:hover{background:var(--signal); color:var(--on-sign
    rounded translucent field + Cancel, pill tabs with count badges, light-on-dark
    regardless of theme */
 .spot{position:fixed; inset:0; z-index:100; color:#fff; overflow-y:auto}
-.spot::before{content:""; position:fixed; inset:0; z-index:-1; background:rgba(0,0,0,.8); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); animation:spot-bg .3s ease both}
+.spot::before{content:""; position:fixed; inset:0; z-index:-1; background:rgba(0,0,0,.8); backdrop-filter:blur(14px); animation:spot-bg .3s ease both}
 .spot[hidden]{display:none}
 .spot-col{width:min(760px,100%); margin:0 auto; padding:16px 16px 48px}
 .spot-top,.spot-tabs,.spot-res{animation:spot-in .3s cubic-bezier(.4,0,.2,1) both}
@@ -655,7 +659,7 @@ header.masthead{--accent:#1976D2}
 .user-btn:hover{border-color:#fff}
 .user-btn.on{background:#fff; color:#0A0A0A; border-color:#fff}
 .masthead .wrap .theme-btn{border-radius:50%}
-.auth{position:fixed; inset:0; z-index:120; display:flex; align-items:flex-start; justify-content:center; padding:8vh 16px 24px; overflow-y:auto; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px)}
+.auth{position:fixed; inset:0; z-index:120; display:flex; align-items:flex-start; justify-content:center; padding:8vh 16px 24px; overflow-y:auto; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); }
 .auth-card{position:relative; width:min(440px,100%); background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:20px; padding:32px 28px 24px; box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
 .auth-x,.auth-back{position:absolute; top:12px; width:36px; height:36px; border:0; border-radius:50%; background:none; color:var(--ink-2); font-size:22px; line-height:1; cursor:pointer}
 .auth-x{right:12px} .auth-back{left:12px}
@@ -739,11 +743,11 @@ header.masthead{--accent:#1976D2}
 .car-track::-webkit-scrollbar{display:none}
 .car-slide{flex:0 0 100%; scroll-snap-align:start; scroll-snap-stop:always; border-radius:0 !important; position:relative}
 .car-play{position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:56px; height:56px; border-radius:50%; background:rgba(10,10,10,.55); color:#fff; display:grid; place-items:center; padding-left:3px; margin-top:-14px}
-.car-btn{position:absolute; top:50%; transform:translateY(-50%); z-index:2; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:rgba(10,10,10,.55); color:#fff; cursor:pointer; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); transition:opacity .2s, background .2s}
+.car-btn{position:absolute; top:50%; transform:translateY(-50%); z-index:2; width:40px; height:40px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:rgba(10,10,10,.55); color:#fff; cursor:pointer; backdrop-filter:blur(6px); transition:opacity .2s, background .2s}
 .car-btn:hover{background:rgba(10,10,10,.8)}
 .car-btn.prev{left:10px} .car-btn.next{right:10px}
 .car-btn[disabled]{opacity:0; pointer-events:none}
-.car-dots{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:2; display:flex; gap:2px; padding:3px 6px; border-radius:999px; background:rgba(10,10,10,.5); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px)}
+.car-dots{position:absolute; left:50%; bottom:12px; transform:translateX(-50%); z-index:2; display:flex; gap:2px; padding:3px 6px; border-radius:999px; background:rgba(10,10,10,.5); backdrop-filter:blur(6px); }
 .car-dot{width:16px; height:16px; padding:0; border:0; background:none; cursor:pointer; position:relative}
 .car-dot::before{content:""; position:absolute; left:50%; top:50%; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.55); transform:translate(-50%,-50%); transition:width .2s, background .2s, border-radius .2s}
 .car-dot.on::before{width:18px; border-radius:4px; background:#fff}
@@ -973,7 +977,7 @@ a.cat:hover{text-decoration:underline}
 .tl h3 a:hover,.ex h3 a:hover{text-decoration:underline}
 
 /* first-visit notification explainer */
-.np{position:fixed; inset:0; z-index:130; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px)}
+.np{position:fixed; inset:0; z-index:130; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); }
 .np-card{width:min(420px,100%); background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:20px; padding:30px 26px 22px; box-shadow:0 30px 80px -20px rgba(0,0,0,.6); text-align:center}
 .np-ic{width:64px; height:64px; margin:0 auto 14px; border-radius:20px; background:var(--surface); display:grid; place-items:center}
 .np-card h2{font-size:24px; font-weight:900; letter-spacing:-0.03em; line-height:1.15; margin:0 0 8px}
@@ -999,7 +1003,7 @@ a.cat:hover{text-decoration:underline}
 .ck-b .ab{min-height:40px; padding:0 18px; font-size:14px}
 .ck-b .auth-link{margin-left:4px}
 @media (max-width:560px){ .ck{left:0; right:0; bottom:0; width:100%; border-radius:18px 18px 0 0} }
-.ckp{position:fixed; inset:0; z-index:126; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); overflow-y:auto}
+.ckp{position:fixed; inset:0; z-index:126; display:flex; align-items:center; justify-content:center; padding:20px; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); overflow-y:auto}
 .ckp-card{position:relative; width:min(480px,100%); background:var(--bg); color:var(--ink); border:1px solid var(--line); border-radius:20px; padding:28px 26px 22px; box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
 .ckp-card h2{font-size:22px; font-weight:900; letter-spacing:-0.03em; margin:0 0 6px}
 .ckp-sub{margin:0 0 14px; font-size:14px; color:var(--ink-2)}
@@ -1048,7 +1052,7 @@ html.has-mplay .toast{bottom:calc(28px + var(--mplay-h,0px))}
 @media (max-width:560px){ html.has-mplay .ck{bottom:var(--mplay-h,0px)} }
 
 /* mini player as a floating pill, bottom centre */
-.mplay{left:50%; right:auto; bottom:20px; transform:translateX(-50%); width:min(780px,calc(100vw - 32px)); height:72px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:rgba(21,24,29,.92); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); box-shadow:0 22px 60px -14px rgba(0,0,0,.75); overflow:hidden; animation:mplay-in .3s cubic-bezier(.2,.8,.2,1) both}
+.mplay{left:50%; right:auto; bottom:20px; transform:translateX(-50%); width:min(780px,calc(100vw - 32px)); height:72px; border:1px solid rgba(255,255,255,.14); border-radius:999px; background:rgba(21,24,29,.92); backdrop-filter:blur(16px); box-shadow:0 22px 60px -14px rgba(0,0,0,.75); overflow:hidden; animation:mplay-in .3s cubic-bezier(.2,.8,.2,1) both}
 @keyframes mplay-in{ from{opacity:0; transform:translate(-50%,24px)} to{opacity:1; transform:translateX(-50%)} }
 @media (prefers-reduced-motion:reduce){ .mplay{animation:none} }
 .mplay-in{max-width:none; margin:0; padding:0 14px 0 12px; gap:14px}
@@ -1068,7 +1072,7 @@ body{min-height:100vh; display:flex; flex-direction:column}
 body > main{flex:1 0 auto; width:100%}
 body > footer{margin-top:auto}
 /* mini player: frosted glass. More see-through than before, with a strong blur of whatever is behind it */
-.mplay{background:rgba(21,24,29,.5); backdrop-filter:blur(24px) saturate(1.6); -webkit-backdrop-filter:blur(24px) saturate(1.6); border-color:rgba(255,255,255,.2)}
+.mplay{background:rgba(21,24,29,.5); backdrop-filter:blur(24px) saturate(1.6); border-color:rgba(255,255,255,.2)}
 
 /* About page */
 .abt{padding-bottom:40px}
@@ -1171,7 +1175,7 @@ html.has-mplay footer{padding-bottom:calc(44px + var(--nav-h) + var(--mplay-h,0p
   .ab-i:active{background:var(--surface)}
 
   /* bottom tab pill: frosted, floating, five icon tabs */
-  .tabbar{display:flex; position:fixed; left:50%; bottom:12px; transform:translateX(-50%); z-index:95; width:min(380px,calc(100vw - 32px)); height:56px; padding:4px; gap:2px; border-radius:28px; border:1px solid var(--line); background:color-mix(in srgb,var(--bg) 60%,transparent); backdrop-filter:blur(22px) saturate(1.6); -webkit-backdrop-filter:blur(22px) saturate(1.6); box-shadow:0 14px 40px -12px rgba(0,0,0,.6); transition:transform .28s cubic-bezier(.3,.8,.3,1)}
+  .tabbar{display:flex; position:fixed; left:50%; bottom:12px; transform:translateX(-50%); z-index:95; width:min(380px,calc(100vw - 32px)); height:56px; padding:4px; gap:2px; border-radius:28px; border:1px solid var(--line); background:color-mix(in srgb,var(--bg) 60%,transparent); backdrop-filter:blur(22px) saturate(1.6); box-shadow:0 14px 40px -12px rgba(0,0,0,.6); transition:transform .28s cubic-bezier(.3,.8,.3,1)}
   .tb{flex:1 1 0; height:46px; border:0; border-radius:23px; background:none; color:var(--ink-2); display:grid; place-items:center; padding:0; cursor:pointer; transition:background .2s, color .2s}
   .tb:hover{text-decoration:none}
   .tb.on{color:var(--ink); background:color-mix(in srgb,var(--ink) 14%,transparent)}
@@ -1187,7 +1191,7 @@ html.has-mplay footer{padding-bottom:calc(44px + var(--nav-h) + var(--mplay-h,0p
   .sty{width:100%}
   .catbar .search-btn{display:none}
   .chip{font-size:14px}
-  .hero-s h1{font-size:30px; letter-spacing:-0.04em}
+  .hero-s h1{font-size:25.5px; letter-spacing:-0.04em}
   .feed-h h1{font-size:34px}
   .abt-hero h1{font-size:34px}
 }
@@ -1289,7 +1293,7 @@ header.masthead .ph{background:#2A2A31; border-color:#3A3A43; color:#9A9AA3}
   .tabbar{flex-direction:column; height:auto; min-height:56px; padding:4px; gap:0}
   .tb-row{display:flex; gap:2px; height:48px; flex:0 0 auto}
   .tabbar:has(.mplay){border-radius:24px}
-  .tabbar .mplay{position:static; transform:none; left:auto; right:auto; bottom:auto; width:auto; height:48px; flex:0 0 auto; border:0; border-bottom:1px solid var(--line); border-radius:0; background:none; box-shadow:none; backdrop-filter:none; -webkit-backdrop-filter:none; overflow:visible; color:var(--ink); animation:mp-open .3s ease both; margin:0 4px 2px}
+  .tabbar .mplay{position:static; transform:none; left:auto; right:auto; bottom:auto; width:auto; height:48px; flex:0 0 auto; border:0; border-bottom:1px solid var(--line); border-radius:0; background:none; box-shadow:none; backdrop-filter:none; overflow:visible; color:var(--ink); animation:mp-open .3s ease both; margin:0 4px 2px}
   @keyframes mp-open{ from{opacity:0} to{opacity:1} }
   .tabbar .mplay-in{padding:0 2px 0 0; gap:9px}
   .tabbar .mplay-pp{background:var(--ink); color:var(--bg); width:32px; height:32px}
