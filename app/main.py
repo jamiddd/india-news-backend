@@ -98,7 +98,9 @@ from uuid import uuid4
 from curl_cffi.requests import AsyncSession as CurlAsyncSession
 from app.services.poller import poll_all_sources
 from app.services.extractor import _resolve_brightcove_policy_key, _resolve_brightcove_video
-from app.services.topic_filters import CONTENT_GATED_CATEGORIES, keyword_regex
+from app.services.topic_filters import (
+    CENTRAL_CATEGORIES, CONTENT_GATED_CATEGORIES, keyword_regex, repeated_keyword_regex,
+)
 from app.services.dedup import video_matches_cluster
 from app.services.watch_feed import has_watchable_video, has_shorts_video, encode_cursor as encode_watch_cursor, decode_cursor as decode_watch_cursor
 from app.services.enrichment import enrich_cluster_with_ai
@@ -2129,10 +2131,14 @@ async def list_story_clusters(
             gate_keywords = CONTENT_GATED_CATEGORIES.get(cat)
             if gate_keywords:
                 pattern = keyword_regex(gate_keywords)
+                # Region tabs need the region to be central, not just named:
+                # in the title, or repeated in the snippet. A regional outlet's
+                # wire story that mentions the region once stays out.
+                snippet_pattern = repeated_keyword_regex(gate_keywords) if cat in CENTRAL_CATEGORIES else pattern
                 subquery = subquery.where(
                     or_(
                         Article.title.op("~*")(pattern),
-                        Article.snippet.op("~*")(pattern),
+                        Article.snippet.op("~*")(snippet_pattern),
                     )
                 )
             query = query.where(StoryCluster.id.in_(subquery))

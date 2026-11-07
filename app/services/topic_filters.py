@@ -24,7 +24,7 @@ Two different bugs prompted this:
    the "Arunachal" keyword the way a plain substring check would.
 """
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 CRYPTO_KEYWORDS = [
     "crypto", "cryptocurrency", "cryptocurrencies", "bitcoin", "btc", "ethereum",
@@ -112,8 +112,56 @@ CONTENT_GATED_CATEGORIES: Dict[str, List[str]] = {
 }
 
 
+# Tabs where membership means "this story is ABOUT the region", not merely
+# "a regional outlet ran it" or "the region is named somewhere in it".
+CENTRAL_CATEGORIES = {"northeast", "regional_south", "regional_west", "regional_east"}
+
+_REGION_ALIASES: Dict[str, List[str]] = {
+    "northeast": NORTHEAST_KEYWORDS,
+    "north east": NORTHEAST_KEYWORDS,
+    "northeast india": NORTHEAST_KEYWORDS,
+    "north east india": NORTHEAST_KEYWORDS,
+    "ne india": NORTHEAST_KEYWORDS,
+    "south india": REGIONAL_SOUTH_KEYWORDS,
+    "southern india": REGIONAL_SOUTH_KEYWORDS,
+    "west india": REGIONAL_WEST_KEYWORDS,
+    "western india": REGIONAL_WEST_KEYWORDS,
+    "east india": REGIONAL_EAST_KEYWORDS,
+    "eastern india": REGIONAL_EAST_KEYWORDS,
+}
+
+_KNOWN_PLACES = {
+    _k.replace("-", " ")
+    for _kws in (NORTHEAST_KEYWORDS, REGIONAL_SOUTH_KEYWORDS, REGIONAL_WEST_KEYWORDS, REGIONAL_EAST_KEYWORDS)
+    for _k in _kws
+}
+
+
+def location_keywords_for_query(q: str) -> Optional[List[str]]:
+    """If a free-text topic/search query names a place we know ("Guwahati") or
+    a whole region ("North east"), the keywords that count as that place being
+    mentioned; otherwise None (the query isn't treated as a location, so its
+    matching is left untouched). A region alias expands to every state/city in
+    that region, so "North east" finds an Imphal story that never says "north
+    east"."""
+    norm = " ".join(q.lower().replace("-", " ").split())
+    if norm in _REGION_ALIASES:
+        return _REGION_ALIASES[norm]
+    if norm in _KNOWN_PLACES:
+        return [norm]
+    return None
+
+
 def keyword_regex(keywords: List[str]) -> str:
     """Build a Postgres ~* pattern matching any keyword on whole-word/phrase
     boundaries (\\y), so e.g. "Arunachaleswar" never matches "Arunachal"."""
     escaped = [re.escape(k) for k in keywords]
     return r"\y(" + "|".join(escaped) + r")\y"
+
+
+def repeated_keyword_regex(keywords: List[str]) -> str:
+    """Pattern for two or more keyword mentions in one text. A single passing
+    mention ("... Assam CM also welcomed the move") is not a story about the
+    region; a repeated one in a short snippet or summary is."""
+    p = keyword_regex(keywords)
+    return p + ".*" + p

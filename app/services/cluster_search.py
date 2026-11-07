@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Article, StoryCluster
+from app.services.topic_filters import keyword_regex, location_keywords_for_query, repeated_keyword_regex
 
 
 async def search_clusters(
@@ -34,10 +35,23 @@ async def search_clusters(
     `source_id` filter (main.py) — powering SourceFeedScreen's search icon
     (search within this outlet only)."""
     pattern = f"%{q}%"
+    place_keywords = location_keywords_for_query(q)
+    if place_keywords:
+        # A place or region ("Guwahati", "North east"): only stories where it
+        # is central -- in the headline or an article title, or repeated in
+        # the summary -- not ones that name it once in passing.
+        kw = keyword_regex(place_keywords)
+        match = or_(
+            StoryCluster.headline.op("~*")(kw),
+            StoryCluster.id.in_(select(Article.cluster_id).where(Article.title.op("~*")(kw))),
+            StoryCluster.summary.op("~*")(repeated_keyword_regex(place_keywords)),
+        )
+    else:
+        match = or_(StoryCluster.headline.ilike(pattern), StoryCluster.summary.ilike(pattern))
     query = (
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
-        .where(or_(StoryCluster.headline.ilike(pattern), StoryCluster.summary.ilike(pattern)))
+        .where(match)
         .order_by(desc(StoryCluster.last_updated_at), desc(StoryCluster.id))
     )
     if apply_gate is not None:
