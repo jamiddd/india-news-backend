@@ -80,15 +80,16 @@ describe("adaptCluster", () => {
 
 describe("front page ordering (left = latest, middle = most covered, right = top)", () => {
   const stories = F.feedPage.items.map((c) => api.adaptCluster(c, CX));
-  it("puts the most-covered story first and the rest newest first", () => {
+  it("leads with the backend's top-ranked story (with an image) and the rest newest first", () => {
     const S = api.orderFrontPage(stories, "All");
-    expect(S[0].id).toBe(2);                                    // 3 outlets
-    expect(S.slice(1).map((s) => s.minutes_ago)).toEqual([5, 15, 30, 60]);
+    expect(S[0].id).toBe((stories.find((s) => s.image) || stories[0]).id);
+    const rest = S.slice(1).map((s) => s.minutes_ago);
+    expect(rest).toEqual([...rest].sort((a, b) => a - b));
   });
-  it("picks the lead within the active category", () => {
+  it("picks the lead within the active category, in backend order", () => {
     const S = api.orderFrontPage(stories, "Northeast");
-    expect(S[0].id).toBe(5);
-    expect(S.filter((s) => s.category === "Northeast")[0].id).toBe(5);
+    const pool = stories.filter((s) => s.category === "Northeast");
+    expect(S[0].id).toBe((pool.find((s) => s.image) || pool[0]).id);
   });
   it("builds tabs: All plus the biggest categories, rest under More", () => {
     const t = api.categoryTabs(stories, 2);

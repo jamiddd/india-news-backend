@@ -218,13 +218,15 @@ export function mostCovered(stories) {
   return best;
 }
 
-// Front-page order (project memory: left = latest, middle = ONE most-covered
-// story, right = top / most covered). The page puts S[0] in the middle and
-// S[1..] in the Latest column, and sorts its own "Most covered" list, so: the
-// most-covered story (within the active category) first, the rest newest first.
+// Front-page order (left = latest, middle = ONE lead story, right = most covered).
+// The page puts S[0] in the middle and S[1..] in the Latest column, and sorts its
+// own "Most covered" list. The lead follows the backend's own ranking
+// (headline_score: outlet corroboration decayed by recency), same as the app's hero:
+// `stories` arrives in backend order, so the lead is the first story in the active
+// category that has an image (falling back to the first at all), the rest newest first.
 export function orderFrontPage(stories, category) {
   const pool = !category || category === "All" || category === "For you" ? stories : stories.filter((s) => s.category === category);
-  const lead = mostCovered(pool);
+  const lead = pool.find((s) => s.image) || pool[0] || null;
   const rest = stories.filter((s) => s !== lead).sort((a, b) => a.minutes_ago - b.minutes_ago);
   return lead ? [lead].concat(rest) : rest;
 }
