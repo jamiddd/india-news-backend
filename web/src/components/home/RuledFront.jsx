@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Ph } from "../Photo.jsx";
-import { Tip, ago, slug } from "./shared.jsx";
+import { ago, slug } from "./shared.jsx";
 import { useData } from "../Status.jsx";
 import { loadWatch } from "../../api.js";
-import { planFront } from "./frontPlan.js";
+import { SHAPES, chunkBlocks, planFront } from "./frontPlan.js";
 
 // Desktop front page: a ruled grid (1px borders between cells) with a Latest rail, after
 // Bloomberg's home page. Stories are dealt out of the feed in order; each one is used once.
@@ -38,7 +38,6 @@ function Cell({ s, side, r, big, top, rel, vid }) {
       <h2 className={"rf-hd" + (big ? " big" : "")}><Link to={href(s)}>{s.headline}</Link></h2>
       {s.dek ? <p className="rf-dek">{s.dek}</p> : null}
       <Related list={rel || []} />
-      <Tip id={s.id} />
     </article>
   );
 }
@@ -48,12 +47,11 @@ function Package({ p }) {
   const s = p.head;
   return (
     <section className="rf-pkg">
-      <div className="rf-top"><Link to={"/?c=" + encodeURIComponent(p.name)} className="rf-topic">{p.name}</Link>{p.links.slice(0, 3).map((l) => <Link key={l.id} to={href(l)} className="rf-tlink">{l.headline}</Link>)}</div>
+      <div className="rf-top"><Link to={"/?c=" + encodeURIComponent(p.name)} className="rf-topic">{p.name}</Link></div>
       <div className="rf-pg hv">
         <Link to={href(s)} className="rf-img" tabIndex={-1} aria-hidden="true"><Ph r="4/3" src={s.image} msg={false} /></Link>
         <div><Kick s={s} /><h2 className="rf-hd"><Link to={href(s)}>{s.headline}</Link></h2></div>
         <div className="rf-side">{p.links.slice(0, 2).map((l, i) => <Link key={l.id} to={href(l)} className={i ? "lab" : ""}>{l.headline}</Link>)}</div>
-        <Tip id={s.id} />
       </div>
     </section>
   );
@@ -169,7 +167,6 @@ function BandCards({ L, name, to }) {
         <div><Kick s={h} /><h2 className="rf-hd"><Link to={href(h)}>{h.headline}</Link></h2>{h.dek ? <p className="rf-dek">{h.dek}</p> : null}</div>
         <div className="rf-side">{[l1, l2].filter(Boolean).map((l, i) => <Link key={l.id} to={href(l)} className={i ? "lab" : ""}>{l.headline}</Link>)}</div>
         <div className="rf-cards">{[c1, c2].filter(Boolean).map((c) => <MiniCard key={c.id} s={c} />)}</div>
-        <Tip id={h.id} />
       </div>
     </div>
   );
@@ -185,7 +182,6 @@ function Feature({ L, name }) {
         <div className="rf-bw1 hv">
           <Pic s={h} r="3/2" />
           <div><Kick s={h} /><h2 className="rf-hd"><Link to={href(h)}>{h.headline}</Link></h2>{h.dek ? <p className="rf-dek">{h.dek}</p> : null}</div>
-          <Tip id={h.id} />
         </div>
         <div className="rf-more"><span>More in {name}:</span><ul>{box.map((s) => <li key={s.id}><Link to={href(s)}>{s.headline}</Link></li>)}</ul></div>
       </div>
@@ -211,7 +207,6 @@ function BigTake({ L }) {
       <div className="rf-blk rf-bt hv">
         <Pic s={h} r="3/2" />
         <div><Kick s={h} /><h2 className="rf-hd big"><Link to={href(h)}>{h.headline}</Link></h2>{h.dek ? <p className="rf-dek">{h.dek}</p> : null}{c ? <div style={{ marginTop: 20 }}><MiniCard s={c} /></div> : null}</div>
-        <Tip id={h.id} />
       </div>
       {r.length ? <FourUp L={r.slice(0, 4)} /> : null}
     </>
@@ -223,7 +218,7 @@ const COLS = { 3: ["5fr 4fr 4fr", "4fr 5fr 4fr"], 2: ["7fr 5fr", "5fr 7fr"], 1: 
 function ThreeCol({ L, title, rev, more }) {
   const cells = L.slice(0, 3), h = L[3];
   const n = cells.length, wide = rev ? 0 : n === 3 ? 1 : n - 1;   // which column is the wide one
-  const pkg = h ? { name: more || "More in " + title, head: h, links: L.slice(4, 7) } : null;
+  const pkg = h ? { name: more || "More in " + (title || h.category), head: h, links: L.slice(4, 7) } : null;
   return (
     <div className={"rf-L multi" + (pkg ? "" : " nopkg")} style={{ gridTemplateColumns: COLS[n][rev ? 0 : 1].split(" ").map((x) => "minmax(0," + x + ")").join(" ") }}>
       {cells.map((x, i) => <Cell key={x.id} s={x} side={i < n - 1 ? "a" : "b"} r={i === wide ? "16/10" : "3/2"} big={i === wide} />)}
@@ -239,8 +234,7 @@ function subs(L) {
   return Object.keys(n).sort((a, b) => n[b] - n[a]).slice(0, 3);
 }
 
-const SHAPES = [["three", 1], ["four", 4], ["band", 5], ["feature", 5], ["bigtake", 3]];
-export function RuledSection({ title, to, L, at = 0, rev, more }) {
+export function RuledSection({ title, to, L, at = 0, rev, more, bare }) {
   if (!L.length) return null;
   let shape = SHAPES[at % SHAPES.length];
   if (L.length < shape[1]) shape = SHAPES[0];
@@ -248,7 +242,7 @@ export function RuledSection({ title, to, L, at = 0, rev, more }) {
   return (
     <section className="rf-sec">
       <div className="rf solo">
-        <div className="rf-head"><b>{title}</b>{subs(L).map((t) => <Link key={t} to={"/topic/" + slug(t)}>{t}</Link>)}{to ? <Link to={to} className="all">See all &rsaquo;</Link> : null}</div>
+        {bare ? null : <div className="rf-head"><b>{title}</b>{subs(L).map((t) => <Link key={t} to={"/topic/" + slug(t)}>{t}</Link>)}{to ? <Link to={to} className="all">See all &rsaquo;</Link> : null}</div>}
         {k === "three" ? <ThreeCol L={L} title={title} rev={rev !== undefined ? rev : at % 2 === 1} more={more} />
           : k === "four" ? <FourUp L={L.slice(0, 4)} />
           : k === "band" ? <BandCards L={L} name={"More in " + title} to={link} />
@@ -285,5 +279,27 @@ export function WatchStrip() {
         </div>
       </div>
     </section>
+  );
+}
+
+// A category's own page: the same blocks as the bottomless feed, three at a time, more as you near the bottom.
+export function RuledFeed({ S }) {
+  const blocks = chunkBlocks(S), [shown, setShown] = useState(3);
+  useEffect(() => {
+    const check = () => { if (shown < blocks.length && document.documentElement.scrollHeight - scrollY - innerHeight < 900) return setTimeout(() => setShown((n) => Math.min(blocks.length, n + 2)), 250); };
+    let t = check();
+    const on = () => { clearTimeout(t); t = check(); };
+    addEventListener("scroll", on, { passive: true }); addEventListener("resize", on);
+    return () => { clearTimeout(t); removeEventListener("scroll", on); removeEventListener("resize", on); };
+  }, [shown, blocks.length]);
+  const toTop = () => scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  return (
+    <>
+      {blocks.slice(0, shown).map((b) => <RuledSection key={b.L[0].id} title="" L={b.L} at={b.at} bare />)}
+      <div className="endless" aria-live="polite">
+        {shown < blocks.length ? <div className="endless-load"><i className="spin"></i><span>Loading more{"…"}</span></div>
+          : <div className="endless-end"><b>You{"’"}re all caught up</b><span>That was the whole feed, {S.length} stories.</span><button type="button" className="more-btn" onClick={toTop}>Back to top</button></div>}
+      </div>
+    </>
   );
 }

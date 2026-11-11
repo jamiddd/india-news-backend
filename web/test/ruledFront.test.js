@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planFront } from "../src/components/home/frontPlan.js";
+import { chunkBlocks, planFront } from "../src/components/home/frontPlan.js";
 
 const st = (id, category, extra = {}) => ({ id, category, headline: "H" + id, image: "i" + id, outlet_count: 1, minutes_ago: id, ...extra });
 
@@ -41,4 +41,18 @@ describe("planFront", () => {
     expect(p.lead.id).toBe(1);
     expect(p.p1).toBeNull();
   });
+});
+
+describe("chunkBlocks", () => {
+  const list = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1 }));
+  it("keeps every story exactly once, in order", () => {
+    for (const n of [1, 2, 3, 5, 12, 31, 55]) {
+      const ids = chunkBlocks(list(n)).flatMap((b) => b.L.map((x) => x.id));
+      expect(ids).toEqual(list(n).map((x) => x.id));
+    }
+  });
+  it("cycles block positions from the start index", () => {
+    expect(chunkBlocks(list(40), 2).map((b) => b.at).slice(0, 3)).toEqual([2, 3, 4]);
+  });
+  it("is empty for no stories", () => { expect(chunkBlocks([])).toEqual([]); });
 });

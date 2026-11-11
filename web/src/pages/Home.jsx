@@ -5,7 +5,7 @@ import { Ph, PopHost, SRow, Src, Tip, getFollows, openLogin, signedIn, slug } fr
 import { useData, statusView } from "../components/Status.jsx";
 import { loadHome as fetchHome } from "../api.js";
 import Search from "../components/home/Search.jsx";
-import RuledFront, { RuledSection, WatchStrip } from "../components/home/RuledFront.jsx";
+import RuledFront, { RuledFeed, RuledSection, WatchStrip } from "../components/home/RuledFront.jsx";
 
 // Data access for this page (src/api.js). Mapping for the real feed: left column = latest,
 // middle = the one most-covered story, right = top / most covered; loadHome orders the
@@ -168,29 +168,22 @@ export default function Home() {
 
   const head = c === "All" ? null : (
     <>
-      <div className="feed-h"><h1>{c}</h1><p>{S.length} stories &middot; updated {ago(S[0].minutes_ago)} ago</p></div>
+      <div className="feed-h"><h1>{c}</h1></div>
       {forYouNote ? <p className="feed-note">{forYouNote}</p> : null}
     </>
   );
   if (phone) return wrap(<>{head}<PhoneFeed S={S} /></>);
 
-  // Only the top timeline is shown in full; the rest are headline-only.
-  const TLS = (c === "All" ? d.timelines : d.timelines.filter((t) => t.category === c)).slice(0, 3);
-  const EXS = (c === "All" ? d.explainers : d.explainers.filter((x) => x.category === c)).slice(0, 6);
-  let sections;
-  if (c === "All") {
-    sections = d.categories.slice(1).flatMap((k, i) => (i === 1 ? [<CatSection key={k} k={k} ALL={ALL} at={i} />, <WatchStrip key="watch" />] : [<CatSection key={k} k={k} ALL={ALL} at={i} />]));
-  } else {
-    // A category feed: whatever the front page above did not use.
-    const wide = S.slice(13).slice(0, 8);
-    sections = <RuledSection title={c === "For you" ? "More for you" : "More in " + c} more="Keep reading" L={wide} at={0} />;
-  }
+  // A category page is just the bottomless feed's blocks for that category: no front-page grid, no rail.
+  if (c !== "All") return wrap(<>{head}<RuledFeed S={S} /></>);
+  const TLS = d.timelines.slice(0, 3);
+  const EXS = d.explainers.slice(0, 6);
+  const sections = d.categories.slice(1).flatMap((k, i) => (i === 1 ? [<CatSection key={k} k={k} ALL={ALL} at={i} />, <WatchStrip key="watch" />] : [<CatSection key={k} k={k} ALL={ALL} at={i} />]));
   return wrap(
     <>
-      {head}
       <RuledFront S={S} TLS={TLS} EXS={EXS} forYou="/?c=For%20you" />
       {sections}
-      {c === "All" ? <EndlessAll d={d} ALL={ALL} /> : null}
+      <EndlessAll d={d} ALL={ALL} />
     </>
   );
 }

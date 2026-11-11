@@ -29,3 +29,21 @@ export function planFront(S) {
   const rel = (s, n) => (s ? [take((x) => x.category === s.category), take((x) => x.category === s.category)].filter(Boolean).slice(0, n) : []);
   return { lead, a, video, vfill, b, p1, p2, row5, topCovered, relLead: rel(lead, 2), relA: rel(a, 1), relB: rel(b, 1) };
 }
+
+// Block shapes for the bottomless feed: [name, fewest stories it needs, most it shows].
+export const SHAPES = [["three", 1, 7], ["four", 4, 4], ["band", 5, 5], ["feature", 5, 7], ["bigtake", 3, 6]];
+
+// Cut a list of stories into consecutive blocks, cycling the shapes. A block that would be left
+// short of its shape's minimum falls back to the three-column shape, so no story is dropped.
+export function chunkBlocks(S, start = 0) {
+  const out = [];
+  let i = 0, at = start;
+  while (i < S.length) {
+    let shape = SHAPES[at % SHAPES.length];
+    if (S.length - i < shape[1]) shape = SHAPES[0];
+    out.push({ at, L: S.slice(i, i + shape[2]) });
+    i += shape[2];
+    at += 1;
+  }
+  return out;
+}
