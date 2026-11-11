@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
-import { Fav } from "../components/Photo.jsx";
-import { AudioPlayer, Carousel, Ph, PopHost, SRow, Src, Tip, getFollows, openLogin, signedIn, slug } from "../components/home/shared.jsx";
+import { Ph, PopHost, SRow, Src, Tip, getFollows, openLogin, signedIn, slug } from "../components/home/shared.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadHome as fetchHome } from "../api.js";
 import Search from "../components/home/Search.jsx";
+import RuledFront, { RuledSection, WatchStrip } from "../components/home/RuledFront.jsx";
 
 // Data access for this page (src/api.js). Mapping for the real feed: left column = latest,
 // middle = the one most-covered story, right = top / most covered; loadHome orders the
@@ -15,103 +15,11 @@ export const loadHome = (category) => fetchHome({ category });
 function ago(m) { return m < 60 ? m + "m" : Math.round(m / 60) + "h"; }
 function Meta({ s }) { return <div className="meta"><span className="cat">{s.category}</span><span>{ago(s.minutes_ago)} ago</span></div>; }
 function SLink({ s }) { return <Link to={"/story/" + s.id}>{s.headline}</Link>; }
-// Top timeline on Home: first few dates only, the rest behind "See more".
-const TL_SHOWN = 4;
-
-// Explainer excerpt clamped to a few lines; "See more" only appears when text is actually cut.
-function ExBody({ text, to }) {
-  const ref = useRef(null), [cut, setCut] = useState(false);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return undefined;
-    const measure = () => setCut(el.scrollHeight > el.clientHeight + 1);
-    measure();
-    addEventListener("resize", measure);
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
-    return () => removeEventListener("resize", measure);
-  }, [text]);
-  return <><p className="ex-body ex-clamp" ref={ref}>{text}</p>{cut ? <Link className="see-more" to={to}>See more</Link> : null}</>;
-}
-
-function Card({ s }) { return <div className="c"><Ph r="3/2" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
-function SmallHead({ s }) { return <Link to={"/story/" + s.id}><small>{s.category.toUpperCase()} &middot; {ago(s.minutes_ago)} ago</small>{s.headline}</Link>; }
-
 function Img({ s }) { return <div className="side-card"><Ph r="3/2" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></div>; }
-function Txt({ s }) { return <div className="side-card txt hv"><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.summary[0]}</p><Src s={s} /><Tip id={s.id} /></div>; }
 function Thumb({ s }) { return <div className="side-card th hv"><div><Meta s={s} /><h3><SLink s={s} /></h3></div><Ph r="1/1" src={s.image} /><Src s={s} /><Tip id={s.id} /></div>; }
-const O = (F, s) => (s ? <F s={s} /> : null);
 
-// Lower-page compositions.
-function G({ s, type, grow, r }) {
-  const cls = (grow ? "grow " : "") + "g";
-  if (type === "big") return <article className={cls + " g-big"}><Ph r="4/3" src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.dek}</p><SRow s={s} /></article>;
-  if (type === "note") return <article className={cls + " g-txt hv"}><Meta s={s} /><h3><SLink s={s} /></h3><p>{s.summary[0]}</p><Src s={s} /><Tip id={s.id} /></article>;
-  return <article className={cls}><Ph r={type === "sq" ? "1/1" : r || "3/2"} src={s.image} /><Meta s={s} /><h3><SLink s={s} /></h3><SRow s={s} /></article>;
-}
-// Spread stories over n columns, each with at least one image card; the last image card stretches.
-function Columns({ L, types, n }) {
-  const cols = [];
-  for (let i = 0; i < n; i++) cols.push([]);
-  L.forEach((s, i) => cols[i % n].push({ t: types[i], s }));
-  return cols.filter((c) => c.length).map((c, ci) => {
-    if (c.every((x) => x.t === "note")) c[0].t = "med";
-    let last = -1;
-    c.forEach((x, i) => { if (x.t !== "note") last = i; });
-    return <div className="scol" key={ci}>{c.map((x, i) => <G key={x.s.id} s={x.s} type={x.t} grow={i === last} />)}</div>;
-  });
-}
-function ListCol({ ALL, k, shown }) {
-  const ids = {};
-  shown.forEach((s) => { ids[s.id] = 1; });
-  const pool = ALL.filter((s) => !ids[s.id] && s.category === k).concat(ALL.filter((s) => !ids[s.id] && s.category !== k)).slice(0, 5);
-  return (
-    <div className="scol list"><h4 className="lh">More headlines</h4>
-      {pool.map((s) => <div className="hv" key={s.id}><Link to={"/story/" + s.id}><small>{s.category} &middot; {ago(s.minutes_ago)} ago</small>{s.headline}</Link><Tip id={s.id} /></div>)}
-    </div>
-  );
-}
-function Featured({ L, types, rev, k, ALL }) {
-  return <div className={"scat" + (rev ? " rev" : "")}><div className="scol main"><G s={L[0]} type="big" grow /></div><Columns L={L.slice(1)} types={types} n={2} /><ListCol ALL={ALL} k={k} shown={L} /></div>;
-}
-const layouts = [
-  (p) => <Featured {...p} types={["med", "sq", "note", "note"]} rev={false} />,
-  (p) => <Featured {...p} types={["note", "sq", "med", "note"]} rev />,
-  (p) => <div className="scat"><Columns L={p.L} types={["med", "note", "note", "sq", "med"]} n={3} /><ListCol ALL={p.ALL} k={p.k} shown={p.L} /></div>,
-];
 function CatSection({ k, ALL, at }) {
-  const L = ALL.filter((s) => s.category === k).slice(0, 5);
-  if (!L.length) return null;
-  const Lay = layouts[at % 3];
-  return <div className="sec"><h2 className="sec-h"><span>{k}</span><Link to={"/?c=" + encodeURIComponent(k)}>See all &rarr;</Link></h2><Lay L={L} k={k} ALL={ALL} /></div>;
-}
-
-function Matrix({ rows }) {
-  return <div className="matrix">{rows.map((f, i) => <div className="mrow" key={i}><b><Fav name={f.outlet} /><span><Link className="so" to={"/source/" + slug(f.outlet)}>{f.outlet}</Link></span></b><span>{f.angle}</span><span className="t">{f.tag}</span></div>)}</div>;
-}
-
-function Band({ TLS, EXS }) {
-  return (
-    <div className="band sec" id="timelines">
-      <div><h2 className="sec-h"><span>Timelines</span><Link to="/timelines">See all &rarr;</Link></h2>
-        {TLS.map((t, i) => i ? (
-          <div className="tl tl-plain" key={t.id}><div><div className="meta"><span>{t.updated}</span><span>{t.points.length} events</span></div><h3><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><p>{t.dek || ""}</p></div></div>
-        ) : (
-          <div className="tl tl-top" key={t.id}><Ph r="3/2" src={t.image} /><h3 style={{ marginTop: 12 }}><Link to={"/timeline/" + t.id}>{t.title}</Link></h3><div className="meta"><span>{t.updated}</span></div>
-            {t.audio ? <AudioPlayer id={t.id} kind="timeline" title={t.title} url={"/timeline/" + t.id} label={t.audio.label} duration={t.audio.duration} src={t.audio.src} /> : null}
-            <ol>{t.points.slice(0, TL_SHOWN).map((p, j) => <li key={j}><b>{p.date}</b><span>{p.text}</span></li>)}</ol>
-            {t.points.length > TL_SHOWN ? <Link className="see-more tl-more" to={"/timeline/" + t.id}>See more &middot; {t.points.length - TL_SHOWN} more event{t.points.length - TL_SHOWN === 1 ? "" : "s"}</Link> : null}</div>
-        ))}
-      </div>
-      <div><h2 className="sec-h"><span>Explainers</span><Link to="/explainers">See all &rarr;</Link></h2>
-        <div className="exs">{EXS.map((x, i) => (
-          // The first explainer is the featured one: an excerpt and three key points.
-          <div className="ex" key={x.id}><Ph r="3/2" src={x.image} /><div className="meta"><span className="cat">{x.category}</span><span>{x.read}</span></div><h3><Link to={"/explainer/" + x.id}>{x.title}</Link></h3><p>{x.dek}</p>
-            {i ? null : <><ExBody text={x.excerpt || ""} to={"/explainer/" + x.id} /><div className="ex-pts"><b>In brief</b><ul>{(x.points || []).map((t, j) => <li key={j}>{t}</li>)}</ul></div><Link className="ex-more" to={"/explainer/" + x.id}>Read the explainer &rarr;</Link></>}
-          </div>
-        ))}</div>
-      </div>
-    </div>
-  );
+  return <RuledSection title={k} to={"/?c=" + encodeURIComponent(k)} L={ALL.filter((s) => s.category === k).slice(0, 8)} at={at} />;
 }
 
 function toTop() { scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); }
@@ -258,8 +166,6 @@ export default function Home() {
   if (gate) return wrap(<><div className="feed-h"><h1>For you</h1></div><div className="gate"><p>Sign in to get a feed built around the publishers and topics you follow.</p><button type="button" className="ab filled" id="gate-in" onClick={openLogin}><span>Sign in</span></button></div></>);
   if (!S.length) return wrap(<p className="empty" style={{ paddingTop: 48 }}>No stories in this feed yet. <Link to="/">Back to top stories</Link></p>);
 
-  const lead = S[0];
-  const byCov = S.slice().sort((a, b) => b.outlet_count - a.outlet_count);
   const head = c === "All" ? null : (
     <>
       <div className="feed-h"><h1>{c}</h1><p>{S.length} stories &middot; updated {ago(S[0].minutes_ago)} ago</p></div>
@@ -268,44 +174,21 @@ export default function Home() {
   );
   if (phone) return wrap(<>{head}<PhoneFeed S={S} /></>);
 
-  const mid = (
-    <div className="hero-s"><Carousel s={lead} /><Meta s={lead} /><h1><SLink s={lead} /></h1><p className="dek">{lead.dek}</p><SRow s={lead} />
-      <ul className="bullets">{lead.summary.map((b, i) => <li key={i}>{b}</li>)}</ul>
-      <h2 className="sec-h" style={{ margin: "24px 0 12px", borderTop: 0, paddingTop: 0 }}><span>Framing, at a glance</span></h2>
-      <Matrix rows={lead.framing.slice(0, 5)} />
-    </div>
-  );
-  const rank = (
-    <div className="side-card"><h2 className="sec-h"><span>Most covered</span></h2>
-      <ol className="rank">{byCov.slice(0, 6).map((s, i) => <li className="hv" key={s.id}><span>{i + 1}</span><SmallHead s={s} /><Tip id={s.id} /></li>)}</ol></div>
-  );
-  const latest = (
-    <div className="latest"><h2 className="sec-h"><span>Latest</span></h2>
-      {S.slice(1, 7).map((s) => <div className="hv" key={s.id}><SmallHead s={s} /><Tip id={s.id} /></div>)}</div>
-  );
   // Only the top timeline is shown in full; the rest are headline-only.
   const TLS = (c === "All" ? d.timelines : d.timelines.filter((t) => t.category === c)).slice(0, 3);
   const EXS = (c === "All" ? d.explainers : d.explainers.filter((x) => x.category === c)).slice(0, 6);
   let sections;
   if (c === "All") {
-    sections = d.categories.slice(1).map((k, i) => <CatSection key={k} k={k} ALL={ALL} at={i} />);
+    sections = d.categories.slice(1).flatMap((k, i) => (i === 1 ? [<CatSection key={k} k={k} ALL={ALL} at={i} />, <WatchStrip key="watch" />] : [<CatSection key={k} k={k} ALL={ALL} at={i} />]));
   } else {
     // A category feed: whatever the front page above did not use.
-    const wide = S.slice(13).slice(0, 5);
-    sections = wide.length ? (
-      <div className="sec"><h2 className="sec-h"><span>{c === "For you" ? "More for you" : "More in " + c}</span></h2>
-        {wide.length >= 5 ? layouts[1]({ L: wide, k: c, ALL }) : <div className="cards flat">{wide.map((s) => <Card key={s.id} s={s} />)}</div>}</div>
-    ) : null;
+    const wide = S.slice(13).slice(0, 8);
+    sections = <RuledSection title={c === "For you" ? "More for you" : "More in " + c} more="Keep reading" L={wide} at={0} />;
   }
   return wrap(
     <>
       {head}
-      <div className="front">
-        <div className="colA">{latest}{O(Img, S[7])}{O(Thumb, S[8])}{O(Txt, S[13])}</div>
-        <div className="colB">{mid}</div>
-        <div className="colC">{O(Thumb, S[9])}{O(Img, S[10])}{rank}{O(Txt, S[11])}{O(Thumb, S[12])}</div>
-      </div>
-      {TLS.length && EXS.length ? <Band TLS={TLS} EXS={EXS} /> : null}
+      <RuledFront S={S} TLS={TLS} EXS={EXS} forYou="/?c=For%20you" />
       {sections}
       {c === "All" ? <EndlessAll d={d} ALL={ALL} /> : null}
     </>
