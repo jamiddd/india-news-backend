@@ -57,3 +57,47 @@ self.addEventListener("fetch", (e) => {
   if (r.mode !== "navigate") return;           // everything else goes straight to the network
   e.respondWith(fetch(r).catch(() => new Response(OFFLINE, { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } })));
 });
+
+// ---- push notifications ----------------------------------------------------------------
+// The backend sends data-only FCM messages (title, body, cluster_id, channel_id, type, ...), so the
+// worker builds the notification itself, as the Android app does. Where a tap goes:
+//   cluster_id > 0         -> the story
+//   type topic_update      -> that topic's page
+//   url (admin alerts)     -> that path, same site only
+//   anything else          -> the front page
+const slugOf = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+function pushTarget(d) {
+  const id = parseInt(d.cluster_id, 10);
+  if (id > 0) return "/story/" + id;
+  if (d.type === "topic_update" && d.topic) return "/topic/" + slugOf(d.topic);
+  if (d.url) { try { const u = new URL(d.url, self.location.origin); if (u.origin === self.location.origin) return u.pathname + u.search; } catch (e) { /* ignore */ } }
+  return "/";
+}
+
+self.addEventListener("push", (e) => {
+  let p = {};
+  try { p = e.data ? e.data.json() : {}; } catch (err) { /* not JSON */ }
+  const d = p.data || p.notification || p;
+  const title = d.title || "Open Indian News", id = parseInt(d.cluster_id, 10);
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || "",
+    icon: "/icon-192.png",
+    badge: "/favicon-48.png",
+    tag: id > 0 ? "story-" + id : d.type || d.channel_id || "oin",
+    renotify: true,
+    data: { url: pushTarget(d) },
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if (new URL(c.url).origin === self.location.origin && "focus" in c) {
+        return c.focus().then((w) => (w && "navigate" in w ? w.navigate(url) : w));
+      }
+    }
+    return self.clients.openWindow(url);
+  }));
+});

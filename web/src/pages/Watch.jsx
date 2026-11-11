@@ -89,6 +89,35 @@ header.masthead,.appbar{display:none !important}
 .wt-skp{aspect-ratio:16/9; border-radius:0}
 .wt-swipe > .wt-card{flex:1 1 auto; height:auto; min-height:0}
 main.wt-swipe ~ footer{display:none}
+/* desktop Watch (after Bloomberg's video page): player and details on the left, a scrolling list of videos on the right */
+.wt-meta,.wt-dek,.wt-kick,.wt-pl2{display:none}
+.wt-row.cur{display:none}
+@media (min-width:1001px){
+  main.wt.wt-watch{max-width:1280px; padding:0 32px 56px; display:grid; grid-template-columns:minmax(0,1fr) 420px; column-gap:40px; align-items:start; --wt-pw:calc(min(100vw,1280px) - 64px - 460px)}
+  .wt-watch .wt-head{position:relative; grid-column:1; grid-row:1}
+  .wt-watch .wt-now{grid-column:1; grid-row:2; background:none}
+  .wt-watch .wt-now .wt-bd{display:none}
+  .wt-watch .wt-nowin{padding:18px 0 0; gap:10px}
+  .wt-watch .wt-nowin h1{font-size:32px; line-height:38px; font-weight:700; letter-spacing:-.02em}
+  .wt-kick{display:block; font-size:16px; color:var(--wf2)}
+  .wt-dek{display:block; margin:0; font-size:17px; line-height:1.45; color:var(--wf2); max-width:70ch}
+  .wt-watch .wt-h{display:none}
+  .wt-watch .wt-rows{grid-column:2; grid-row:1 / span 2; margin-top:var(--wt-strip); max-height:calc(var(--wt-pw) * 9 / 16); overflow-y:auto; background:none; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.4) transparent; padding-right:12px}
+  .wt-watch .wt-row{display:flex; padding:14px 0; background:none; border-bottom:1px solid rgba(255,255,255,.16); gap:16px; align-items:center}
+  .wt-watch .wt-row:hover{background:rgba(255,255,255,.06)}
+  .wt-watch .wt-row.cur{display:flex}
+  .wt-watch .wt-th{flex:0 0 104px; border-radius:6px; aspect-ratio:16/10}
+  .wt-watch .wt-th em{display:none}
+  .wt-watch .wt-th .wt-pl2{display:block; position:absolute; left:6px; bottom:6px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,.55); border:1.5px solid #fff}
+  .wt-watch .wt-th .wt-pl2::after{content:""; position:absolute; left:7px; top:4px; border-left:7px solid #fff; border-block:5px solid transparent}
+  .wt-watch .wt-tx{gap:2px}
+  .wt-watch .wt-tx small{display:none}
+  .wt-meta{display:flex; align-items:center; gap:7px; font-size:14px; color:var(--wf2)}
+  .wt-meta::before{content:""; border-left:9px solid currentColor; border-block:5px solid transparent}
+  .wt-watch .wt-tx b{font-size:17px; line-height:21px; font-weight:600; -webkit-line-clamp:3}
+  .wt-watch .wt-row.cur .wt-tx b{color:#fff}
+}
+
 @media (min-width:1001px){ .wt-swipe{height:calc(100vh - 24px)} }
 `;
 
@@ -183,13 +212,13 @@ function WatchView({ mode, onMode }) {
               {v.dur ? <span className="wt-time">{mmss(v.dur)}</span> : null}</>}
         </div>
       </div>
-      <div className="wt-now"><Backdrop src={v.poster} /><div className="wt-nowin"><h1>{v.s.headline}</h1><Src v={v} /><Pills v={v} /></div></div>
+      <div className="wt-now"><Backdrop src={v.poster} /><div className="wt-nowin"><span className="wt-kick">{v.s.category} &bull; {ago(v.s.minutes_ago)} ago</span><h1>{v.s.headline}</h1><Src v={v} />{v.s.dek ? <p className="wt-dek">{v.s.dek}</p> : null}<Pills v={v} /></div></div>
       <h2 className="wt-h">Up next</h2>
       <div className="wt-rows">
-        {V.map((x, i) => i === cur ? null : (
-          <button type="button" className="wt-row" key={x.id} onClick={() => { setCur(i); setPlaying(true); window.scrollTo(0, 0); }}>
-            <span className="wt-th" style={bg(x.poster)}>{x.dur ? <em>{mmss(x.dur)}</em> : null}</span>
-            <span className="wt-tx"><b>{x.s.headline}</b><small><Fav name={x.outlet} /><span>{[x.outlet, ago(x.s.minutes_ago)].filter(Boolean).join(" · ")}</span></small></span>
+        {V.map((x, i) => (
+          <button type="button" className={"wt-row" + (i === cur ? " cur" : "")} key={x.id} onClick={() => { setCur(i); setPlaying(true); window.scrollTo(0, 0); }}>
+            <span className="wt-th" style={bg(x.poster)}>{x.dur ? <em>{mmss(x.dur)}</em> : null}<i className="wt-pl2"></i></span>
+            <span className="wt-tx"><span className="wt-meta">{i === cur ? "Now playing" : x.dur ? mmss(x.dur) : "Video"}</span><b>{x.s.headline}</b><small><Fav name={x.outlet} /><span>{[x.outlet, ago(x.s.minutes_ago)].filter(Boolean).join(" · ")}</span></small></span>
           </button>
         ))}
       </div>

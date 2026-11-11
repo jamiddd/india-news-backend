@@ -97,7 +97,7 @@ export default function Profile() {
   function clearHistory() { try { localStorage.removeItem("oin-read"); localStorage.removeItem("oin-read-at"); } catch (x) {} redraw(); }
   function signOut() {
     const finish = () => { clearLocal(); try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
-    import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
+    import("../push.js").then((m) => m.disablePush()).catch(() => {}).then(() => import("../auth.js")).then((m) => m.signOutEverywhere()).then(finish, finish);
   }
   function toggleEdit() { const u = sess(); setName((u && u.name) || ""); setEditing(!editing); setFlash(false); }
   function submit(e) {

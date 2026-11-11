@@ -83,12 +83,23 @@ export default function Settings() {
       const n = on ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", n);
       try { localStorage.setItem("oin-theme", n); } catch (x) {}
-    } else setPref(k, on);
+    } else {
+      setPref(k, on);
+      if (k === "notify") pushSwitch(on);
+    }
     redraw();
+  }
+  // Turning notifications on asks the browser if it has not been asked; off forgets this browser's token.
+  function pushSwitch(on) {
+    import("../push.js").then(async (m) => {
+      if (!on) return m.disablePush();
+      if (typeof Notification !== "undefined" && Notification.permission === "default") await Notification.requestPermission();
+      return m.enablePush();
+    }).catch(() => {});
   }
   function signOut() {
     const finish = () => { clearLocal(); try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); };
-    import("../auth.js").then((m) => m.signOutEverywhere()).then(finish, finish);
+    import("../push.js").then((m) => m.disablePush()).catch(() => {}).then(() => import("../auth.js")).then((m) => m.signOutEverywhere()).then(finish, finish);
   }
 
   const sw = (

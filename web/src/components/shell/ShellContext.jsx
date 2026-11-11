@@ -126,7 +126,7 @@ export function ShellProvider({ children }) {
       dataEpoch: epoch,
       setSession(u) {
         if (u) { save(SESSION, u); runSync(); }
-        else { try { localStorage.removeItem(SESSION); } catch (e) {} clearLocal(); import("../../auth.js").then((m) => m.signOutEverywhere()).catch(() => {}); }
+        else { try { localStorage.removeItem(SESSION); } catch (e) {} clearLocal(); import("../../push.js").then((m) => m.disablePush()).catch(() => {}).then(() => import("../../auth.js")).then((m) => m.signOutEverywhere()).catch(() => {}); }
         setSession(u);
       },
       loginOpen,

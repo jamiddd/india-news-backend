@@ -45,6 +45,7 @@ export default function Notify() {
       close(perm);
       if (perm === "granted") {
         toast("Notifications are on", 4200);
+        import("../../push.js").then((m) => m.enablePush()).catch(() => {});
         try { new Notification("Open Indian News", { body: "You’ll get breaking news alerts and your daily digest here. No ads, ever." }); } catch (e) {}
       } else if (perm === "denied") toast("Notifications are off. You can turn them on in your browser’s site settings.", 4200);
     };

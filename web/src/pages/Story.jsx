@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Carousel, CoverageRows, PopHost, SRow, Tip, ago, slug } from "../components/home/shared.jsx";
+import { Carousel, CoverageRows, PopHost, SRow, ago, slug } from "../components/home/shared.jsx";
 import { Fav } from "../components/Photo.jsx";
 import { RelatedSkeleton } from "../components/Skeleton.jsx";
 import { useData, statusView } from "../components/Status.jsx";
@@ -15,7 +15,7 @@ function pickStory(d, rel, id) {
   if (!s) return {};
   const S = (rel && rel.stories) || [];
   const related = S.filter((x) => x.id !== s.id && x.category === s.category)
-    .concat(S.filter((x) => x.id !== s.id && x.category !== s.category)).slice(0, 3);
+    .concat(S.filter((x) => x.id !== s.id && x.category !== s.category)).slice(0, 6);
   return { s, related };
 }
 
@@ -49,7 +49,7 @@ export default function Story() {
   const topics = s.topics || [];
   return (
     <main className="wide" id="story" style={{ paddingBottom: 72 }}>
-      <article className="sty"><div className="sty-main">
+      <article className="sty has-rail"><div className="sty-main">
         <p className="meta crumb"><Link to="/">&larr; Top stories</Link><Link className="cat" to={"/?c=" + encodeURIComponent(s.category)}>{s.category}</Link><span>Updated {ago(s.minutes_ago)} ago</span></p>
         <h1>{s.headline}</h1><p className="dek">{s.dek}</p>
         <SRow s={s} />
@@ -65,11 +65,12 @@ export default function Story() {
             <div className="tiles" id="tiles">{(topOpen ? topics : topics.slice(0, TOPIC_SHOWN)).map((t) => <Link className="tile" key={slug(t.label)} to={"/topic/" + slug(t.label)}><b>{t.label}</b><span>{t.kind}</span></Link>)}</div>
             {topics.length > TOPIC_SHOWN ? <button type="button" className="more-btn" id="top-more" onClick={() => setTopOpen(!topOpen)}>{topOpen ? "Show fewer" : "All " + topics.length + " topics"}</button> : null}</section>
         ) : null}
-        {related.length ? (
-          <section className="sty-sec" id="related"><h2 className="sec-h"><span>Related stories</span></h2>
-            <div className="latest">{related.map((x) => <div className="hv" key={x.id}><Link to={"/story/" + x.id}><small>{x.category.toUpperCase()} &middot; {ago(x.minutes_ago)} ago</small>{x.headline}</Link><Tip id={x.id} /></div>)}</div></section>
-        ) : rq.loading ? <RelatedSkeleton /> : null}
-      </div></article>
+      </div>
+      {related.length ? (
+        <aside className="sty-rail" aria-label="Related stories"><div className="latest"><h2 className="sec-h"><span>Related stories</span></h2>
+          {related.map((x) => <div key={x.id}><Link to={"/story/" + x.id}><small>{x.category.toUpperCase()} &middot; {ago(x.minutes_ago)} ago</small>{x.headline}</Link></div>)}</div></aside>
+      ) : rq.loading ? <aside className="sty-rail"><RelatedSkeleton /></aside> : null}
+      </article>
       <PopHost />
     </main>
   );

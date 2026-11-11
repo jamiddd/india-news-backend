@@ -13,5 +13,8 @@ createRoot(document.getElementById("root")).render(
 // Service worker: makes the site installable as an app (Chrome's "Install app") and gives a
 // friendly offline page. Production only: the dev server doesn't serve /sw.js.
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  addEventListener("load", () => { navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {}); });
+  addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+    import("./push.js").then((m) => m.syncPush()).catch(() => {});   // a reader with push on stays registered
+  });
 }

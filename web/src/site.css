@@ -1616,3 +1616,10 @@ a.rf-pill:hover{border-color:var(--ink)}
 }
 .rf:not(.solo) .rf-L > :nth-last-child(-n+2){border-bottom:0}
 .feed-h + .rf-sec,.feed-note + .rf-sec{margin-top:20px}
+
+/* story page: the article, with a Related stories list beside it on wide screens */
+.sty.has-rail{display:grid; grid-template-columns:minmax(0,720px) 340px; gap:0 56px; width:auto; justify-content:center}
+.sty.has-rail .sty-rail{padding:0; margin:0; position:sticky; top:20px; align-self:start}
+.sty-rail .latest a{font-size:17px; padding:16px 0}
+.sty-rail .latest small{font-family:var(--sans); font-size:13px; font-weight:500; letter-spacing:0; margin-bottom:4px}
+@media (max-width:1100px){ .sty.has-rail{grid-template-columns:minmax(0,720px); gap:0} .sty.has-rail .sty-rail{position:static; margin-top:36px} }

@@ -18,14 +18,19 @@ function boot() {
   };
   const net = { calls: [], impl: async () => ({ ok: true, type: "opaque", clone() { return this; } }) };
   const fetchFn = vi.fn(async (req) => { net.calls.push(req.url); return net.impl(req); });
-  const self = { location: { origin: "https://openindiannews.com" }, addEventListener: (t, f) => { handlers[t] = f; }, skipWaiting() {}, clients: { claim() {} } };
+  const shown = [], opened = [], windows = [];
+  const self = {
+    location: { origin: "https://openindiannews.com" }, addEventListener: (t, f) => { handlers[t] = f; }, skipWaiting() {},
+    registration: { showNotification: async (title, o) => { shown.push({ title, ...o }); } },
+    clients: { claim() {}, matchAll: async () => windows, openWindow: async (u) => { opened.push(u); } },
+  };
   new Function("self", "caches", "fetch", "Response", "URL", SRC)(self, { open }, fetchFn, Response, URL);
   const ask = (url, extra = {}) => {
     let p = null;
     handlers.fetch({ request: { url, method: "GET", destination: "image", mode: "no-cors", ...extra }, respondWith: (x) => { p = x; } });
     return p;
   };
-  return { stores, net, ask, handlers, fetchFn };
+  return { stores, net, ask, handlers, fetchFn, shown, opened, windows };
 }
 
 const IMG = "https://img.publisher.com/a.jpg";
@@ -84,5 +89,53 @@ describe("service worker image cache", () => {
     expect(sw.ask("http://img.publisher.com/a.jpg")).toBeNull();
     expect(sw.ask("https://img.publisher.com/a.json", { destination: "empty", mode: "cors" })).toBeNull();
     expect(sw.net.calls).toHaveLength(0);
+  });
+});
+
+
+// A push as FCM delivers it: the data-only message the backend sends, under `data`.
+const pushOf = (data) => ({ data: { json: () => ({ from: "389055722716", data }) }, waitUntil: (p) => p });
+async function receive(data) { await sw.handlers.push(pushOf(data)); return sw.shown.at(-1); }
+
+describe("service worker push", () => {
+  it("shows the title and body, and opens the story when a tap follows a story push", async () => {
+    const n = await receive({ title: "Budget passed", body: "Both Houses cleared it", cluster_id: "42", channel_id: "breaking_news" });
+    expect(n).toMatchObject({ title: "Budget passed", body: "Both Houses cleared it", tag: "story-42", data: { url: "/story/42" } });
+  });
+
+  it("sends a topic update to the topic page", async () => {
+    const n = await receive({ title: "Budget", body: "x", cluster_id: "0", type: "topic_update", topic: "Union Budget 2027" });
+    expect(n.data.url).toBe("/topic/union-budget-2027");
+  });
+
+  it("opens the front page for the brief, horoscope and anything unknown", async () => {
+    expect((await receive({ title: "Morning brief", body: "x", cluster_id: "0", type: "morning_brief" })).data.url).toBe("/");
+    expect((await receive({ title: "Aries", body: "x", cluster_id: "-1", type: "horoscope", sign: "aries" })).data.url).toBe("/");
+    expect((await receive({ title: "Hi", body: "x" })).data.url).toBe("/");
+  });
+
+  it("follows an admin link only when it stays on our own site", async () => {
+    expect((await receive({ title: "Admin", body: "x", url: "https://openindiannews.com/admin/reports?x=1" })).data.url).toBe("/admin/reports?x=1");
+    expect((await receive({ title: "Admin", body: "x", url: "https://evil.example/phish" })).data.url).toBe("/");
+  });
+
+  it("still shows something when the payload is empty or not JSON", async () => {
+    await sw.handlers.push({ data: { json: () => { throw new Error("bad"); } }, waitUntil: (p) => p });
+    expect(sw.shown.at(-1).title).toBe("Open Indian News");
+  });
+
+  it("a tap focuses an open tab and sends it to the page", async () => {
+    const calls = [];
+    sw.windows.push({ url: "https://openindiannews.com/", focus: async () => ({ navigate: async (u) => { calls.push(u); } }) });
+    let done; sw.handlers.notificationclick({ notification: { close() {}, data: { url: "/story/7" } }, waitUntil: (p) => { done = p; } });
+    await done;
+    expect(calls).toEqual(["/story/7"]);
+    expect(sw.opened).toEqual([]);
+  });
+
+  it("a tap opens a new window when no tab is open", async () => {
+    let done; sw.handlers.notificationclick({ notification: { close() {}, data: { url: "/story/7" } }, waitUntil: (p) => { done = p; } });
+    await done;
+    expect(sw.opened).toEqual(["/story/7"]);
   });
 });

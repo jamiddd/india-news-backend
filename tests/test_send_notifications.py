@@ -51,3 +51,24 @@ class TestIsWithinDailyWindow:
     def test_not_near_midnight_at_all(self):
         now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
         assert _is_within_daily_window("00:00", now) is False
+
+
+class TestSendCarriesWebPush:
+    """One message serves both kinds of device: Android tokens use `android`, browser tokens use
+    `webpush`. Without the webpush part, Chrome gets a default-priority message with no expiry."""
+
+    def test_message_has_webpush_headers_and_stays_data_only(self, monkeypatch):
+        import asyncio
+        from scripts import send_notifications as sn
+
+        sent = []
+        monkeypatch.setattr(sn.messaging, "send", lambda message, app=None: sent.append(message))
+        ok = asyncio.run(sn._send(None, "tok", "Title", "Body", 42, "breaking_news", {"type": "topic_update", "topic": "Budget"}))
+
+        assert ok is True
+        message = sent[0]
+        assert message.webpush.headers == {"Urgency": "high", "TTL": "21600"}
+        assert message.android.priority == "high"
+        assert message.notification is None                      # data-only, so our own code builds the notification
+        assert message.data["cluster_id"] == "42"
+        assert message.data["topic"] == "Budget"

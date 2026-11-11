@@ -157,6 +157,9 @@ async def _send(
             **(extra or {}),
         },
         android=messaging.AndroidConfig(priority="high"),
+        # Browser tokens (platform "web") use this part and ignore `android`; Android tokens do the
+        # reverse. News is stale after a few hours, so a push the browser could not deliver by then is dropped.
+        webpush=messaging.WebpushConfig(headers={"Urgency": "high", "TTL": "21600"}),
         token=token,
     )
     try:
