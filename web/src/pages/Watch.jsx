@@ -18,7 +18,7 @@ import { loadWatch, loadShorts } from "../api.js";
 const CSS = `
 body{background:#000}
 .signal-bar{display:none}
-header.masthead,.appbar{display:none !important}
+.appbar{display:none !important}   /* the site's own header stays on screens wide enough to show it */
 .tabbar{--ink:#FFFFFF; --ink-2:rgba(255,255,255,.68); --bg:#0A0A0A; --line:rgba(255,255,255,.14); background:rgba(10,10,10,.72) !important; border-color:rgba(255,255,255,.14) !important}
 .wt{--wt-strip:calc(48px + env(safe-area-inset-top,0px)); --wt-w:min(100vw,760px); --wt-nav:calc(84px + env(safe-area-inset-bottom,0px) + var(--mplay-h,0px));
   --wf:#fff; --wf2:rgba(255,255,255,.8); --wl:rgba(255,255,255,.14); color:var(--wf); background:#000; min-height:100vh; padding-bottom:calc(var(--wt-nav) + 12px); max-width:760px; margin:0 auto}
@@ -89,6 +89,9 @@ header.masthead,.appbar{display:none !important}
 .wt-skp{aspect-ratio:16/9; border-radius:0}
 .wt-swipe > .wt-card{flex:1 1 auto; height:auto; min-height:0}
 main.wt-swipe ~ footer{display:none}
+/* wider than a phone: no Watch | Swipe pill (vertical videos make no sense here), and the site's header stays */
+@media (min-width:701px){ main.wt{--wt-strip:0px} .wt-strip{display:none} .wt-swipe{display:none} }
+
 /* desktop Watch (after Bloomberg's video page): player and details on the left, a scrolling list of videos on the right */
 .wt-meta,.wt-dek,.wt-kick,.wt-pl2{display:none}
 .wt-row.cur{display:none}
@@ -102,7 +105,7 @@ main.wt-swipe ~ footer{display:none}
   .wt-kick{display:block; font-size:16px; color:var(--wf2)}
   .wt-dek{display:block; margin:0; font-size:17px; line-height:1.45; color:var(--wf2); max-width:70ch}
   .wt-watch .wt-h{display:none}
-  .wt-watch .wt-rows{grid-column:2; grid-row:1 / span 2; margin-top:var(--wt-strip); max-height:calc(var(--wt-pw) * 9 / 16); overflow-y:auto; background:none; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.4) transparent; padding-right:12px}
+  .wt-watch .wt-rows{grid-column:2; grid-row:1 / span 2; margin-top:0; background:none}
   .wt-watch .wt-row{display:flex; padding:14px 0; background:none; border-bottom:1px solid rgba(255,255,255,.16); gap:16px; align-items:center}
   .wt-watch .wt-row:hover{background:rgba(255,255,255,.06)}
   .wt-watch .wt-row.cur{display:flex}
@@ -173,7 +176,15 @@ function Src({ v }) { return <span className="wt-src"><Fav name={v.outlet} /><sp
 
 export default function Watch() {
   // Reopens on the view the reader used last, as the app does.
-  const [mode, setMode] = useState(() => { try { return localStorage.getItem("oin-watch-mode") === "swipe" ? "swipe" : "watch"; } catch (e) { return "watch"; } });
+  const [saved, setMode] = useState(() => { try { return localStorage.getItem("oin-watch-mode") === "swipe" ? "swipe" : "watch"; } catch (e) { return "watch"; } });
+  // Swipe is for phones: on anything wider the page is always the Watch view, whatever was saved.
+  const [wide, setWide] = useState(() => matchMedia("(min-width:701px)").matches);
+  useEffect(() => {
+    const mq = matchMedia("(min-width:701px)"), f = () => setWide(mq.matches);
+    mq.addEventListener("change", f);
+    return () => mq.removeEventListener("change", f);
+  }, []);
+  const mode = wide ? "watch" : saved;
   const pick = (m) => { setMode(m); try { localStorage.setItem("oin-watch-mode", m); } catch (e) { /* private mode */ } };
   return (
     <main className={"wt wt-" + mode} id="page"><style>{CSS}</style>
