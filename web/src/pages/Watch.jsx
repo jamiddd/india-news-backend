@@ -96,16 +96,17 @@ main.wt-swipe ~ footer{display:none}
 .wt-meta,.wt-dek,.wt-kick,.wt-pl2{display:none}
 .wt-row.cur{display:none}
 @media (min-width:1001px){
-  main.wt.wt-watch{max-width:1280px; padding:0 32px 56px; display:grid; grid-template-columns:minmax(0,1fr) 420px; column-gap:40px; align-items:start; --wt-pw:calc(min(100vw,1280px) - 64px - 460px)}
+  /* one screen under the site header: the active video on the left, its own scrolling list on the right */
+  main.wt.wt-watch{max-width:1440px; height:calc(100vh - 70px); height:calc(100dvh - 70px); min-height:0; padding:24px 32px; box-sizing:border-box; display:grid; grid-template-columns:minmax(0,1fr) 420px; grid-template-rows:auto minmax(0,1fr); column-gap:40px; align-items:start; overflow:hidden}
   .wt-watch .wt-head{position:relative; grid-column:1; grid-row:1}
-  .wt-watch .wt-now{grid-column:1; grid-row:2; background:none}
+  .wt-watch .wt-now{grid-column:1; grid-row:2; background:none; min-height:0; max-height:100%; overflow-y:auto; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.35) transparent}
   .wt-watch .wt-now .wt-bd{display:none}
   .wt-watch .wt-nowin{padding:18px 0 0; gap:10px}
   .wt-watch .wt-nowin h1{font-size:32px; line-height:38px; font-weight:700; letter-spacing:-.02em}
   .wt-kick{display:block; font-size:16px; color:var(--wf2)}
   .wt-dek{display:block; margin:0; font-size:17px; line-height:1.45; color:var(--wf2); max-width:70ch}
   .wt-watch .wt-h{display:none}
-  .wt-watch .wt-rows{grid-column:2; grid-row:1 / span 2; margin-top:0; background:none}
+  .wt-watch .wt-rows{grid-column:2; grid-row:1 / span 2; margin:0; background:none; min-height:0; height:100%; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-color:rgba(255,255,255,.4) transparent; padding-right:12px}
   .wt-watch .wt-row{display:flex; padding:14px 0; background:none; border-bottom:1px solid rgba(255,255,255,.16); gap:16px; align-items:center}
   .wt-watch .wt-row:hover{background:rgba(255,255,255,.06)}
   .wt-watch .wt-row.cur{display:flex}
