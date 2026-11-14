@@ -1643,3 +1643,112 @@ a.rf-pill:hover{border-color:var(--ink)}
 .tune-actions{display:flex; justify-content:space-between; margin-top:14px}
 .tune-actions button{padding:8px 16px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--ink); font-weight:600; cursor:pointer}
 .tune-actions .done{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.tune-top{display:flex; align-items:center; justify-content:space-between}
+.tune-x{border:0; background:transparent; color:var(--ink); font-size:24px; line-height:1; cursor:pointer; width:32px; height:32px; border-radius:8px}
+.tune-sheet h3{display:flex; align-items:baseline; justify-content:space-between; margin:22px 0 2px; font-size:14px; text-transform:uppercase; letter-spacing:.06em}
+.tune-sheet h3 a{font-size:13px; text-transform:none; letter-spacing:0; font-weight:600}
+.tune-blurb{margin:0 0 10px; font-size:13px; opacity:.75}
+.tune-list li{padding:6px 0}
+.tune-list li span{flex:1; font-weight:600; font-size:14px}
+.tune-list li em, .tune-chips + * em{margin-left:8px; font-style:normal; font-weight:500; font-size:12px; opacity:.6}
+.tune-list li.fixed{opacity:.7}
+.tune-chips{display:flex; flex-wrap:wrap; gap:8px}
+.tune-chips button{display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--line); border-radius:999px; background:transparent; color:var(--ink); font:inherit; font-size:13px; font-weight:600; cursor:pointer}
+.tune-chips button:hover{background:var(--surface)}
+.tune-chips button.on{border-color:var(--ink)}
+.tune-none{font-size:13px; opacity:.7}
+.tune-add{display:flex; gap:8px}
+.tune-add input{flex:1; min-width:0; min-height:40px; padding:0 14px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit}
+.tune-add button, .tune-actions .done{padding:8px 16px; border-radius:8px; border:1px solid var(--ink); background:var(--ink); color:var(--bg); font-weight:600; cursor:pointer}
+.tune-add button:disabled{opacity:.4; cursor:default}
+
+.tune-sheet{width:min(960px,100%); max-height:calc(100vh - 48px); padding:28px 32px}
+.tune-sheet h2{font-size:22px}
+.tune-cols{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); gap:40px; margin-top:6px}
+.tune-col > h3:first-child{margin-top:12px}
+@media (max-width:760px){ .tune-cols{grid-template-columns:minmax(0,1fr); gap:0} .tune-sheet{padding:20px} }
+.tune-list li{background:var(--bg)}
+.tune-list li.drag{background:var(--surface); box-shadow:0 6px 20px -8px rgba(0,0,0,.5); border-radius:8px}
+.tune-list li .grip{cursor:grab; touch-action:none; font-size:18px; opacity:.6}
+.tune-list li .grip:active{cursor:grabbing}
+.tune-search{display:flex; align-items:center; gap:10px; margin:10px 0 0; padding:0 14px; min-height:46px; border:1px solid var(--line); border-radius:999px; background:var(--surface)}
+.tune-search:focus-within{outline:2px solid var(--accent); outline-offset:1px}
+.tune-search input{flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font:inherit; font-size:15px; outline:0}
+.tune-results{margin-top:12px; padding:14px; border:1px solid var(--line); border-radius:12px; display:grid; gap:12px}
+.tune-topic{justify-self:start; padding:8px 14px; border:1px dashed var(--ink); border-radius:999px; background:transparent; color:var(--ink); font:inherit; font-size:13px; font-weight:600; cursor:pointer}
+.tune-topic:hover{background:var(--surface)}
+.tune-cats{margin:0 0 12px} .tune-cats button{padding:5px 11px; font-size:12px}
+.tune-cats button.on{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.tune-col > h3:first-child{margin-top:12px}
+.tune-col .tune-search{margin-top:12px}
+.tune-after{margin-top:22px}
+.tune-filter{position:relative; flex:0 0 auto}
+.tune-filter-btn{display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid var(--line); border-radius:999px; background:var(--bg); color:var(--ink); font:inherit; font-size:13px; font-weight:600; cursor:pointer}
+.tune-filter-btn.on{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.tune-menu{position:absolute; right:0; top:calc(100% + 8px); z-index:5; margin:0; padding:6px; list-style:none; width:220px; max-height:300px; overflow-y:auto; background:var(--bg); border:1px solid var(--line); border-radius:12px; box-shadow:0 18px 50px -12px rgba(0,0,0,.55)}
+.tune-menu button{display:block; width:100%; text-align:left; padding:9px 12px; border:0; border-radius:8px; background:transparent; color:var(--ink); font:inherit; font-size:14px; font-weight:600; cursor:pointer}
+.tune-menu button:hover, .tune-menu button.on{background:var(--surface)}
+.tune-chips button{max-width:100%; min-width:0; line-height:1.3; white-space:nowrap}
+.tune-chips button .fv{flex:0 0 auto}
+.tune-chips button{overflow:hidden; text-overflow:ellipsis}
+.tune-menu{width:260px}
+.tune-menu button{line-height:1.35; padding:10px 12px}
+.tune-list li span{line-height:1.35; padding:4px 0}
+.tune-topic{max-width:100%; line-height:1.35; white-space:normal; text-align:left; padding:10px 14px; border-radius:14px}
+.tune-menu .tune-menu-h{display:block; padding:6px 12px 4px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; opacity:.6}
+.tune-menu li{display:block}
+.tune-sheet .tune-menu li{display:block; padding:0; border:0}
+.tune-sheet .tune-menu li button{width:100%; height:auto; min-height:42px; white-space:normal; line-height:1.3}
+.tune-chips button{gap:6px; padding:5px 11px; font-size:13px}
+.tune-chips button .fv{width:18px; height:18px; flex:0 0 18px; margin:0}
+.tune-chips button .fv img{width:100%; height:100%}
+
+.tune-back{display:none}
+.tune-list li{position:relative}
+@media (max-width:700px){
+  .tune-scrim{padding:0; align-items:stretch; background:var(--bg)}
+  .tune-sheet{width:100%; max-height:none; height:100dvh; border:0; border-radius:0; box-shadow:none; padding:0 16px 88px}
+  .tune-top{position:sticky; top:0; z-index:6; gap:8px; justify-content:flex-start; padding:12px 0 4px; background:var(--bg)}
+  .tune-top h2{flex:1; margin:0}
+  .tune-back{display:block; border:0; background:transparent; color:var(--ink); font-size:22px; width:36px; height:36px; border-radius:8px; cursor:pointer}
+  .tune-x{display:none}
+  .tune-top + .tune-blurb{margin:0 0 6px 44px}
+  .tune-cols, .tune-col{display:flex; flex-direction:column; gap:0}
+  .tune-cols{gap:0} .tune-col{display:contents}
+  .tune-cols > .tune-col:first-child{order:1} .tune-cols > .tune-col:last-child{order:2; display:flex}
+  .tune-s1{order:1} .tune-s2{order:2} .tune-s3{order:3; margin-top:8px}
+  .tune-col > h3:first-child{display:none}
+  .tune-list{display:flex; flex-wrap:wrap; gap:8px; padding:10px 0 4px}
+  .tune-list li{width:auto; padding:0 4px 0 14px; gap:2px; border:1px solid var(--line); border-radius:999px; background:var(--surface)}
+  .tune-list li.drag{box-shadow:0 8px 24px -8px rgba(0,0,0,.6); border-color:var(--ink)}
+  .tune-list li .grip{position:absolute; inset:0; width:auto; height:auto; opacity:0; z-index:0}
+  .tune-list li span{position:relative; padding:8px 0; font-size:14px}
+  .tune-list li em{display:none}
+  .tune-list li button:not(.grip){position:relative; z-index:1; width:30px; height:30px}
+  .tune-list li.fixed{padding-right:14px; opacity:.75}
+  .tune-actions{position:fixed; left:0; right:0; bottom:0; z-index:6; margin:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid var(--line)}
+  .tune-menu{width:min(260px,calc(100vw - 48px))}
+}
+/* phone: search field first, right under the header */
+@media (max-width:700px){
+  .tune-cols > .tune-col:last-child{display:contents}
+  .tune-s3{order:0; margin:4px 0 0}
+  .tune-cols > .tune-col:first-child .tune-list{order:1}
+  .tune-s1{order:2} .tune-s2{order:3}
+  .tune-s3 .tune-search{margin-top:6px}
+}
+/* active = accent colour: tabs on the strip, followed publishers, an applied filter */
+.tune-s3{margin-bottom:18px}
+.tune-chips button.on, .tune-filter-btn.on{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.tune-chips button.on:hover{background:var(--accent); filter:brightness(1.08)}
+@media (max-width:700px){
+  .tune-s3{margin-bottom:20px}
+  .tune-list li:not(.fixed){background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+  .tune-list li:not(.fixed) button{color:var(--on-accent)}
+  .tune-list li.fixed{background:var(--accent); border-color:var(--accent); color:var(--on-accent); opacity:1}
+  .tune-list li.fixed em{display:none}
+  .tune-list li.drag{box-shadow:0 8px 24px -8px rgba(0,0,0,.6); outline:2px solid var(--on-accent)}
+}
+@media (min-width:701px){
+  .tune-list li:not(.fixed) span::before{content:""; display:inline-block; width:8px; height:8px; margin-right:10px; border-radius:50%; background:var(--accent)}
+}

@@ -460,6 +460,10 @@ export async function loadList(kind, key) {
     const page = await feedPage({ source_id: src.id });
     return { stories: page.items.map((x) => adaptCluster(x, cx)), source: src };
   }
+  if (kind === "category") {
+    const page = await feedPage({ category: key });
+    return { stories: page.items.map((x) => adaptCluster(x, cx)) };
+  }
   if (kind === "topic") {
     const q = String(key || "").replace(/-/g, " ").trim();
     if (q.length < 2) return { stories: [] };

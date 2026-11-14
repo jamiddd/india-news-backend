@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { Ph, PopHost, SRow, Src, Tip, getFollows, openLogin, signedIn, slug } from "../components/home/shared.jsx";
 import { useData, statusView } from "../components/Status.jsx";
-import { loadHome as fetchHome } from "../api.js";
+import { loadHome as fetchHome, loadList } from "../api.js";
+import { categoryKey, readTabs, resolveTabs, tabTo } from "../feedTabs.js";
+import TuneTabs from "../components/home/TuneTabs.jsx";
 import Search from "../components/home/Search.jsx";
 import RuledFront, { RuledFeed, RuledSection, WatchStrip } from "../components/home/RuledFront.jsx";
 
@@ -11,6 +12,12 @@ import RuledFront, { RuledFeed, RuledSection, WatchStrip } from "../components/h
 // middle = the one most-covered story, right = top / most covered; loadHome orders the
 // stories so S[0] is the most covered in the active category and the rest run newest first.
 export const loadHome = (category) => fetchHome({ category });
+// A pinned publisher ("src:<slug>") or topic ("q:<text>") tab: the front-page data for the strip, plus that tab's own stories.
+const loadTab = async (c) => {
+  const list = c.indexOf("src:") === 0 ? loadList("source", c.slice(4)) : c.indexOf("q:") === 0 ? loadList("topic", c.slice(2)) : loadList("category", c);
+  const [h, l] = await Promise.all([fetchHome({ category: "All" }), list]);
+  return { ...h, tabStories: l.stories, tabMissing: c.indexOf("src:") === 0 && !l.source };
+};
 
 function ago(m) { return m < 60 ? m + "m" : Math.round(m / 60) + "h"; }
 function Meta({ s }) { return <div className="meta"><span className="cat">{s.category}</span><span>{ago(s.minutes_ago)} ago</span></div>; }
@@ -75,98 +82,31 @@ function EndlessAll({ d, ALL, children }) {
   );
 }
 
-// Which category tabs show in the strip, and in what order (like the Android app's topic settings).
-// Saved per browser; categories the user has switched off stay reachable under "More".
-const TAB_PREFS = "tab_prefs";
-function readTabPrefs() {
-  try { const p = JSON.parse(localStorage.getItem(TAB_PREFS)); if (p && Array.isArray(p.order) && Array.isArray(p.off)) return p; } catch (e) {}
-  return null;
-}
-function applyTabPrefs(all, defShown, p) {
-  if (!p) return { shown: defShown, hidden: all.filter((k) => defShown.indexOf(k) < 0), list: all };
-  const list = p.order.filter((k) => all.indexOf(k) > -1).concat(all.filter((k) => p.order.indexOf(k) < 0));
-  return { shown: list.filter((k) => p.off.indexOf(k) < 0), hidden: list.filter((k) => p.off.indexOf(k) > -1), list };
-}
-
 function CatBar({ d, c, onSearch }) {
-  const defShown = d.categories.slice(1), all = defShown.concat(d.moreCategories || []);
-  const [prefs, setPrefs] = useState(readTabPrefs);
-  const [tuning, setTuning] = useState(false);
-  const view = applyTabPrefs(all, defShown, prefs);
+  const [prefs, setPrefs] = useState(readTabs), [tuning, setTuning] = useState(false);
+  const view = resolveTabs(prefs);
   const tabs = ["All"].concat(view.shown);
   if (signedIn()) tabs.splice(1, 0, "For you");
-  const more = view.hidden, moreOn = more.indexOf(c) > -1;
-  function savePrefs(order, off) {
-    const p = { order, off };
-    setPrefs(p);
-    try { localStorage.setItem(TAB_PREFS, JSON.stringify(p)); } catch (e) {}
-  }
-  function move(k, dir) {
-    const o = view.list.slice(), i = o.indexOf(k), j = i + dir;
-    if (j < 0 || j >= o.length) return;
-    o[i] = o[j]; o[j] = k;
-    savePrefs(o, view.hidden);
-  }
-  function flip(k) { savePrefs(view.list, view.hidden.indexOf(k) > -1 ? view.hidden.filter((x) => x !== k) : view.hidden.concat(k)); }
-  function reset() { setPrefs(null); try { localStorage.removeItem(TAB_PREFS); } catch (e) {} }
-  const [menu, setMenu] = useState(null), btn = useRef(null), pop = useRef(null);
-  useLayoutEffect(() => {
-    if (!menu || !pop.current) return;
-    // Starts at left:0 (see the style below) so it can never widen the page, then slides to sit
-    // under the button, kept 12px inside the visible width.
-    const vw = document.documentElement.clientWidth;
-    pop.current.style.left = Math.max(12, Math.min(menu.left, vw - pop.current.offsetWidth - 12)) + "px";
-  }, [menu]);
-  useEffect(() => {
-    if (!menu) return;
-    const click = (e) => { if (pop.current && !pop.current.contains(e.target)) setMenu(null); };
-    const key = (e) => { if (e.key === "Escape") { setMenu(null); btn.current && btn.current.focus(); } };
-    document.addEventListener("click", click); document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("click", click); document.removeEventListener("keydown", key); };
-  }, [menu]);
-  function toggle(e) {
-    e.stopPropagation();
-    if (menu) { setMenu(null); return; }
-    const r = btn.current.getBoundingClientRect();
-    setMenu({ top: r.bottom + scrollY + 6, left: r.left + scrollX });
-  }
+  if (tabs.indexOf(c) < 0) tabs.push(c);   // a link to a tab you've removed still shows where you are
+  const label = (k) => view.label[k] || k.replace(/^\w+:/, "");
+  const close = useCallback(() => setTuning(false), []);
   return (
     <nav className="catbar" aria-label="Categories">
       <div className="wide" id="cats" style={{ display: "flex", alignItems: "center", gap: 26, paddingTop: 0, paddingBottom: 0, overflowX: "auto", scrollbarWidth: "none" }}>
-        {tabs.map((k) => <Link key={k} className={"chip" + (k === c ? " on" : "")} to={k === "All" ? "/" : "/?c=" + encodeURIComponent(k)}>{k}</Link>)}
-        {more.length ? <span className="more-wrap"><button type="button" ref={btn} className={"chip" + (moreOn ? " on" : "")} id="more-open" aria-haspopup="true" aria-expanded={!!menu} onClick={toggle}>{moreOn ? c : "More"} &#9662;</button></span> : null}
-        <button type="button" className="search-btn tune-btn" id="tune-open" aria-label="Choose tabs" title="Choose tabs" aria-haspopup="dialog" aria-expanded={tuning} onClick={() => setTuning(true)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg></button>
+        {tabs.map((k) => <Link key={k} className={"chip" + (k === c ? " on" : "")} to={tabTo(k)}>{label(k)}</Link>)}
+        <button type="button" className="search-btn tune-btn" id="tune-open" aria-label="Customize feed" title="Customize feed" aria-haspopup="dialog" aria-expanded={tuning} onClick={() => setTuning(true)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg></button>
         <button type="button" className="search-btn" id="search-open" aria-label="Search" title="Search (Ctrl/Cmd+K)" onClick={onSearch}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg></button>
       </div>
-      {menu ? createPortal(
-        <div className="cat-pop" role="menu" ref={pop} style={{ top: menu.top, left: 0 }}>
-          {more.map((k) => <Link key={k} role="menuitem" className={k === c ? "on" : ""} to={"/?c=" + encodeURIComponent(k)} onClick={() => setMenu(null)}>{k}</Link>)}
-        </div>, document.body) : null}
-      {tuning ? createPortal(
-        <div className="tune-scrim" onClick={() => setTuning(false)} onKeyDown={(e) => { if (e.key === "Escape") setTuning(false); }}>
-          <div className="tune-sheet" role="dialog" aria-modal="true" aria-label="Choose tabs" onClick={(e) => e.stopPropagation()}>
-            <h2>Choose tabs</h2>
-            <p>Pick which categories show in the strip and drag them into your order with the arrows. Hidden ones stay under {"“More”"}.</p>
-            <ul>
-              {view.list.map((k, i) => (
-                <li key={k}>
-                  <label><input type="checkbox" checked={view.hidden.indexOf(k) < 0} onChange={() => flip(k)} />{k}</label>
-                  <button type="button" aria-label={"Move " + k + " up"} disabled={i === 0} onClick={() => move(k, -1)}>{"↑"}</button>
-                  <button type="button" aria-label={"Move " + k + " down"} disabled={i === view.list.length - 1} onClick={() => move(k, 1)}>{"↓"}</button>
-                </li>
-              ))}
-            </ul>
-            <div className="tune-actions"><button type="button" onClick={reset}>Reset</button><button type="button" className="done" autoFocus onClick={() => setTuning(false)}>Done</button></div>
-          </div>
-        </div>, document.body) : null}
+      {tuning ? <TuneTabs view={view} onChange={setPrefs} onClose={close} /> : null}
     </nav>
   );
 }
 
 export default function Home() {
   const [qs] = useSearchParams();
-  const c = qs.get("c") || "All";
-  const q = useData(() => loadHome(c), [c], { keep: true, cacheKey: "home:" + c }), d = q.data;
+  const raw = qs.get("c") || "All", c = categoryKey(raw) || raw;
+  const isCustom = c.indexOf("src:") === 0 || c.indexOf("q:") === 0 || categoryKey(c) === c;
+  const q = useData(() => (isCustom ? loadTab(c) : loadHome(c)), [c], { keep: true, cacheKey: "home:" + c }), d = q.data;
   const [phone, setPhone] = useState(() => matchMedia("(max-width:700px)").matches);
   const [search, setSearch] = useState(null);   // null | "open" | "closing"
   useEffect(() => {
@@ -204,7 +144,8 @@ export default function Home() {
         forYouNote = "You aren’t following anything yet, so these are the top stories. Follow publishers and topics to shape this feed.";
       }
     }
-  } else if (c !== "All") S = ALL.filter((x) => x.category === c);
+  } else if (isCustom) S = d.tabStories;
+  else if (c !== "All") S = ALL.filter((x) => x.category === c);
 
   const bar = <CatBar d={d} c={c} onSearch={openS} />;
   const overlay = search ? <Search d={d} S={S} state={search} onClose={closeS} /> : null;
@@ -213,9 +154,10 @@ export default function Home() {
   if (gate) return wrap(<><div className="feed-h"><h1>For you</h1></div><div className="gate"><p>Sign in to get a feed built around the publishers and topics you follow.</p><button type="button" className="ab filled" id="gate-in" onClick={openLogin}><span>Sign in</span></button></div></>);
   if (!S.length) return wrap(<p className="empty" style={{ paddingTop: 48 }}>No stories in this feed yet. <Link to="/">Back to top stories</Link></p>);
 
+  const headLabel = isCustom ? resolveTabs(readTabs()).label[c] || c.replace(/^\w+:/, "") : c;
   const head = c === "All" ? null : (
     <>
-      <div className="feed-h"><h1>{c}</h1></div>
+      <div className="feed-h"><h1>{headLabel}</h1></div>
       {forYouNote ? <p className="feed-note">{forYouNote}</p> : null}
     </>
   );

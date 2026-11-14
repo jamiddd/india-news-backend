@@ -12,6 +12,7 @@ const svg = (inner) => <svg width="24" height="24" viewBox="0 0 24 24" fill="non
 const IC = {
   sun: svg(<><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>),
   moon: svg(<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />),
+  tune: svg(<><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>),
   search: svg(<><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>),
   home: fsvg(<><path fillRule="evenodd" d="M4.8 2.88H16.32L21.12 7.68V19.2Q21.12 21.12 19.2 21.12H4.8Q2.88 21.12 2.88 19.2V4.8Q2.88 2.88 4.8 2.88Z M5.91 5.8H10.43A.84.84 0 0 1 11.27 6.64V11.16A.84.84 0 0 1 10.43 12H5.91A.84.84 0 0 1 5.07 11.16V6.64A.84.84 0 0 1 5.91 5.8Z" /><path className="fold" d="M16.32 2.88L21.12 7.68H16.32Z" opacity=".55" /></>),
   watch: fsvg(<><path fillRule="evenodd" d="M5.5 6H18.5A3.5 3.5 0 0 1 22 9.5V17.5A3.5 3.5 0 0 1 18.5 21H5.5A3.5 3.5 0 0 1 2 17.5V9.5A3.5 3.5 0 0 1 5.5 6Z M10 10V17L16 13.5Z" /><path d="M12 6L8 2.8M12 6L16 2.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" /></>),
@@ -38,7 +39,7 @@ function usePhone() {
 
 export function AppBar({ brand, onTheme }) {
   const [showDate, setShowDate] = useState(false), [hide, setHide] = useState(false);
-  const dark = useDark(), nav = useNavigate();
+  const dark = useDark(), nav = useNavigate(), home = useLocation().pathname === "/";
   const now = new Date(), day = now.toLocaleDateString("en-IN", { weekday: "long" }), dm = now.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
   useEffect(() => {
     // The app name and the day take turns every 5 seconds (not while the tab is in the background).
@@ -52,6 +53,7 @@ export function AppBar({ brand, onTheme }) {
     addEventListener("scroll", onScroll, { passive: true });
     return () => { clearInterval(t); removeEventListener("scroll", onScroll); };
   }, []);
+  function tune() { const t = document.getElementById("tune-open"); if (t) t.click(); }
   function search() { const so = document.getElementById("search-open"); if (so) so.click(); else nav("/?s=1"); }
   return (
     <header className={"appbar" + (showDate ? " show-date" : "") + (hide ? " hide" : "")}>
@@ -60,6 +62,7 @@ export function AppBar({ brand, onTheme }) {
           <span className="ab-t2"><b>{day}</b><small>{dm}</small></span></span></Link>
       <div className="ab-act">
         <button type="button" className="ab-i" id="ab-theme" aria-label={dark ? "Switch to day mode" : "Switch to night mode"} onClick={onTheme}>{dark ? IC.sun : IC.moon}</button>
+        {home ? <button type="button" className="ab-i" id="ab-tune" aria-label="Customize feed" onClick={tune}>{IC.tune}</button> : null}
         <button type="button" className="ab-i" id="ab-search" aria-label="Search" onClick={search}>{IC.search}</button>
       </div>
     </header>
