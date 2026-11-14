@@ -7,7 +7,7 @@ export function planFront(S) {
     return s || null;
   };
   const img = (x) => !!x.image;
-  const lead = take();
+  const lead = take(img) || take();
   const topCovered = S.reduce((b, x) => (!b || x.outlet_count > b.outlet_count ? x : b), null);
   const a = take(img) || take();
   const video = take((x) => x.video);   // reserved before the packages can swallow it

@@ -4,6 +4,7 @@ import { Ph } from "../Photo.jsx";
 import { ago, slug } from "./shared.jsx";
 import { useData } from "../Status.jsx";
 import { loadWatch } from "../../api.js";
+import { useLiveImages } from "../../liveImages.js";
 import { SHAPES, chunkBlocks, planFront } from "./frontPlan.js";
 
 // Desktop front page: a ruled grid (1px borders between cells) with a Latest rail, after
@@ -30,10 +31,12 @@ function Cell({ s, side, r, big, top, rel, vid }) {
   const playable = vid && s.video;
   return (
     <article className={"rf-cell hv " + side}>
-      <Link to={href(s)} className={"rf-img" + (playable ? " vid" : "")} tabIndex={-1} aria-hidden="true">
-        <Ph r={r} src={playable ? s.video.poster || s.image : s.image} msg={false} />
-        {playable ? <span className="rf-play">{PLAY}{s.video.duration ? <em>{dur(s.video.duration)}</em> : null}</span> : null}
-      </Link>
+      {s.image || (playable && s.video.poster) ? (
+        <Link to={href(s)} className={"rf-img" + (playable ? " vid" : "")} tabIndex={-1} aria-hidden="true">
+          <Ph r={r} src={playable ? s.video.poster || s.image : s.image} msg={false} />
+          {playable ? <span className="rf-play">{PLAY}{s.video.duration ? <em>{dur(s.video.duration)}</em> : null}</span> : null}
+        </Link>
+      ) : null}
       <Kick s={s} top={top} />
       <h2 className={"rf-hd" + (big ? " big" : "")}><Link to={href(s)}>{s.headline}</Link></h2>
       {s.dek ? <p className="rf-dek">{s.dek}</p> : null}
@@ -88,7 +91,8 @@ function Latest({ S, forYou }) {
   );
 }
 
-export default function RuledFront({ S, TLS, EXS, forYou }) {
+export default function RuledFront({ S: feed, TLS, EXS, forYou }) {
+  const S = useLiveImages(feed);   // a story whose pictures are all dead is dealt as text only
   const p = planFront(S);
   // Today's videos come from the videos feed (the Watch tab's), not from the news feed. Fails quietly.
   const wq = useData(loadWatch, [], { cacheKey: "watch" });
@@ -234,11 +238,16 @@ function subs(L) {
   return Object.keys(n).sort((a, b) => n[b] - n[a]).slice(0, 3);
 }
 
-export function RuledSection({ title, to, L, at = 0, rev, more, bare }) {
-  if (!L.length) return null;
+export function RuledSection({ title, to, L: feed, at = 0, rev, more, bare }) {
+  const live = useLiveImages(feed, 24);
+  if (!live.length) return null;
+  let L = live;
   let shape = SHAPES[at % SHAPES.length];
   if (L.length < shape[1]) shape = SHAPES[0];
-  const k = shape[0], link = to || "/?c=" + encodeURIComponent(title);
+  const k = shape[0];
+  // Shapes built around a lead picture: the first story that still has one leads, the rest keep their order.
+  if (k !== "three" && k !== "four") { const j = L.findIndex((x) => x.image); if (j > 0) L = [L[j]].concat(L.filter((_, i) => i !== j)); }
+  const link = to || "/?c=" + encodeURIComponent(title);
   return (
     <section className="rf-sec">
       <div className="rf solo">
