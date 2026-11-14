@@ -75,10 +75,40 @@ function EndlessAll({ d, ALL, children }) {
   );
 }
 
+// Which category tabs show in the strip, and in what order (like the Android app's topic settings).
+// Saved per browser; categories the user has switched off stay reachable under "More".
+const TAB_PREFS = "tab_prefs";
+function readTabPrefs() {
+  try { const p = JSON.parse(localStorage.getItem(TAB_PREFS)); if (p && Array.isArray(p.order) && Array.isArray(p.off)) return p; } catch (e) {}
+  return null;
+}
+function applyTabPrefs(all, defShown, p) {
+  if (!p) return { shown: defShown, hidden: all.filter((k) => defShown.indexOf(k) < 0), list: all };
+  const list = p.order.filter((k) => all.indexOf(k) > -1).concat(all.filter((k) => p.order.indexOf(k) < 0));
+  return { shown: list.filter((k) => p.off.indexOf(k) < 0), hidden: list.filter((k) => p.off.indexOf(k) > -1), list };
+}
+
 function CatBar({ d, c, onSearch }) {
-  const tabs = d.categories.slice();
+  const defShown = d.categories.slice(1), all = defShown.concat(d.moreCategories || []);
+  const [prefs, setPrefs] = useState(readTabPrefs);
+  const [tuning, setTuning] = useState(false);
+  const view = applyTabPrefs(all, defShown, prefs);
+  const tabs = ["All"].concat(view.shown);
   if (signedIn()) tabs.splice(1, 0, "For you");
-  const more = d.moreCategories || [], moreOn = more.indexOf(c) > -1;
+  const more = view.hidden, moreOn = more.indexOf(c) > -1;
+  function savePrefs(order, off) {
+    const p = { order, off };
+    setPrefs(p);
+    try { localStorage.setItem(TAB_PREFS, JSON.stringify(p)); } catch (e) {}
+  }
+  function move(k, dir) {
+    const o = view.list.slice(), i = o.indexOf(k), j = i + dir;
+    if (j < 0 || j >= o.length) return;
+    o[i] = o[j]; o[j] = k;
+    savePrefs(o, view.hidden);
+  }
+  function flip(k) { savePrefs(view.list, view.hidden.indexOf(k) > -1 ? view.hidden.filter((x) => x !== k) : view.hidden.concat(k)); }
+  function reset() { setPrefs(null); try { localStorage.removeItem(TAB_PREFS); } catch (e) {} }
   const [menu, setMenu] = useState(null), btn = useRef(null), pop = useRef(null);
   useLayoutEffect(() => {
     if (!menu || !pop.current) return;
@@ -105,12 +135,29 @@ function CatBar({ d, c, onSearch }) {
       <div className="wide" id="cats" style={{ display: "flex", alignItems: "center", gap: 26, paddingTop: 0, paddingBottom: 0, overflowX: "auto", scrollbarWidth: "none" }}>
         {tabs.map((k) => <Link key={k} className={"chip" + (k === c ? " on" : "")} to={k === "All" ? "/" : "/?c=" + encodeURIComponent(k)}>{k}</Link>)}
         {more.length ? <span className="more-wrap"><button type="button" ref={btn} className={"chip" + (moreOn ? " on" : "")} id="more-open" aria-haspopup="true" aria-expanded={!!menu} onClick={toggle}>{moreOn ? c : "More"} &#9662;</button></span> : null}
-        <button type="button" className="search-btn tune-btn" id="tune-open" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg></button>
+        <button type="button" className="search-btn tune-btn" id="tune-open" aria-label="Choose tabs" title="Choose tabs" aria-haspopup="dialog" aria-expanded={tuning} onClick={() => setTuning(true)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg></button>
         <button type="button" className="search-btn" id="search-open" aria-label="Search" title="Search (Ctrl/Cmd+K)" onClick={onSearch}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg></button>
       </div>
       {menu ? createPortal(
         <div className="cat-pop" role="menu" ref={pop} style={{ top: menu.top, left: 0 }}>
           {more.map((k) => <Link key={k} role="menuitem" className={k === c ? "on" : ""} to={"/?c=" + encodeURIComponent(k)} onClick={() => setMenu(null)}>{k}</Link>)}
+        </div>, document.body) : null}
+      {tuning ? createPortal(
+        <div className="tune-scrim" onClick={() => setTuning(false)} onKeyDown={(e) => { if (e.key === "Escape") setTuning(false); }}>
+          <div className="tune-sheet" role="dialog" aria-modal="true" aria-label="Choose tabs" onClick={(e) => e.stopPropagation()}>
+            <h2>Choose tabs</h2>
+            <p>Pick which categories show in the strip and drag them into your order with the arrows. Hidden ones stay under {"“More”"}.</p>
+            <ul>
+              {view.list.map((k, i) => (
+                <li key={k}>
+                  <label><input type="checkbox" checked={view.hidden.indexOf(k) < 0} onChange={() => flip(k)} />{k}</label>
+                  <button type="button" aria-label={"Move " + k + " up"} disabled={i === 0} onClick={() => move(k, -1)}>{"↑"}</button>
+                  <button type="button" aria-label={"Move " + k + " down"} disabled={i === view.list.length - 1} onClick={() => move(k, 1)}>{"↓"}</button>
+                </li>
+              ))}
+            </ul>
+            <div className="tune-actions"><button type="button" onClick={reset}>Reset</button><button type="button" className="done" autoFocus onClick={() => setTuning(false)}>Done</button></div>
+          </div>
         </div>, document.body) : null}
     </nav>
   );

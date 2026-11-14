@@ -34,16 +34,20 @@ function outletList(d) {
 export default function Sources() {
   const ld = useData(loadSourcesPage), d = ld.data;
   const [q, setQ] = useState("");
+  const [cat, setCat] = useState("");
   const all = useMemo(() => (d ? outletList(d) : []), [d]);
+  const cats = useMemo(() => [...new Set(all.map((o) => o.category).filter(Boolean))].sort(), [all]);
   const wait = statusView(ld, "publishers", ({ children }) => <main className="wide" style={{ paddingBottom: 72 }}>{children}</main>);
   if (wait) return wait;
   const n = q.trim().toLowerCase();
-  const l = all.filter((o) => !n || o.name.toLowerCase().indexOf(n) > -1);
+  const l = all.filter((o) => (!n || o.name.toLowerCase().indexOf(n) > -1) && (!cat || o.category === cat));
   return (
     <main className="wide" style={{ paddingBottom: 72 }}>
       <p className="meta crumb" style={{ paddingTop: 28 }}><Link to="/">&larr; Top stories</Link></p>
       <div className="feed-h"><h1>Sources</h1><p>{all.length} publishers we read</p></div>
-      <div className="pg-tools"><input id="sq" type="search" placeholder="Find a source" aria-label="Find a source" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+      <div className="pg-tools"><input id="sq" type="search" placeholder="Find a source" aria-label="Find a source" value={q} onChange={(e) => setQ(e.target.value)} />
+        {cats.length > 0 && <select id="sc" aria-label="Filter by category" value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{cats.map((c) => <option key={c} value={c}>{c}</option>)}</select>}
+      </div>
       <div className="sg" id="sg">
         {l.length ? l.map((o) => (
           <div className="stile" key={o.key}>

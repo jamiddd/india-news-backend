@@ -499,7 +499,7 @@ export async function loadSourcesPage() {
     return { stories };
   }
   const sources = cx.sources.list.filter((s) => !s.status || s.status === "active").map((s) => ({
-    key: slug(s.name), name: s.name, region: titleCase(s.region || s.category || ""), lang: String(s.language || "").toUpperCase(), homepage: s.homepage_url || null,
+    key: slug(s.name), name: s.name, region: titleCase(s.region || s.category || ""), lang: String(s.language || "").toUpperCase(), category: titleCase(s.category || ""), homepage: s.homepage_url || null,
   }));
   return { sources, stories };
 }
