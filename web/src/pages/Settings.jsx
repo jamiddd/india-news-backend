@@ -140,7 +140,7 @@ export default function Settings() {
         <Group t="Help and about" rows={[
           { ic: IC.msg, t: "Send feedback", s: "Tell us what is broken, missing, or wrong", href: "/feedback" },
           { ic: IC.play, t: "Replay app tour", s: "A quick walkthrough of how Open Indian News works", href: "/about" },
-          { ic: IC.star, t: "Rate Open Indian News", s: "Leave a review on the Play Store", href: "/download" },
+          { ic: IC.star, t: "Rate Open Indian News", s: "Leave a review on the Play Store", href: "https://play.google.com/store/apps/details?id=com.jamid.news" },
           { ic: IC.lock, t: "Privacy and your data", href: "/privacy" },
           { ic: IC.info, t: "About Open Indian News", href: "/about" },
           { ic: IC.book, t: "Credits", s: "Sources, word lists, typefaces and open source software", href: "/credits" },

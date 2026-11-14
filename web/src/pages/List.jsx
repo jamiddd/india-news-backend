@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { FollowBtn, PopHost, Ph, SRow, ago, slug } from "../components/home/shared.jsx";
+import { Fav } from "../components/Photo.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadList } from "../api.js";
 import { LANGS, REGIONS, outletHash } from "./Sources.jsx";
@@ -67,7 +68,7 @@ export default function List() {
               <div className="tiles four">{others.map((k) => {
                 const h2 = outletHash(outlets[k]);
                 return (
-                  <div className="stile" key={k}><Link className="stile-l" to={"/source/" + k}><span className="fv big sm"></span><span><b>{outlets[k]}</b><small>{REGIONS[h2 % 4]} &middot; {LANGS[h2 % 3]}</small></span></Link><FollowBtn k={"source:" + k} /></div>
+                  <div className="stile" key={k}><Link className="stile-l" to={"/source/" + k}><Fav name={outlets[k]} className="big sm" /><span><b>{outlets[k]}</b><small>{REGIONS[h2 % 4]} &middot; {LANGS[h2 % 3]}</small></span></Link><FollowBtn k={"source:" + k} /></div>
                 );
               })}</div></section>
             <p className="foot-note">Stories open on the publisher&rsquo;s own site, so every read counts for them.</p>

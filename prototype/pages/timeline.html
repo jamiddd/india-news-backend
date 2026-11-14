@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timeline — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, ago = PROTO.ago, S = d.stories, id = +location.pathname.split("/").pop();
+  var t = d.timelines.filter(function (x) { return x.id === id; })[0], el = document.getElementById("page");
+  if (!t) { el.innerHTML = '<p class="empty" style="padding-top:48px">Timeline not found. <a href="/">Back to top stories</a></p>'; return; }
+  document.title = t.title + " — Open Indian News";
+  var AI = '<span class="ai"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 2l2.2 6.3L18.5 10l-6.3 2.2L10 18.5l-2.2-6.3L1.5 10l6.3-1.7zM19 13l1 2.6 2.6 1-2.6 1L19 21l-1-2.4-2.6-1 2.6-1z"/></svg>AI GENERATED</span>';
+  var byId = {}; S.forEach(function (s) { byId[s.id] = s; });
+  var beats = t.beats || [];
+  var more = d.timelines.filter(function (x) { return x.id !== t.id && x.category === t.category; })
+    .concat(d.timelines.filter(function (x) { return x.id !== t.id && x.category !== t.category; })).slice(0, 3);
+
+  el.innerHTML = '<article class="sty"><div class="sty-main">' +
+    '<p class="meta crumb"><a href="/">&larr; Top stories</a><span class="cat" style="color:var(--hue-context)">Timeline</span><a class="cat" href="/?c=' + encodeURIComponent(t.category) + '">' + E(t.category) + "</a><span>" + E(t.updated) + "</span>" + AI + "</p>" +
+    "<h1>" + E(t.title) + "</h1>" +
+    '<div class="sty-media"><div class="ph mv" role="button" tabindex="0" aria-label="Open media fullscreen" style="aspect-ratio:16/9">image</div></div>' +
+    '<p class="dek" style="margin-top:14px">' + E(t.context || t.dek || "") + "</p>" +
+    (t.audio ? PROTO.player({ label: t.audio.label, duration: t.audio.duration, id: t.id, kind: "timeline", title: t.title, url: "/timeline/" + t.id }) : "") +
+    '<section class="sty-sec"><h2 class="sec-h"><span>The story so far</span><span class="sec-n">' + beats.length + " entries</span></h2><ol class=\"beats\">" +
+    beats.map(function (b, i) {
+      var last = i === beats.length - 1;
+      return '<li class="beat' + (last ? " last" : "") + '"><span class="beat-d">' + E(b.date) + '</span><span class="beat-dot' + (last ? " now" : "") + '"></span><div class="beat-c">' +
+        (last ? '<em class="beat-now">LATEST</em>' : "") + "<h3>" + E(b.label) + "</h3><p>" + E(b.body) + "</p>" +
+        (b.stories || []).map(function (sid) {
+          var s = byId[sid]; if (!s) return "";
+          return '<a class="beat-story" href="/story/' + s.id + '"><small>' + E(s.category.toUpperCase()) + " &middot; " + ago(s.minutes_ago) + " ago &middot; " + s.outlet_count + " outlets</small><span>" + E(s.headline) + "</span></a>";
+        }).join("") + "</div></li>";
+    }).join("") + "</ol></section>" +
+    (more.length ? '<section class="sty-sec"><h2 class="sec-h"><span>More timelines</span></h2><div class="latest">' + more.map(function (x) {
+      return '<div class="hv"><a href="/timeline/' + x.id + '"><small>' + x.points.length + " events &middot; " + E(x.updated) + "</small>" + E(x.title) + "</a></div>";
+    }).join("") + "</div></section>" : "") + "</div></article>";
+});
+</script>
+</body>
+</html>

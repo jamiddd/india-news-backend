@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Story — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="story" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, ago = PROTO.ago, S = d.stories, id = +location.pathname.split("/").pop();
+  var s = S.filter(function (x) { return x.id === id; })[0], el = document.getElementById("story");
+  if (!s) { el.innerHTML = '<p class="empty" style="padding-top:48px">Story not found. <a href="/">Back to top stories</a></p>'; return; }
+  document.title = s.headline + " — Open Indian News";
+
+  // Coverage runs oldest first, as in the app; the first report is tagged FIRST.
+  var chrono = s.coverage.slice().sort(function (a, b) { return b.minutes_ago - a.minutes_ago; });
+  var COLLAPSED = 5, TOPIC_SHOWN = 6, topics = s.topics || [];
+  function covRows(list) {
+    return list.map(function (v, i) {
+      return '<div class="pop-r' + (i === list.length - 1 ? " last" : "") + '"><span class="pop-t">' + ago(v.minutes_ago) + '</span><span class="pop-dot' + (i === 0 ? " first" : "") + '"></span>' +
+        '<div><div class="pop-n"><i class="fv"></i><a class="so" href="/source/' + PROTO.slug(v.outlet) + '"><b>' + E(v.outlet) + "</b></a>" + (i === 0 ? "<em>FIRST</em>" : "") + '</div><div class="pop-s"><a href="#" target="_blank" rel="noopener" style="color:inherit">' + E(v.title) + "</a></div></div></div>";
+    }).join("");
+  }
+  function topicTiles(all) {
+    return (all ? topics : topics.slice(0, TOPIC_SHOWN)).map(function (t) {
+      return '<a class="tile" href="/topic/' + PROTO.slug(t.label) + '"><b>' + E(t.label) + "</b><span>" + E(t.kind) + "</span></a>";
+    }).join("");
+  }
+  var related = S.filter(function (x) { return x.id !== s.id && x.category === s.category; })
+    .concat(S.filter(function (x) { return x.id !== s.id && x.category !== s.category; })).slice(0, 3);
+
+  // One column, only this story's own content: header, media, summary, framing,
+  // coverage, related topics, related stories.
+  el.innerHTML = '<article class="sty"><div class="sty-main">' +
+    '<p class="meta crumb"><a href="/">&larr; Top stories</a><a class="cat" href="/?c=' + encodeURIComponent(s.category) + '">' + E(s.category) + "</a><span>Updated " + ago(s.minutes_ago) + " ago</span></p>" +
+    "<h1>" + E(s.headline) + '</h1><p class="dek">' + E(s.dek) + "</p>" +
+    PROTO.srow(s) +
+    '<div class="sty-media">' + PROTO.carousel(s) + "</div>" +
+    '<section class="sty-sec" id="summary"><h2 class="sec-h"><span>Summary</span></h2><ul class="bullets">' + s.summary.map(function (b) { return "<li>" + E(b) + "</li>"; }).join("") + "</ul></section>" +
+    '<section class="sty-sec" id="framing"><h2 class="sec-h"><span>Media framing</span></h2><p class="sty-sub">Comparing how ' + s.outlet_count + ' outlets are framing this story.</p><div class="matrix">' +
+      s.framing.map(function (f) { return '<div class="mrow"><b><i class="fv"></i><span><a class="so" href="/source/' + PROTO.slug(f.outlet) + '">' + E(f.outlet) + "</a></span></b><span>" + E(f.angle) + '</span><span class="t">' + E(f.tag) + "</span></div>"; }).join("") + "</div></section>" +
+    '<section class="sty-sec" id="coverage"><h2 class="sec-h"><span>Coverage</span><span class="sec-n">' + chrono.length + ' articles</span></h2><div class="cov-l" id="cov-l">' + covRows(chrono.slice(0, COLLAPSED)) + "</div>" +
+      (chrono.length > COLLAPSED ? '<button type="button" class="more-btn" id="cov-more">Show ' + (chrono.length - COLLAPSED) + " more articles</button>" : "") + "</section>" +
+    (topics.length ? '<section class="sty-sec" id="topics"><h2 class="sec-h"><span>Related topics</span></h2><div class="tiles" id="tiles">' + topicTiles(false) + "</div>" +
+      (topics.length > TOPIC_SHOWN ? '<button type="button" class="more-btn" id="top-more">All ' + topics.length + " topics</button>" : "") + "</section>" : "") +
+    (related.length ? '<section class="sty-sec" id="related"><h2 class="sec-h"><span>Related stories</span></h2><div class="latest">' + related.map(function (x) {
+      return '<div class="hv"><a href="/story/' + x.id + '"><small>' + x.category.toUpperCase() + " &middot; " + ago(x.minutes_ago) + " ago</small>" + E(x.headline) + "</a>" + PROTO.tip(x.id) + "</div>";
+    }).join("") + "</div></section>" : "") +
+    "</div></article>";
+
+  var cm = document.getElementById("cov-more");
+  if (cm) cm.addEventListener("click", function () {
+    var open = cm.dataset.open !== "1";
+    cm.dataset.open = open ? "1" : "0";
+    document.getElementById("cov-l").innerHTML = covRows(open ? chrono : chrono.slice(0, COLLAPSED));
+    cm.textContent = open ? "Show fewer" : "Show " + (chrono.length - COLLAPSED) + " more articles";
+  });
+  var tm = document.getElementById("top-more");
+  if (tm) tm.addEventListener("click", function () {
+    var open = tm.dataset.open !== "1";
+    tm.dataset.open = open ? "1" : "0";
+    document.getElementById("tiles").innerHTML = topicTiles(open);
+    tm.textContent = open ? "Show fewer" : "All " + topics.length + " topics";
+  });
+  if (location.hash && document.querySelector(location.hash)) document.querySelector(location.hash).scrollIntoView();
+});
+</script>
+</body>
+</html>

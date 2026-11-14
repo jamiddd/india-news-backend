@@ -1,50 +1,38 @@
-# The Caddyfile is an easy way to configure your Caddy web server.
-#
-# Unless the file starts with a global options block, the first
-# uncommented line is always the address of your site.
-#
-# To use your own domain name (with automatic HTTPS), first make
-# sure your domain's A/AAAA DNS records are properly pointed to
-# this machine's public IP, then replace ":80" below with your
-# domain name.
+{
+	servers {
+		trusted_proxies_strict
+		# DO load balancer (health checks + forwarded traffic) and Cloudflare's
+		# edge ranges (https://www.cloudflare.com/ips-v4 and /ips-v6, fetched
+		# 2026-10-03). Caddy walks X-Forwarded-For right-to-left past these to
+		# find the real client, exposed below as {client_ip}.
+		trusted_proxies static 10.122.0.6/32 \
+			173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+			141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+			197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+			104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 \
+			2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 \
+			2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	}
+}
 
 :80 {
-	# Set this path to your site's directory.
-	root * /usr/share/caddy
+      @admin_host host admin.openindiannews.com
 
-	# Enable the static file server.
-	file_server
+      handle @admin_host {
+        @admin_root path /
+        handle @admin_root {
+            rewrite * /admin
+            reverse_proxy 127.0.0.1:8080 {
+                header_up X-Forwarded-For {client_ip}
+            }
+        }
+        rewrite * /admin{uri}
+          reverse_proxy 127.0.0.1:8080 {
+              header_up X-Forwarded-For {client_ip}
+          }
+      }
 
-	# Another common task is to set up a reverse proxy:
-	# reverse_proxy localhost:8080
-
-	# Or serve a PHP site through php-fpm:
-	# php_fastcgi localhost:9000
-}
-
-# Refer to the Caddy docs for more information:
-# https://caddyserver.com/docs/caddyfile
-
-api.scalp8.xyz {
-    reverse_proxy 127.0.0.1:8000
-}
-
-app.scalp8.xyz {
-    root * /var/www/app.scalp8.xyz
-    encode gzip
-    file_server
-    try_files {path} /index.html
-}
-
-www.openindiannews.com {
-    redir https://openindiannews.com{uri} 308
-}
-
-admin.openindiannews.com {
-    rewrite * /admin{uri}
-    reverse_proxy 127.0.0.1:8080
-}
-
-openindiannews.com {
-    reverse_proxy 127.0.0.1:8080
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-For {client_ip}
+	}
 }

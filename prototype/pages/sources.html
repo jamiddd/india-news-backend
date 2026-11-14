@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sources — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page");
+  var S = d.stories, slug = PROTO.slug, outlets = {};
+  S.forEach(function (s) { s.coverage.forEach(function (v) {
+    var k = slug(v.outlet); (outlets[k] = outlets[k] || { name: v.outlet, n: 0 }).n++;
+  }); });
+  var all = Object.keys(outlets).map(function (k) {
+    var o = outlets[k], h = 0; o.name.split("").forEach(function (c) { h = (h * 31 + c.charCodeAt(0)) >>> 0; });
+    return { key: k, name: o.name, n: o.n, region: ["National", "Northeast", "Business", "Regional"][h % 4], lang: ["EN", "EN", "HI"][h % 3] };
+  }).sort(function (a, b) { return b.n - a.n || a.name.localeCompare(b.name); });
+  var FK = "oin-follow";
+  function follows() { try { return JSON.parse(localStorage.getItem(FK)) || []; } catch (e) { return []; } }
+  function btn(k) { var on = follows().indexOf("source:" + k) > -1;
+    return '<button type="button" class="fbtn' + (on ? " on" : "") + '" data-follow="source:' + E(k) + '" aria-pressed="' + on + '">' + (on ? "Following" : "Follow") + "</button>"; }
+  function tiles(q) {
+    var l = all.filter(function (o) { return !q || o.name.toLowerCase().indexOf(q) > -1; });
+    return l.length ? l.map(function (o) {
+      return '<div class="stile"><a class="stile-l" href="/source/' + o.key + '"><span class="fv big sm"></span><span><b>' + E(o.name) + "</b><small>" + o.region + " &middot; " + o.lang + " &middot; " + o.n + " stories</small></span></a>" + btn(o.key) + "</div>";
+    }).join("") : '<p class="empty">No sources match.</p>';
+  }
+  el.innerHTML = '<p class="meta crumb" style="padding-top:28px"><a href="/">&larr; Top stories</a></p><div class="feed-h"><h1>Sources</h1><p>' + all.length + ' publishers we read</p></div>' +
+    '<div class="pg-tools"><input id="sq" type="search" placeholder="Find a source" aria-label="Find a source"></div><div class="sg" id="sg">' + tiles("") + "</div>";
+  document.getElementById("sq").addEventListener("input", function (e) { document.getElementById("sg").innerHTML = tiles(e.target.value.trim().toLowerCase()); });
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-follow]");
+    if (!b) return;
+    if (!PROTO.signedIn()) { PROTO.openLogin(); return; }
+    var k = b.dataset.follow, l = follows(), i = l.indexOf(k), on = i < 0;
+    if (on) l.push(k); else l.splice(i, 1);
+    try { localStorage.setItem(FK, JSON.stringify(l)); } catch (x) {}
+    b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); b.firstChild.nodeValue = on ? "Following" : "Follow";
+  });
+});
+</script>
+</body>
+</html>

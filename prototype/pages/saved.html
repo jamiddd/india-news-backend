@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Saved stories — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page");
+  var S = d.stories, ago = PROTO.ago;
+  function ph(r) { return '<div class="ph" style="aspect-ratio:' + r + '">image</div>'; }
+  function card(x) {
+    return '<div class="c">' + ph("3/2") + '<div class="meta"><span class="cat">' + E(x.category) + "</span><span>" + ago(x.minutes_ago) + " ago</span></div>" +
+      '<h3><a href="/story/' + x.id + '">' + E(x.headline) + "</a></h3>" + PROTO.srow(x) + "</div>";
+  }
+  function draw() {
+    var list = S.filter(function (s) { return PROTO.isSaved(s.id); });
+    el.innerHTML = '<p class="meta crumb" style="padding-top:28px"><a href="/">&larr; Top stories</a></p><div class="feed-h"><h1>Saved</h1><p>' + list.length + ' stor' + (list.length === 1 ? "y" : "ies") + '</p></div>' +
+      (list.length ? '<div class="cards flat" id="grid">' + list.map(card).join("") + "</div>"
+        : '<p class="empty" style="padding-top:32px">Nothing saved yet. Tap the bookmark on any story to keep it here. <a href="/">Browse top stories</a></p>');
+  }
+  draw();
+  // Un-saving a story drops it from the page once the shared handler has updated storage.
+  document.addEventListener("click", function (e) { if (e.target.closest("[data-save]")) setTimeout(draw, 0); });
+});
+</script>
+</body>
+</html>

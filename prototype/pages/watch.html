@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watch — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+<style>
+/* Watch: always dark, like the app's Watch tab, whatever the site theme. */
+body{background:#000}
+/* no top bar on this tab: the switcher and the video take its place */
+header.masthead,.appbar{display:none !important}
+/* bottom nav: dark glass with light icons, whatever the site theme */
+.tabbar{--ink:#FFFFFF; --ink-2:rgba(255,255,255,.68); --bg:#0A0A0A; --line:rgba(255,255,255,.14); background:rgba(10,10,10,.72) !important; border-color:rgba(255,255,255,.14) !important}
+.wt{--wb:#000; --wf:#fff; --wf2:rgba(255,255,255,.72); --wl:rgba(255,255,255,.14); color:var(--wf); background:var(--wb); min-height:100vh; padding-bottom:120px; max-width:760px; margin:0 auto}
+.wt a{color:inherit}
+.wt-top{display:flex; justify-content:center; padding:calc(12px + env(safe-area-inset-top)) 16px 4px}
+.wt-sw{position:relative; display:flex; padding:3px; border-radius:18px; background:rgba(255,255,255,.12)}
+.wt-sw i{position:absolute; top:3px; left:3px; width:72px; height:30px; border-radius:15px; background:#1976D2; transition:transform .25s cubic-bezier(.3,.8,.3,1)}
+.wt-sw.swipe i{transform:translateX(72px)}
+.wt-sw button{position:relative; width:72px; height:30px; border:0; background:none; border-radius:15px; color:var(--wf2); font:600 13px var(--sans,Inter,sans-serif); cursor:pointer}
+.wt-sw button.on{color:#fff}
+/* player */
+.wt-pl{position:sticky; top:0; z-index:10; box-shadow:0 8px 20px -10px rgba(0,0,0,.8); aspect-ratio:16/9; margin-top:10px; background:linear-gradient(135deg,#23262d,#14161a); display:grid; place-items:center; cursor:pointer; overflow:hidden}
+.wt-pl .lbl{position:absolute; left:12px; top:10px; font:600 11px var(--mono); letter-spacing:.08em; color:var(--wf2); text-transform:uppercase}
+.wt-play{width:64px; height:64px; border-radius:50%; border:0; display:grid; place-items:center; background:rgba(0,0,0,.55); color:#fff; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); cursor:pointer}
+.wt-bar{position:absolute; left:0; right:0; bottom:0; height:4px; background:rgba(255,255,255,.2)}
+.wt-bar b{display:block; height:100%; width:0; background:#1976D2}
+.wt-time{position:absolute; right:10px; bottom:12px; font:600 11px var(--mono); background:rgba(0,0,0,.7); padding:2px 6px; border-radius:5px}
+/* now playing */
+.wt-now{padding:14px 16px}
+.wt-now h1{margin:0 0 8px; font-size:21px; line-height:1.28; font-weight:600; letter-spacing:-.01em}
+.wt-src{display:flex; align-items:center; gap:8px; font-size:14px; color:var(--wf2)}
+.wt-src .fv{flex:0 0 auto}
+.wt-pills{display:flex; gap:8px; margin-top:12px; overflow-x:auto; scrollbar-width:none}
+.wt-pill{flex:0 0 auto; display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 14px; border-radius:18px; border:0; background:rgba(255,255,255,.12); color:#fff; font:600 13px var(--sans,Inter,sans-serif); cursor:pointer; text-decoration:none}
+.wt-pill:hover{text-decoration:none; background:rgba(255,255,255,.2)}
+.wt-pill.on{color:#fff; background:#1976D2}
+.wt-pill.on svg{fill:currentColor}
+/* up next */
+.wt-h{padding:8px 16px 10px; margin:6px 0 0; border-top:1px solid var(--wl); padding-top:16px; font-size:15px; font-weight:700}
+.wt-row{display:flex; gap:12px; padding:8px 16px; cursor:pointer; text-align:left; width:100%; border:0; background:none; color:inherit; font:inherit}
+.wt-row:hover{background:rgba(255,255,255,.05)}
+.wt-th{position:relative; flex:0 0 168px; aspect-ratio:16/9; border-radius:10px; background:linear-gradient(135deg,#2a2e36,#171a1f); overflow:hidden}
+.wt-th em{position:absolute; right:6px; bottom:6px; font:700 11px var(--mono); font-style:normal; background:rgba(0,0,0,.78); padding:2px 6px; border-radius:5px}
+.wt-row.cur .wt-th{outline:2px solid #1976D2; outline-offset:-2px}
+.wt-tx{min-width:0; display:flex; flex-direction:column; gap:5px}
+.wt-tx b{font-size:15px; font-weight:600; line-height:1.3; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden}
+.wt-tx small{font-size:12.5px; color:var(--wf2); display:flex; align-items:center; gap:6px}
+/* swipe */
+.wt-feed{height:calc(100dvh - 64px); overflow-y:auto; scroll-snap-type:y mandatory; scrollbar-width:none}
+.wt-feed::-webkit-scrollbar{display:none}
+.wt-card{position:relative; height:100%; scroll-snap-align:start; scroll-snap-stop:always; background:linear-gradient(160deg,#2a2e36,#0d0f12); display:flex; flex-direction:column; justify-content:flex-end; padding:18px 76px 96px 16px; box-sizing:border-box}
+.wt-card::after{content:""; position:absolute; inset:45% 0 0 0; background:linear-gradient(transparent,rgba(0,0,0,.85)); pointer-events:none}
+.wt-card > *{position:relative; z-index:1}
+.wt-card h2{margin:8px 0 0; font-size:21px; line-height:1.28; font-weight:700}
+.wt-rail{position:absolute; right:10px; bottom:96px; z-index:2; display:flex; flex-direction:column; gap:14px; align-items:center}
+.wt-rail .wt-pill{width:48px; height:48px; padding:0; justify-content:center; border-radius:50%; background:rgba(0,0,0,.45)}
+.wt-card .wt-play{position:absolute; left:50%; top:40%; transform:translate(-50%,-50%); z-index:1}
+.wt-card.playing .wt-play{opacity:0}
+.wt-empty{padding:60px 20px; text-align:center; color:var(--wf2)}
+@media (min-width:1001px){ .wt-feed{height:calc(100vh - 140px)} }
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+<main class="wt" id="page"></main>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, ago = PROTO.ago, el = document.getElementById("page");
+  var V = d.stories.filter(function (s) { return s.media.some(function (m) { return m.kind === "video"; }); }).map(function (s) {
+    return { s: s, id: s.id, outlet: s.coverage[0] ? s.coverage[0].outlet : "", dur: 45 + (s.id * 37) % 200 };
+  });
+  var cur = 0, playing = false, mode = "watch", tick = null, pos = 0;
+  function mmss(n) { return Math.floor(n / 60) + ":" + ("0" + (n % 60)).slice(-2); }
+  var PLAY = '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+  var PAUSE = '<svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+  var BM = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg>';
+  var SH = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/></svg>';
+  var RD = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M9 9h6M9 13h6M9 17h3"/></svg>';
+  function pills(v, rail) {
+    var on = PROTO.isSaved(v.id);
+    return '<div class="' + (rail ? "wt-rail" : "wt-pills") + '"><button type="button" class="wt-pill' + (on ? " on" : "") + '" data-save="' + v.id + '" aria-pressed="' + on + '" aria-label="Save">' + BM + (rail ? "" : "<span>Save</span>") + "</button>" +
+      '<button type="button" class="wt-pill" data-share="' + v.id + '" aria-label="Share">' + SH + (rail ? "" : "<span>Share</span>") + "</button>" +
+      '<a class="wt-pill" href="/story/' + v.id + '" aria-label="Read story">' + RD + (rail ? "" : "<span>Read story</span>") + "</a></div>";
+  }
+  function src(v) { return '<span class="wt-src"><i class="fv"></i><span>' + E(v.outlet) + " &middot; " + ago(v.s.minutes_ago) + " ago</span></span>"; }
+  function switcher() {
+    return '<div class="wt-top"><div class="wt-sw' + (mode === "swipe" ? " swipe" : "") + '" role="tablist"><i></i><button type="button" class="' + (mode === "watch" ? "on" : "") + '" data-mode="watch" role="tab">Watch</button><button type="button" class="' + (mode === "swipe" ? "on" : "") + '" data-mode="swipe" role="tab">Swipe</button></div></div>';
+  }
+  function stop() { clearInterval(tick); tick = null; }
+  function run() {
+    stop(); if (!playing) return;
+    tick = setInterval(function () {
+      pos++; var v = V[cur];
+      if (pos >= v.dur) { pos = 0; if (mode === "watch") { cur = (cur + 1) % V.length; draw(); return; } }
+      var b = document.querySelector(".wt-bar b"), t = document.querySelector(".wt-time");
+      if (b) b.style.width = (pos / v.dur * 100) + "%"; if (t) t.textContent = mmss(pos) + " / " + mmss(v.dur);
+    }, 1000);
+  }
+  function draw() {
+    if (!V.length) { el.innerHTML = switcher() + '<p class="wt-empty">No videos yet.</p>'; return; }
+    if (mode === "swipe") {
+      el.innerHTML = switcher() + '<div class="wt-feed" id="feed">' + V.map(function (v, i) {
+        return '<section class="wt-card" data-i="' + i + '"><button type="button" class="wt-play" aria-label="Play">' + PLAY + "</button>" + src(v) + "<h2>" + E(v.s.headline) + "</h2>" + pills(v, true) + "</section>";
+      }).join("") + "</div>";
+      return;
+    }
+    var v = V[cur];
+    el.innerHTML = switcher() +
+      '<div class="wt-pl" id="pl"><span class="lbl">Video</span><button type="button" class="wt-play" aria-label="' + (playing ? "Pause" : "Play") + '">' + (playing ? PAUSE : PLAY) + '</button><span class="wt-time">' + mmss(pos) + " / " + mmss(v.dur) + '</span><div class="wt-bar"><b style="width:' + (pos / v.dur * 100) + '%"></b></div></div>' +
+      '<div class="wt-now"><h1>' + E(v.s.headline) + "</h1>" + src(v) + pills(v, false) + "</div>" +
+      '<h2 class="wt-h">Up next</h2>' + V.map(function (x, i) {
+        if (i === cur) return "";
+        return '<button type="button" class="wt-row" data-i="' + i + '"><span class="wt-th"><em>' + mmss(x.dur) + '</em></span><span class="wt-tx"><b>' + E(x.s.headline) + "</b><small><i class=\"fv\"></i>" + E(x.outlet) + " &middot; " + ago(x.s.minutes_ago) + "</small></span></button>";
+      }).join("");
+    run();
+  }
+  el.addEventListener("click", function (e) {
+    var m = e.target.closest("[data-mode]"), r = e.target.closest(".wt-row"), p = e.target.closest(".wt-play, .wt-pl");
+    if (m) { mode = m.dataset.mode; playing = false; pos = 0; stop(); draw(); return; }
+    if (r) { cur = +r.dataset.i; pos = 0; playing = true; draw(); window.scrollTo(0, 0); return; }
+    if (p && mode === "watch") { playing = !playing; draw(); return; }
+    if (p) { var c = p.closest(".wt-card"); c.classList.toggle("playing"); }
+  });
+  draw();
+});
+</script>
+</body>
+</html>

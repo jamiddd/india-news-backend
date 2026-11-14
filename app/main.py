@@ -1301,20 +1301,6 @@ async def donate_page(request: Request):
     return web_spa.render_shell(title="Donate") or static_page("donate.html")
 
 
-def _default_apk_url() -> str:
-    """The public Storage URL for the current Android build, or "" when
-    Supabase is not configured. Reuses the editorial-backgrounds helper for
-    the project origin, which already copes with SUPABASE_URL being set to
-    the REST endpoint rather than the bare origin."""
-    base = project_base_url()
-    if not base:
-        return ""
-    return (
-        f"{base}/storage/v1/object/public/"
-        f"{settings.APK_BUCKET}/{settings.APK_OBJECT_PATH.lstrip('/')}"
-    )
-
-
 @app.get("/donations/thanks", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def donation_thanks(request: Request):
@@ -1442,7 +1428,7 @@ async def story_deep_link(request: Request, cluster_id: int, db: AsyncSession = 
         f"<h1>{headline}</h1>\n"
         f'<p class="updated">{description}</p>\n'
         '<p style="margin:28px 0">'
-        '<a class="btn btn-primary" href="/download">Get the app to read the full story</a>'
+        '<a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.jamid.news">Get the app to read the full story</a>'
         "</p>\n"
         "</main>\n</body>\n</html>"
     )
@@ -1502,7 +1488,7 @@ def _deep_link_page(*, title: str, description: str, page_url: str, image_url: O
         f"<h1>{title}</h1>\n"
         f'<p class="updated">{description}</p>\n'
         '<p style="margin:28px 0">'
-        f'<a class="btn btn-primary" href="/download">{cta_label}</a>'
+        f'<a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.jamid.news">{cta_label}</a>'
         "</p>\n"
         "</main>\n</body>\n</html>"
     )
@@ -1580,39 +1566,17 @@ async def explainer_deep_link(request: Request, explainer_id: int, db: AsyncSess
     )
 
 
-@app.get("/download", response_class=HTMLResponse)
-@limiter.limit("60/minute")
-async def download_page(request: Request):
-    """Install page for the Android build.
-
-    Exists because the app is not on Google Play yet, and Razorpay's
-    activation form wants an app link a reviewer can actually open. Play's
-    pre-production tracks are no use for that: internal testing is an
-    allowlist-only URL, closed testing is not publicly searchable, and open
-    testing needs production access first. So the build is hosted directly
-    and this page is the link that gets submitted.
-    """
-    return web_spa.render_shell(title="Download the app") or static_page("download.html")
+PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.jamid.news"
 
 
+@app.get("/download")
 @app.get("/download/apk")
-@limiter.limit("30/minute")
-async def download_apk(request: Request):
-    """Redirects to the hosted build.
-
-    A redirect rather than a file response so the APK never has to live in
-    this repo or the image. The target defaults to the public Supabase
-    Storage object, derived from SUPABASE_URL, so shipping a new build is an
-    upload to the bucket with no redeploy -- see APK_DOWNLOAD_URL and friends
-    in config.py.
-    """
-    url = settings.APK_DOWNLOAD_URL or _default_apk_url()
-    if not url:
-        raise HTTPException(
-            status_code=404,
-            detail="No build is currently published for direct download.",
-        )
-    return RedirectResponse(url, status_code=302)
+@limiter.limit("60/minute")
+async def download_redirect(request: Request):
+    """The app is distributed through Google Play only. These old install-page
+    and direct-APK URLs stay alive as permanent redirects so existing links
+    land on the Play listing."""
+    return RedirectResponse(PLAY_STORE_URL, status_code=301)
 
 
 @app.get("/privacy", response_class=HTMLResponse)

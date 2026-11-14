@@ -36,6 +36,11 @@ Volume=<PLAY_BILLING_HOST_PATH>:/run/secrets/play-billing-service-account.json:r
 # system-level Caddy reverse-proxies HTTPS to 127.0.0.1:8080. Never publish
 # on 0.0.0.0 here.
 PublishPort=127.0.0.1:8080:8000
+# Caddy reaches the container via the Podman bridge gateway, so uvicorn sees
+# every request as coming from 10.88.0.1 and ignores X-Forwarded-For (it only
+# trusts 127.0.0.1 by default). Without this the per-IP rate limiter puts all
+# users in one shared bucket. Trust only the gateway, never "*" (spoofable).
+Environment=FORWARDED_ALLOW_IPS=10.88.0.1
 
 [Service]
 Restart=always

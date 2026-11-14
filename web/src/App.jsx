@@ -7,7 +7,6 @@ import Credits from "./pages/Credits.jsx";
 import DeleteAccount from "./pages/DeleteAccount.jsx";
 import Donate from "./pages/Donate.jsx";
 import DonationThanks from "./pages/DonationThanks.jsx";
-import Download from "./pages/Download.jsx";
 import Explainer from "./pages/Explainer.jsx";
 import Explainers from "./pages/Explainers.jsx";
 import FallbackPreview from "./pages/FallbackPreview.jsx";
@@ -52,7 +51,6 @@ export default function App() {
         <Route path="/delete-account" element={<DeleteAccount />} />
         <Route path="/donate" element={<Donate />} />
         <Route path="/donation-thanks" element={<DonationThanks />} />
-        <Route path="/download" element={<Download />} />
         <Route path="/explainer" element={<Explainer />} />
         <Route path="/explainers" element={<Explainers />} />
         <Route path="/feedback" element={<Feedback />} />

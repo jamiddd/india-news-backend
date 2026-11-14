@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+<style>
+.pf{padding-top:28px; padding-bottom:120px}
+.pf-grid{display:grid; grid-template-columns:320px minmax(0,1fr); gap:32px; align-items:start}
+.pf-id{position:sticky; top:24px; text-align:center; padding:28px 22px; border:1px solid var(--line); border-radius:20px; background:var(--surface)}
+.pf-av{width:96px; height:96px; margin:0 auto 14px; border-radius:50%; display:grid; place-items:center; background:#1976D2; color:#fff; font-size:40px; font-weight:800}
+.pf-av.guest{background:var(--line); color:var(--ink-3)}
+.pf-id h1{margin:0; font-size:24px; font-weight:800; letter-spacing:-.02em}
+.pf-id .em{margin-top:2px; font-size:14px; color:var(--ink-2); word-break:break-all}
+.pf-id .jn{margin-top:6px; font:500 12px var(--mono); color:var(--ink-3)}
+.pf-chips{display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top:14px}
+.pf-chip{display:inline-flex; align-items:center; height:30px; padding:0 12px; border-radius:15px; background:var(--bg); border:1px solid var(--line); font-size:13px; font-weight:600; color:var(--ink)}
+.pf-chip:hover{text-decoration:none; border-color:var(--ink-3)}
+.pf-id .btn{margin-top:18px; width:100%; justify-content:center}
+.pf-g{margin:0 0 26px}
+.pf-g > h2{margin:0 0 8px 4px; font:600 12px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+.pf-card{border:1px solid var(--line); border-radius:16px; background:var(--surface); overflow:hidden}
+.pf-r{display:flex; align-items:center; gap:14px; width:100%; padding:14px 16px; border:0; border-bottom:1px solid var(--line); background:none; color:var(--ink); font:inherit; text-align:left; cursor:pointer; text-decoration:none}
+.pf-r:last-child{border-bottom:0}
+a.pf-r:hover,button.pf-r:hover{text-decoration:none; background:color-mix(in srgb,var(--ink) 5%,transparent)}
+.pf-r .ic{flex:0 0 auto; width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background:var(--bg); border:1px solid var(--line); color:var(--ink-2)}
+.pf-r .tx{flex:1 1 auto; min-width:0}
+.pf-r .tx b{display:block; font-size:15px; font-weight:600}
+.pf-r .tx small{display:block; margin-top:2px; font-size:12.5px; color:var(--ink-3); line-height:1.35}
+.pf-r .ch{flex:0 0 auto; color:var(--ink-3)}
+.pf-r.danger .tx b,.pf-r.danger .ic{color:var(--breaking)}
+.pf-sw{position:relative; flex:0 0 auto; width:46px; height:28px; border-radius:14px; background:var(--line); transition:background .2s}
+.pf-sw::after{content:""; position:absolute; top:3px; left:3px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.35); transition:transform .2s}
+[aria-checked="true"] > .pf-sw{background:#1976D2}
+[aria-checked="true"] > .pf-sw::after{transform:translateX(18px)}
+.pf-sel{flex:0 0 auto; min-height:34px; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink); font:inherit; font-size:14px}
+.pf-sws{display:flex; gap:10px; flex-wrap:wrap; padding:0 16px 16px 66px}
+.pf-sws button{width:30px; height:30px; border-radius:50%; border:2px solid transparent; cursor:pointer; padding:0; outline-offset:2px}
+.pf-sws button[aria-pressed="true"]{border-color:var(--ink); box-shadow:inset 0 0 0 2px var(--surface)}
+.pf-ver{text-align:center; font:500 12px var(--mono); color:var(--ink-3); margin-top:8px}
+.pf-guest{text-align:left; margin-top:18px; padding:16px; border-radius:14px; background:var(--bg); border:1px solid var(--line)}
+.pf-guest b{display:block; font-size:15px} .pf-guest span{display:block; margin:2px 0 12px; font-size:13px; color:var(--ink-2)}
+@media (max-width:1000px){
+  .pf{padding-top:12px}
+  .pf-grid{grid-template-columns:1fr; gap:22px}
+  .pf-id{position:static; display:grid; grid-template-columns:auto 1fr; column-gap:16px; text-align:left; padding:18px; border-radius:18px}
+  .pf-av{width:64px; height:64px; margin:0; font-size:28px; grid-row:1 / span 3}
+  .pf-id .btn,.pf-chips,.pf-guest{grid-column:1 / -1}
+  .pf-chips{justify-content:flex-start}
+  .pf-id h1{font-size:20px}
+  .pf-sws{padding-left:16px}
+}
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide pf" id="page"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page"), PK = "oin-prefs";
+  function sess() { try { return JSON.parse(localStorage.getItem("oin-session")); } catch (e) { return null; } }
+  function prefs() { try { return JSON.parse(localStorage.getItem(PK)) || {}; } catch (e) { return {}; } }
+  function setPref(k, v) { var p = prefs(); p[k] = v; try { localStorage.setItem(PK, JSON.stringify(p)); } catch (e) {} }
+  function theme() { return document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+  var ACC = [["Blue","#1976D2"],["Purple","#7B1FA2"],["Green","#2E7D32"],["Red","#C62828"],["Amber","#E65100"],["Teal","#00838F"],["Indigo","#3949AB"],["Pink","#D81B60"],["Orange","#F57C00"],["Navy","#264653"],["Slate","#546E7A"],["Black","#171717"]];
+  function I(p) { return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + "</svg>"; }
+  var CH = '<svg class="ch" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>';
+  var IC = { moon: I('<path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z"/>'), blur: I('<circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/>'), pal: I('<path d="M12 3a9 9 0 100 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 003-3A9 9 0 0012 3z"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="11" r="1"/>'),
+    feed: I('<path d="M4 6h16M4 12h16M4 18h10"/>'), lang: I('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>'), bell: I('<path d="M6 17V11a6 6 0 1112 0v6l2 2H4z"/><path d="M10 21h4"/>'), trash: I('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),
+    src: I('<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/>'), bm: I('<path d="M6 3h12v18l-6-4.5L6 21z"/>'), msg: I('<path d="M4 5h16v11H9l-5 4z"/>'), play: I('<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z"/>'), star: I('<path d="M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.3l1-6.2L3 9.7l6.2-.9z"/>'), lock: I('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 118 0v3"/>'),
+    info: I('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'), book: I('<path d="M5 4h10a4 4 0 014 4v12H9a4 4 0 01-4-4z"/>'), out: I('<path d="M10 4H5v16h5M15 8l4 4-4 4M19 12H9"/>'), edit: I('<path d="M4 20h4L19 9l-4-4L4 16z"/>') };
+
+  function row(o) {
+    var inner = '<span class="ic">' + o.ic + '</span><span class="tx"><b>' + E(o.t) + "</b>" + (o.s ? "<small>" + E(o.s) + "</small>" : "") + "</span>";
+    if (o.sw) return '<button type="button" class="pf-r" role="switch" aria-checked="' + !!o.on + '" data-pref="' + o.sw + '">' + inner + '<span class="pf-sw"></span></button>';
+    if (o.sel) return '<div class="pf-r" style="cursor:default">' + inner + '<select class="pf-sel" data-sel="' + o.sel + '" aria-label="' + E(o.t) + '">' + o.opts.map(function (x) { return "<option" + (x === o.val ? " selected" : "") + ">" + x + "</option>"; }).join("") + "</select></div>";
+    if (o.href) return '<a class="pf-r' + (o.danger ? " danger" : "") + '" href="' + o.href + '">' + inner + CH + "</a>";
+    return '<button type="button" class="pf-r' + (o.danger ? " danger" : "") + '"' + (o.id ? ' id="' + o.id + '"' : "") + ">" + inner + (o.chev === false ? "" : CH) + "</button>";
+  }
+  function group(t, rows, extra) { return '<section class="pf-g"><h2>' + E(t) + '</h2><div class="pf-card">' + rows.map(row).join("") + (extra || "") + "</div></section>"; }
+
+  function draw() {
+    var u = sess(), p = prefs(), saved = 0;
+    try { saved = (JSON.parse(localStorage.getItem("oin-saved")) || []).length; } catch (e) {}
+    var accent = p.accent || "#1976D2";
+    var id = u
+      ? '<div class="pf-av" aria-hidden="true">' + E((u.name || u.email || "?").trim().charAt(0).toUpperCase()) + "</div><h1>" + E(u.name || "Reader") + '</h1><div class="em">' + E(u.email || "") + '</div><div class="jn">Joined ' + E(u.joined || "this month") + '</div>' +
+        '<div class="pf-chips"><a class="pf-chip" href="/saved">' + saved + " saved</a><a class=\"pf-chip\" href=\"/sources\">Following</a></div>" +
+        '<button type="button" class="btn btn-primary btn-sm" id="pf-edit"><span>Edit profile</span></button>'
+      : '<div class="pf-av guest" aria-hidden="true">' + I('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>') + "</div><h1>Welcome, Reader</h1>" +
+        '<div class="em">Sign in to save stories and sync across devices</div><div class="pf-guest"><b>Sign in or create an account</b><span>It only takes a moment</span><button type="button" class="btn btn-primary btn-sm" id="pf-login" style="width:100%"><span>Sign in</span></button></div>';
+    var sw = '<div class="pf-sws" role="group" aria-label="Accent colour">' + ACC.map(function (a) { return '<button type="button" style="background:' + a[1] + '" data-acc="' + a[1] + '" aria-label="' + a[0] + '" aria-pressed="' + (a[1] === accent) + '"></button>'; }).join("") + "</div>";
+    el.innerHTML = '<div class="pf-grid"><aside class="pf-id">' + id + "</aside><div>" +
+      group("Appearance", [
+        { ic: IC.moon, t: "Dark mode", s: "Switch between day and night", sw: "dark", on: theme() === "dark" },
+        { ic: IC.blur, t: "Reduce blur", s: "Turn off blur effects to make the app smoother on older phones", sw: "noblur", on: p.noblur },
+        { ic: IC.pal, t: "Accent colour", s: "Choose your preferred accent colour", chev: false, id: "pf-acc" }
+      ].slice(0, 2).concat([{ ic: IC.pal, t: "Accent colour", s: "Choose your preferred accent colour", chev: false, id: "pf-acc" }]), sw) +
+      group("Your feed", [
+        { ic: IC.feed, t: "Customize feed", s: "Choose and arrange which topics appear in your feed", href: "/?c=For%20you" },
+        { ic: IC.src, t: "Sources", s: "See every publisher this app aggregates news from", href: "/sources" },
+        { ic: IC.bm, t: "Saved stories", s: saved + (saved === 1 ? " story" : " stories") + " saved", href: "/saved" },
+        { ic: IC.lang, t: "News language", s: "Language preference for the news feed and search", sel: "lang", opts: ["English", "हिन्दी"], val: p.lang || "English" },
+        { ic: IC.bell, t: "Notifications", s: "Breaking news and your daily digest", sw: "notify", on: p.notify !== false },
+        { ic: IC.trash, t: "Auto-remove saved stories", s: "Clear a saved story after you have read it", sw: "autoremove", on: p.autoremove }
+      ]) +
+      group("Help and about", [
+        { ic: IC.msg, t: "Send feedback", s: "Tell us what is broken, missing, or wrong", href: "/feedback" },
+        { ic: IC.play, t: "Replay app tour", s: "A quick walkthrough of how Open Indian News works", href: "/about" },
+        { ic: IC.star, t: "Rate Open Indian News", s: "Leave a review on the Play Store", href: "/download" },
+        { ic: IC.lock, t: "Privacy and your data", href: "/privacy" },
+        { ic: IC.info, t: "About Open Indian News", href: "/about" },
+        { ic: IC.book, t: "Credits", s: "Sources, word lists, typefaces and open source software", href: "/credits" }
+      ]) +
+      (u ? group("Account", [
+        { ic: IC.out, t: "Sign out", id: "pf-out", chev: false },
+        { ic: IC.trash, t: "Delete account", s: "Permanently delete your account and all data stored about you", href: "/delete-account", danger: true }
+      ]) : "") + '<p class="pf-ver">Open Indian News &middot; web prototype</p></div></div>';
+    // the accent row opens its swatches inline: show them under the row
+    var accRow = document.getElementById("pf-acc"); accRow.parentNode.insertBefore(el.querySelector(".pf-sws"), accRow.nextSibling);
+  }
+  el.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-pref]"), a = e.target.closest("[data-acc]");
+    if (t) {
+      var k = t.dataset.pref, on = t.getAttribute("aria-checked") !== "true";
+      t.setAttribute("aria-checked", on);
+      if (k === "dark") { var n = on ? "dark" : "light"; document.documentElement.setAttribute("data-theme", n); try { localStorage.setItem("oin-theme", n); } catch (x) {} }
+      else setPref(k, on);
+    } else if (a) {
+      setPref("accent", a.dataset.acc);
+      [].forEach.call(el.querySelectorAll("[data-acc]"), function (b) { b.setAttribute("aria-pressed", b === a); });
+    } else if (e.target.closest("#pf-login, #pf-edit")) PROTO.openLogin();
+    else if (e.target.closest("#pf-out")) {
+      try { localStorage.removeItem("oin-session"); } catch (x) {}
+      location.reload();
+    }
+  });
+  el.addEventListener("change", function (e) { var s = e.target.closest("[data-sel]"); if (s) setPref(s.dataset.sel, s.value); });
+  draw();
+  var ub = document.getElementById("user");
+  if (ub) new MutationObserver(function () { draw(); }).observe(ub, { childList: true, attributes: true, attributeFilter: ["aria-label"] });
+});
+</script>
+</body>
+</html>

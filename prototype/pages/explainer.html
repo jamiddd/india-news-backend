@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explainer — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, ago = PROTO.ago, S = d.stories, id = +location.pathname.split("/").pop();
+  var x = d.explainers.filter(function (e) { return e.id === id; })[0], el = document.getElementById("page");
+  if (!x) { el.innerHTML = '<p class="empty" style="padding-top:48px">Explainer not found. <a href="/">Back to top stories</a></p>'; return; }
+  document.title = x.title + " — Open Indian News";
+  var AI = '<span class="ai"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 2l2.2 6.3L18.5 10l-6.3 2.2L10 18.5l-2.2-6.3L1.5 10l6.3-1.7zM19 13l1 2.6 2.6 1-2.6 1L19 21l-1-2.4-2.6-1 2.6-1z"/></svg>AI GENERATED</span>';
+  var byId = {}; S.forEach(function (s) { byId[s.id] = s; });
+  var srcs = (x.sources || []).map(function (sid) { return byId[sid]; }).filter(Boolean);
+  // "Outlet A, Outlet B and N others", as the app attributes a multi-outlet story
+  function attribution(s) {
+    var names = s.coverage.map(function (v) { return v.outlet; }).filter(function (n, i, a) { return a.indexOf(n) === i; });
+    if (names.length <= 1) return names[0] || "News Desk";
+    var extra = s.outlet_count - 2;
+    return names[0] + ", " + names[1] + (extra > 0 ? " and " + extra + " other" + (extra > 1 ? "s" : "") : "");
+  }
+  var more = d.explainers.filter(function (e) { return e.id !== x.id && e.category === x.category; })
+    .concat(d.explainers.filter(function (e) { return e.id !== x.id && e.category !== x.category; })).slice(0, 3);
+
+  el.innerHTML = '<article class="sty"><div class="sty-main">' +
+    '<p class="meta crumb"><a href="/">&larr; Top stories</a><span class="cat" style="color:var(--hue-context)">Explainer</span><a class="cat" href="/?c=' + encodeURIComponent(x.category) + '">' + E(x.category) + "</a><span>Updated 4h ago</span>" + AI + "</p>" +
+    "<h1>" + E(x.title) + "</h1>" +
+    '<div class="sty-media"><div class="ph mv" role="button" tabindex="0" aria-label="Open media fullscreen" style="aspect-ratio:16/9">image</div></div>' +
+    '<div style="margin-top:14px">' + PROTO.player({ label: "Listen to this explainer", duration: 150 + (x.id % 7) * 20, id: x.id, kind: "explainer", title: x.title, url: "/explainer/" + x.id }) + "</div>" +
+    '<div class="quick"><b>QUICK ANSWER</b><p>' + E(x.quick || x.dek) + "</p></div>" +
+    (x.sections || []).map(function (sec) {
+      return '<section class="ex-sec"><h2>' + E(sec.heading) + "</h2>" + sec.body.map(function (p) { return "<p>" + E(p) + "</p>"; }).join("") + "</section>";
+    }).join("") +
+    (srcs.length ? '<section class="sty-sec"><h2 class="sec-h"><span>Sources</span><span class="sec-n">' + srcs.length + " real stor" + (srcs.length === 1 ? "y" : "ies") + '</span></h2><div class="srcl">' + srcs.map(function (s) {
+      return '<a class="srcl-r" href="/story/' + s.id + '"><span class="favs"><i class="fv"></i><i class="fv"></i></span><span class="srcl-t"><small>' + E(attribution(s)) + "</small><b>" + E(s.headline) + "</b></span></a>";
+    }).join("") + "</div></section>" : "") +
+    (more.length ? '<section class="sty-sec"><h2 class="sec-h"><span>More explainers</span></h2><div class="latest">' + more.map(function (e) {
+      return '<div class="hv"><a href="/explainer/' + e.id + '"><small>' + E(e.category.toUpperCase()) + " &middot; " + E(e.read) + "</small>" + E(e.title) + "</a></div>";
+    }).join("") + "</div></section>" : "") + "</div></article>";
+});
+</script>
+</body>
+</html>

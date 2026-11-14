@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timelines — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page");
+  function ph(r) { return '<div class="ph" style="aspect-ratio:' + r + '">image</div>'; }
+  function tlCard(t) {
+    return '<article class="cx"><a class="cx-img" href="/timeline/' + t.id + '" tabindex="-1" aria-hidden="true">' + ph("3/2") + '</a><div class="cx-b">' +
+      '<div class="meta"><span class="cat" style="color:var(--hue-context)">' + E(t.category) + "</span><span>" + E(t.updated) + "</span></div>" +
+      '<h3><a href="/timeline/' + t.id + '">' + E(t.title) + "</a></h3><p>" + E(t.dek || "") + "</p>" +
+      '<div class="cx-f"><span>' + t.points.length + " events</span>" + (t.audio ? '<span class="cx-au"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Audio</span>' : "") + "</div></div></article>";
+  }
+  el.innerHTML = '<p class="meta crumb" style="padding-top:28px"><a href="/">&larr; Top stories</a></p><div class="feed-h"><h1>Timelines</h1><p>' + d.timelines.length + ' threads followed from start to now</p></div><div class="ctx-grid" style="margin-top:18px">' + d.timelines.map(tlCard).join("") + "</div>";
+});
+</script>
+</body>
+</html>

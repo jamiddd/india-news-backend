@@ -6,10 +6,10 @@ export default function About() {
           <p className="eyebrow">About Open Indian News</p>
           <h1>The same story, told fifteen ways. We show you all of them, once.</h1>
           <p className="abt-lede">Open Indian News is an Android news app that groups every outlet's coverage of a story into a single item, summarises it, and shows how different publishers are framing the same facts. It is built and operated by a single independent developer in Assam, India.</p>
-          <div className="abt-cta"><a className="btn btn-primary" href="/download">Download for Android</a><a className="btn btn-ghost" href="#how">How it works</a></div>
+          <div className="abt-cta"><a className="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.jamid.news">Get it on Google Play</a><a className="btn btn-ghost" href="#how">How it works</a></div>
         </div>
         <dl className="abt-facts">
-          <div><dt>Platform</dt><dd>Android, in development and preparing for release on Google Play</dd></div>
+          <div><dt>Platform</dt><dd>Android, available on Google Play</dd></div>
           <div><dt>Reading</dt><dd>Free to read, with no advertising anywhere</dd></div>
           <div><dt>News from</dt><dd>Publicly available feeds from Indian publishers. Every article links back to its publisher.</dd></div>
           <div><dt>Funded by</dt><dd>Optional Premium and optional donations. Nothing else.</dd></div>
@@ -96,9 +96,9 @@ export default function About() {
           <dl className="abt-contact">
             <div><dt>Email</dt><dd><a href="mailto:jamiddeka1@gmail.com">jamiddeka1@gmail.com</a></dd></div>
             <div><dt>Phone</dt><dd>+91 60034 99695</dd></div>
-            <div><dt>Availability</dt><dd>An Android app, currently in development and preparing for release on Google Play. This page will link to the listing once it is live.</dd></div>
+            <div><dt>Availability</dt><dd>An Android app, available only on Google Play. Please install it from there; we do not distribute the app anywhere else.</dd></div>
           </dl>
-          <div className="abt-cta" style={{marginTop:"20px"}}><a className="btn btn-primary" href="/download">Download for Android</a><a className="btn btn-ghost" href="/contact">Contact</a></div>
+          <div className="abt-cta" style={{marginTop:"20px"}}><a className="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.jamid.news">Get it on Google Play</a><a className="btn btn-ghost" href="/contact">Contact</a></div>
         </div>
       </section>
     </main>

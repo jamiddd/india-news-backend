@@ -74,7 +74,7 @@ function Shell() {
           </span>
         </Link>
         <nav className="links"><NavLinks list={nav} /></nav>
-        <Link className="btn btn-primary btn-sm get-app" to="/download"><span>Get the app</span></Link>
+        <a className="btn btn-primary btn-sm get-app" href="https://play.google.com/store/apps/details?id=com.jamid.news"><span>Get the app</span></a>
         <button className="theme-btn" id="theme" aria-label="Toggle dark mode" onClick={toggleTheme}>&#9680;</button>
         <UserButton />
       </div></header>

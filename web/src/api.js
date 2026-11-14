@@ -159,6 +159,24 @@ export function adaptTopics(topics, entities) {
   return out;
 }
 
+// Image URL -> who published it and where it lives, plus the cluster's other pictures to fall back
+// on when it will not load. Filled as stories are adapted; <Ph> reads it, so no call site changes.
+const IMG_INFO = {};
+export function imageInfo(url) { return IMG_INFO[url] || null; }
+function registerImages(arts) {
+  const pics = [];
+  (arts || []).forEach((a) => {
+    const us = a.image_urls && a.image_urls.length ? a.image_urls : a.image_url ? [a.image_url] : [];
+    us.forEach((u) => { if (u && !pics.some((p) => p.src === u)) pics.push({ src: u, source: a.source_name || "", link: a.url || null }); });
+  });
+  const ordered = bestFirst(pics, (p) => p.src);
+  ordered.forEach((p) => {
+    const old = IMG_INFO[p.src];
+    const alts = ordered.filter((q) => q.src !== p.src).map((q) => q.src);
+    IMG_INFO[p.src] = { source: p.source, link: p.link, alts: old ? old.alts.concat(alts.filter((u) => !old.alts.includes(u))) : alts };
+  });
+}
+
 export function adaptMedia(articles) {
   // Images lead and videos come last, but the cap reserves room at the end for them: a big story
   // can have a dozen articles' images, which used to push a later video out of the list.
@@ -190,6 +208,7 @@ export function adaptCluster(c, { sources = EMPTY_SOURCES, now = Date.now(), cat
   const lead = arts.filter((a) => a.snippet)[0];
   const video = arts.filter((a) => a.video_url || a.has_pending_video)[0];
   const imageArt = bestFirst(arts.filter((a) => a.image_url), (a) => a.image_url)[0];   // the sharpest lead
+  registerImages(arts);
   return {
     id: c.id,
     headline: c.headline || (arts[0] && arts[0].title) || "Untitled story",
@@ -250,6 +269,7 @@ export function adaptTimeline(item, detail, { sources = EMPTY_SOURCES, now = Dat
   const beatArts = (d.beats || []).reduce((a, b) => a.concat(...(b.clusters || []).map((c) => c.articles || [])), []);
   const context = base.context || d.context || "";
   const anchorImg = bestFirst(anchorArts.filter((a) => a.image_url), (a) => a.image_url)[0] || bestFirst(beatArts.filter((a) => a.image_url), (a) => a.image_url)[0];   // else the first story's
+  registerImages(anchorArts.concat(beatArts));
   return {
     id: base.id,
     title: base.title || d.title || "",

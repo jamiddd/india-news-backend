@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+// Context: the timelines and explainers behind the stories. It is the third tab on phones, and
+// the "See all" target of the two blocks on the home page.
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, qs = new URLSearchParams(location.search);
+  var tab = qs.get("t") === "explainers" ? "explainers" : "timelines";
+  var NOTE = "violet";
+  function ph(r) { return '<div class="ph" style="aspect-ratio:' + r + '">image</div>'; }
+  function url(t) { return "/context?t=" + t; }
+
+  var list = tab === "timelines" ? d.timelines : d.explainers;
+
+  function tlCard(t) {
+    return '<article class="cx"><a class="cx-img" href="/timeline/' + t.id + '" tabindex="-1" aria-hidden="true">' + ph("3/2") + '</a><div class="cx-b">' +
+      '<div class="meta"><span class="cat" style="color:var(--hue-context)">' + E(t.category) + "</span><span>" + E(t.updated) + "</span></div>" +
+      '<h3><a href="/timeline/' + t.id + '">' + E(t.title) + "</a></h3><p>" + E(t.dek || "") + "</p>" +
+      '<div class="cx-f"><span>' + t.points.length + " events</span>" + (t.audio ? '<span class="cx-au"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Audio</span>' : "") + "</div></div></article>";
+  }
+  function exCard(x) {
+    return '<article class="cx"><a class="cx-img" href="/explainer/' + x.id + '" tabindex="-1" aria-hidden="true">' + ph("3/2") + '</a><div class="cx-b">' +
+      '<div class="meta"><span class="cat" style="color:var(--hue-context)">' + E(x.category) + "</span><span>" + E(x.read) + "</span></div>" +
+      '<h3><a href="/explainer/' + x.id + '">' + E(x.title) + "</a></h3><p>" + E(x.dek) + "</p></div></article>";
+  }
+
+  document.getElementById("page").innerHTML =
+    '<div class="feed-h"><h1>Context</h1><p>The story behind the story</p></div>' +
+    '<div class="ctx-tabs" role="tablist" aria-label="Context sections">' +
+      ["timelines", "explainers"].map(function (t) {
+        return '<a role="tab" aria-selected="' + (t === tab) + '" class="ctx-tab' + (t === tab ? " on" : "") + '" href="' + url(t) + '">' + (t === "timelines" ? "Timelines" : "Explainers") + "</a>";
+      }).join("") + "</div>" +
+    (list.length ? '<div class="ctx-grid">' + list.map(tab === "timelines" ? tlCard : exCard).join("") + "</div>"
+      : '<p class="empty">No ' + tab + " yet.</p>");
+});
+</script>
+</body>
+</html>

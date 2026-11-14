@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { FollowBtn, slug } from "../components/home/shared.jsx";
+import { Fav } from "../components/Photo.jsx";
 import { useData, statusView } from "../components/Status.jsx";
 import { loadSourcesPage } from "../api.js";
 
@@ -46,7 +47,7 @@ export default function Sources() {
       <div className="sg" id="sg">
         {l.length ? l.map((o) => (
           <div className="stile" key={o.key}>
-            <Link className="stile-l" to={"/source/" + o.key}><span className="fv big sm"></span><span><b>{o.name}</b><small>{o.region} &middot; {o.lang} &middot; {o.n} stories</small></span></Link>
+            <Link className="stile-l" to={"/source/" + o.key}><Fav name={o.name} className="big sm" /><span><b>{o.name}</b><small>{o.region} &middot; {o.lang} &middot; {o.n} stories</small></span></Link>
             <FollowBtn k={"source:" + o.key} />
           </div>
         )) : <p className="empty">No sources match.</p>}

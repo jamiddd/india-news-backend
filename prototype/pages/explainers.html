@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explainers — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page");
+  function ph(r) { return '<div class="ph" style="aspect-ratio:' + r + '">image</div>'; }
+  function exCard(x) {
+    return '<article class="cx"><a class="cx-img" href="/explainer/' + x.id + '" tabindex="-1" aria-hidden="true">' + ph("3/2") + '</a><div class="cx-b">' +
+      '<div class="meta"><span class="cat" style="color:var(--hue-context)">' + E(x.category) + "</span><span>" + E(x.read) + "</span></div>" +
+      '<h3><a href="/explainer/' + x.id + '">' + E(x.title) + "</a></h3><p>" + E(x.dek) + "</p></div></article>";
+  }
+  el.innerHTML = '<p class="meta crumb" style="padding-top:28px"><a href="/">&larr; Top stories</a></p><div class="feed-h"><h1>Explainers</h1><p>' + d.explainers.length + ' plain-language answers</p></div><div class="ctx-grid" style="margin-top:18px">' + d.explainers.map(exCard).join("") + "</div>";
+});
+</script>
+</body>
+</html>

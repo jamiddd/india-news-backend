@@ -11,12 +11,16 @@ ssh vps "cat /etc/caddy/Caddyfile" > backend/infra/Caddyfile
 ```
 
 - `Caddyfile` — system-level Caddy config (`/etc/caddy/Caddyfile`), last
-  pulled 2026-08-09, **now stale**: as of 2026-08-22 both `newsapp` and
-  `newsapp-2` run a trivial `:80 { reverse_proxy 127.0.0.1:8080 }` instead
-  (no more per-domain blocks, no more Caddy-managed TLS — see the load
-  balancer entry below for why). The `scalp8.xyz` blocks in this backup
-  belong to the other project that used to share the host and are unrelated
-  to this app regardless.
+  pulled 2026-10-03 and identical on `newsapp` and `newsapp-2`: a `:80` site
+  (no Caddy-managed TLS — the DigitalOcean load balancer terminates HTTPS,
+  behind Cloudflare) plus a global `trusted_proxies` block. That block trusts
+  the load balancer (10.122.0.6) and Cloudflare's published ranges
+  (cloudflare.com/ips-v4, /ips-v6) and sets `X-Forwarded-For` to the real
+  client IP, which is what the per-IP rate limiter keys on. Keep
+  `trusted_proxies_strict`: without it Caddy takes the leftmost header entry
+  and clients can spoof their IP. Update the ranges if Cloudflare changes
+  them or the load balancer's private IP changes. Paired with
+  `FORWARDED_ALLOW_IPS=10.88.0.1` in `deploy/quadlets/app.container`.
 
 Re-pull and commit whenever the box's Caddy config changes — closes
 production-readiness-gaps.md gap #9 ("lives outside version control").

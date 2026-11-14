@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Open Indian News — Indian news, clustered and compared</title>
-<meta name="description" content="Indian news from many outlets, clustered into one story — summarised, compared, and free to read. No ads in the feed.">
+<meta name="description" content="Indian news from many outlets, clustered into one story — summarised, compared, and free to read. No ads, anywhere.">
 <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
 <meta property="og:title" content="Open Indian News">
@@ -12,9 +12,9 @@
 <meta property="og:type" content="website">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23171717'/><text x='16' y='23' font-family='Georgia,serif' font-size='20' font-weight='700' fill='%23fff' text-anchor='middle'>O</text></svg>">
-<link rel="stylesheet" href="/static/site.css?v=8">
+<link rel="stylesheet" href="/static/site.css?v=9">
 <style>  /* ---------- hero ---------- */
   .hero{padding:72px 0 8px; border-bottom:1px solid var(--line)}
   /* .85fr/1.15fr rather than the earlier near-even split -- the coverflow's
@@ -418,6 +418,54 @@
   .price li svg{flex:0 0 16px; margin-top:4px; color:var(--success)}
   .donate-note{max-width:640px; margin:28px auto 0; text-align:center; font-size:14px; color:var(--ink-3)}
 
+
+  /* ---------- terminal-style overrides ----------
+     Layered over the rules above rather than rewriting them, so the coverflow
+     and the three step visualisations keep their behaviour untouched. */
+  .signal-bar{background:var(--signal); color:var(--on-signal); border-bottom:1px solid var(--rule)}
+  .signal-bar .wrap{display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; padding-top:12px; padding-bottom:12px; font-weight:800; font-size:16px}
+  .signal-bar .tag{font-family:var(--mono); font-size:12px; font-weight:600; background:#0A0A0A; color:var(--signal); padding:3px 8px; letter-spacing:.06em}
+  .hero{padding:0; border-bottom:1px solid var(--rule)}
+  .hero .wrap:first-child{gap:0}
+  .hero .wrap:first-child > div:first-child{padding:56px 40px 48px 0}
+  .hero h1{font-size:clamp(40px,6.4vw,78px); font-weight:900; line-height:.98; letter-spacing:-0.045em}
+  .hero .lede{font-size:19px; color:var(--ink-2)}
+  .hero .coverflow{border-left:1px solid var(--line); padding-left:24px}
+  .hero-stats{border-top:1px solid var(--rule); gap:0; padding:0; flex-wrap:nowrap}
+  .stat{padding:22px 28px 24px; border-left:1px solid var(--line); flex:1 1 0}
+  .stat:first-child{padding-left:0; border-left:0}
+  .stat b{font-family:var(--serif); font-weight:900; font-size:30px; letter-spacing:-0.03em}
+  .stat span{font-family:var(--mono); font-size:12px}
+  .note{font-family:var(--mono); font-size:12px}
+  section{border-bottom:1px solid var(--rule)}
+  .sec-head h2{font-weight:900; font-size:clamp(30px,4.4vw,48px); letter-spacing:-0.035em; border-top:4px solid var(--rule); padding-top:12px}
+  .steps,.grid{border-radius:0; border-color:var(--rule)}
+  .step-no{font-family:var(--mono); font-weight:600}
+  .vcard,.cf-card,.frame-card,.price{border-radius:2px}
+  .vchip{border-radius:0; font-family:var(--mono)}
+  .card .ico{color:var(--accent)}
+  .cf-nav{border-radius:0}
+  .framer-head span,.gallery figcaption{font-family:var(--mono)}
+  .framer-dots button{border-radius:0}
+  .shot{border-radius:2px}
+  .price{border-color:var(--rule); background:var(--bg); text-align:left; max-width:none}
+  .price .big{font-weight:900; letter-spacing:-0.04em}
+  .price ul{margin-inline:0; max-width:none}
+  .price li svg{color:var(--accent)}
+  .nads{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:32px; align-items:center;
+    background:#0A0A0A; color:#F4F4F4; padding:56px 48px; margin:0 0 0}
+  .nads .big{font-weight:900; font-size:clamp(56px,10vw,120px); line-height:.9; letter-spacing:-0.05em}
+  .nads .big em{font-style:normal; color:var(--signal)}
+  .nads p{margin:0; font-size:20px; line-height:1.5; color:#CFCFCF}
+  .nads p + p{margin-top:12px; font-size:15px}
+  @media (max-width:900px){
+    .hero .wrap:first-child > div:first-child{padding:36px 0 8px}
+    .hero .coverflow{border-left:0; padding-left:0}
+    .hero-stats{flex-wrap:wrap}
+    .stat{flex:1 1 100%; border-left:0; border-top:1px solid var(--line); padding-left:0}
+    .stat:first-child{border-top:0}
+    .nads{padding:40px 24px}
+  }
 </style>
 </head>
 <body>
@@ -449,7 +497,7 @@
       <a href="/contact">Contact</a>
       <a href="/feedback">Feedback</a>
     </nav>
-    <a class="btn btn-primary btn-sm get-app" href="/download" aria-label="Get the app">
+    <a class="btn btn-primary btn-sm get-app" href="https://play.google.com/store/apps/details?id=com.jamid.news" aria-label="Get the app">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 12l6 6 6-6"/></svg>
       <span>Get the app</span>
     </a>
@@ -459,23 +507,27 @@
   </div>
 </header>
 
+<div class="signal-bar" role="note">
+  <div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div>
+</div>
+
 <div class="hero">
   <div class="wrap">
     <div>
-      <p class="eyebrow">Android · India</p>
+      <p class="eyebrow">Android · India · Multi-outlet clustered feed</p>
       <h1>The same story,<br>told fifteen ways.<br>Read it once.</h1>
       <p class="lede">
         Open Indian News groups every outlet's coverage of a story into a single item, summarises
         it, and shows you how different publishers are framing the same facts.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="/download">
-          Download for Android
+        <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.jamid.news">
+          Get it on Google Play
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M6 12l6 6 6-6"/></svg>
         </a>
         <a class="btn btn-ghost" href="#features">See what it does</a>
       </div>
-      <p class="note">Free to read, and free of ads in the feed &mdash; with an optional Premium plan for the extras. Not on Google Play yet, so the build installs <a href="/download">directly</a>.</p>
+      <p class="note">Free to read, with no ads anywhere &mdash; and an optional Premium plan for the extras. Available only on <a href="https://play.google.com/store/apps/details?id=com.jamid.news">Google Play</a>.</p>
     </div>
 
     <div class="coverflow reveal" id="hero-coverflow" role="region" aria-label="Top stories, compared across outlets">
@@ -487,9 +539,17 @@
   <div class="wrap">
     <div class="hero-stats reveal">
       <div class="stat"><b>1 story</b><span>not fifteen headlines</span></div>
-      <div class="stat"><b>0 ads</b><span>in the reading feed</span></div>
+      <div class="stat"><b>0 ads</b><span>anywhere in the app</span></div>
       <div class="stat"><b>Games &amp; services</b><span>daily horoscope, word of the day, quote of the day, on this day, community poll — and seven puzzles</span></div>
     </div>
+  </div>
+</div>
+
+<div class="nads" id="no-ads">
+  <div class="big">No ads.<br><em>Anywhere.</em></div>
+  <div>
+    <p>Not in the feed. Not between stories. Not in a banner, an interstitial, or a sponsored card dressed up as news.</p>
+    <p>The only news app with zero advertising. What you read is the story, once.</p>
   </div>
 </div>
 
@@ -605,8 +665,8 @@
       <div class="grid-divider" aria-hidden="true"></div>
       <div class="card row-bottom">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg>
-        <h3>No ads in the feed</h3>
-        <p>The reading experience carries no advertising, no interstitials, and nothing that follows you between stories.</p>
+        <h3>No ads, anywhere</h3>
+        <p>The app carries no advertising, no interstitials, and nothing that follows you between stories.</p>
       </div>
       <div class="card row-bottom">
         <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/></svg>
@@ -679,7 +739,7 @@
       <ul>
         <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> The feed, clustering, summaries and framing are free for everyone</li>
         <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Premium adds the Context tab (Daily Brief, timelines, explainers), back-dated games and all accent colours &mdash; <a href="/pricing">see Pricing</a></li>
-        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> The reading feed carries no advertising</li>
+        <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> The app carries no advertising anywhere</li>
         <li><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Articles always link back to the original publisher</li>
       </ul>
     </div>
@@ -697,8 +757,8 @@
     <div class="sec-head reveal" style="margin-bottom:0">
       <p class="eyebrow">About</p>
       <h2>Built by one person, in Assam.</h2>
-      <p>Open Indian News is an independent Android app, preparing for release on Google Play — until
-         then you can <a href="/download">install it directly</a>. It aggregates
+      <p>Open Indian News is an independent Android app, available on
+         <a href="https://play.google.com/store/apps/details?id=com.jamid.news">Google Play</a>. It aggregates
          publicly available news feeds from Indian publishers, and every article links back to the
          original source. If you publish news and would like to be included, or removed,
          <a href="/contact">get in touch</a>.</p>

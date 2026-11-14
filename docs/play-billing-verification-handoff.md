@@ -8,6 +8,32 @@ Google's Play Developer API, not just returning a config error. Remaining
 work is just uploading the new Android build (see step 6) — not blocking,
 since the client already works with or without this (fail-open).
 
+**Update 2026-10-03:**
+- The Play Console 401 is **fixed** (found 2026-09-29, resolved 2026-09-30).
+  The service account `play-billing-verifier@indian-news-open.iam.gserviceaccount.com`
+  authenticated fine but had no effective permission on `com.jamid.news`:
+  `subscriptionsv2 lookup failed: 401 insufficient permissions`, and because
+  verification fails *closed*, every real purchase would have been rejected.
+  The grant was stale even though it showed as active with the financial-data
+  permission ticked. Fix: revoke the account in Play Console → Users and
+  permissions, save, re-invite it and re-tick "View financial data, orders,
+  and cancellation survey responses" for the app. No new service account
+  was needed.
+- **Correction to the garbage-token check below:** `{"valid":false}` is
+  returned for a 401 exactly as for a genuinely invalid token, so that curl
+  does *not* prove the wiring is right. Read the reason in the logs instead
+  (`journalctl -u app.service --since "3 minutes ago" | grep -A 6 "Rejected purchase verification"`).
+  `400 Invalid Value` = Google accepted the service account and rejected the
+  literal "garbage" token (good). `401` = permission problem.
+- The one-time product ID is now **`premium_lifetime_next`** (the original
+  `premium_lifetime` ID was already used in Play Console and can't be reused).
+  Price is ₹490. `BillingProductIds.LIFETIME_PRODUCT` in `BillingManager.kt`
+  was updated to match. No backend change was needed: `product_id` in
+  `VerifyPurchaseRequest` is a free-form string and is passed straight into
+  the `purchases/products/{product_id}/tokens/{token}` lookup.
+- Still open: the real-purchase confirmation below, now against
+  `premium_lifetime_next`.
+
 ## What this is
 
 Premium (subscription + lifetime) used to be trusted purely from the local
@@ -66,7 +92,7 @@ droplet already has the real `Volume=` line filled in (no more placeholder).
 Verified on both:
 ```
 curl -s -X POST http://127.0.0.1:8080/api/v1/billing/verify-purchase -H "Content-Type: application/json" -d '{"product_id":"premium_monthly","purchase_token":"garbage","product_type":"subs"}'
-# {"valid":false}  <- correct: a garbage token is genuinely rejected by Google, not by a config error
+# {"valid":false}  <- NOT proof on its own (a 401 gives the same body); check the log reason, see the 2026-10-03 update at the top
 ```
 
 ### 5. Reload + restart on both droplets — NOT DONE YET
@@ -91,7 +117,8 @@ active for real users instead of always failing open.
 The garbage-token test above proves the wiring is correct, but a genuine
 end-to-end check (real test purchase on the Pixel, license tester account,
 current build) hasn't been run since this deploy. Do that next:
-1. On the Pixel, do a real test purchase (monthly or lifetime) — should
+1. On the Pixel, do a real test purchase (monthly, or lifetime via
+   `premium_lifetime_next`) — should
    succeed and show the Play "test purchase" banner as before.
 2. Check backend logs (`journalctl -u app.service -f` on whichever droplet
    the app container round-robins to) for either silence (success, no

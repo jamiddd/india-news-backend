@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top stories — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<nav class="catbar" aria-label="Categories"><div class="wide" id="cats" style="display:flex;align-items:center;gap:26px;padding-top:0;padding-bottom:0;overflow-x:auto;scrollbar-width:none"></div></nav>
+<main class="wide" style="padding-bottom:72px" id="page"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, qs = new URLSearchParams(location.search), c = qs.get("c") || "All", ALL = d.stories, S = ALL;
+  function ago(m) { return m < 60 ? m + "m" : Math.round(m / 60) + "h"; }
+  function ph(r) { return '<div class="ph" style="aspect-ratio:' + r + '">image</div>'; }
+  // Source row, as on the Android feed items: two overlapping round logos (grey
+  // here) and "First outlet & N others"; links to the story's full coverage.
+  function src(s) {
+    var names = s.coverage.map(function (v) { return v.outlet; }), first = names[0] || "News Desk", n = Math.max(0, s.outlet_count - 1);
+    return '<a class="src" data-sid="' + s.id + '" href="/story/' + s.id + '#coverage"><span class="favs"><i class="fv"></i>' + (s.outlet_count > 1 ? '<i class="fv"></i>' : "") + "</span><span>" +
+      E(first) + (n ? " &amp; " + n + " other" + (n > 1 ? "s" : "") : "") + "</span></a>";
+  }
+  // Posts without a hero image have no room for the save/share row, so those two
+  // buttons live in a small tooltip that appears over the top edge on hover/focus.
+  function tip(id) { return '<div class="tip" role="group" aria-label="Story actions">' + PROTO.acts(id) + "</div>"; }
+  function srow(s) { return '<div class="srcrow">' + src(s) + PROTO.acts(s.id) + "</div>"; }
+  function meta(s) { return '<div class="meta"><span class="cat">' + E(s.category) + "</span><span>" + ago(s.minutes_ago) + " ago</span></div>"; }
+  function link(s) { return '<a href="/story/' + s.id + '">' + E(s.headline) + "</a>"; }
+  function card(s) { return '<div class="c">' + ph("3/2") + meta(s) + "<h3>" + link(s) + "</h3>" + srow(s) + "</div>"; }
+
+  var tabs = d.categories.slice();
+  if (PROTO.signedIn()) tabs.splice(1, 0, "For you");
+  var more = d.moreCategories || [], moreOn = more.indexOf(c) > -1;
+  function tab(k, on) { return '<a class="chip' + (on ? " on" : "") + '" href="' + (k === "All" ? "/" : "/?c=" + encodeURIComponent(k)) + '">' + E(k) + "</a>"; }
+  document.getElementById("cats").innerHTML = tabs.map(function (k) { return tab(k, k === c); }).join("") +
+    (more.length ? '<span class="more-wrap"><button type="button" class="chip' + (moreOn ? " on" : "") + '" id="more-open" aria-haspopup="true" aria-expanded="false">' + E(moreOn ? c : "More") + ' &#9662;</button></span>' : "") + '<button type="button" class="search-btn tune-btn" id="tune-open" aria-label="Settings" title="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></button>' + '<button type="button" class="search-btn" id="search-open" aria-label="Search" title="Search (Ctrl/Cmd+K)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>';
+
+  var moreBtn = document.getElementById("more-open"), moreMenu = null;
+  function closeMore() { if (moreMenu) { moreMenu.remove(); moreMenu = null; moreBtn.setAttribute("aria-expanded", "false"); } }
+  if (moreBtn) {
+    moreBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (moreMenu) { closeMore(); return; }
+      moreMenu = document.createElement("div");
+      moreMenu.className = "cat-pop"; moreMenu.setAttribute("role", "menu");
+      moreMenu.innerHTML = more.map(function (k) { return '<a role="menuitem" class="' + (k === c ? "on" : "") + '" href="/?c=' + encodeURIComponent(k) + '">' + E(k) + "</a>"; }).join("");
+      document.body.appendChild(moreMenu);
+      var r = moreBtn.getBoundingClientRect();
+      moreMenu.style.top = r.bottom + scrollY + 6 + "px";
+      moreMenu.style.left = Math.max(12, Math.min(r.left + scrollX, innerWidth - moreMenu.offsetWidth - 12)) + "px";
+      moreBtn.setAttribute("aria-expanded", "true");
+    });
+    document.addEventListener("click", function (e) { if (moreMenu && !moreMenu.contains(e.target)) closeMore(); });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape" && moreMenu) { closeMore(); moreBtn.focus(); } });
+  }
+
+  var page = document.getElementById("page");
+  // The feed's own stories: everything for All, or just this category's.
+  var forYouNote = "";
+  if (c === "For you") {
+    if (!PROTO.signedIn()) {
+      page.innerHTML = '<div class="feed-h"><h1>For you</h1></div><div class="gate"><p>Sign in to get a feed built around the publishers and topics you follow.</p><button type="button" class="ab filled" id="gate-in"><span>Sign in</span></button></div>';
+      document.getElementById("gate-in").addEventListener("click", PROTO.openLogin);
+      return;
+    }
+    var fl = []; try { fl = JSON.parse(localStorage.getItem("oin-follow")) || []; } catch (e) {}
+    var mine = ALL.filter(function (x) {
+      return fl.some(function (f) {
+        return f.indexOf("topic:") === 0 ? (x.topics || []).some(function (t) { return PROTO.slug(t.label) === f.slice(6); }) : x.coverage.some(function (v) { return PROTO.slug(v.outlet) === f.slice(7); });
+      });
+    });
+    if (mine.length) S = mine;
+    else {
+      S = ALL.slice().sort(function (a, b) { return b.outlet_count - a.outlet_count; }).slice(0, 30).sort(function (a, b) { return a.minutes_ago - b.minutes_ago; });
+      forYouNote = "You aren\u2019t following anything yet, so these are the top stories. Follow publishers and topics to shape this feed.";
+    }
+  } else if (c !== "All") S = ALL.filter(function (x) { return x.category === c; });
+  if (!S.length) { page.innerHTML = '<p class="empty" style="padding-top:48px">No stories in this feed yet. <a href="/">Back to top stories</a></p>'; return; }
+  function o(f, x) { return x ? f(x) : ""; }
+  var lead = S[0];
+  var byCov = S.slice().sort(function (a, b) { return b.outlet_count - a.outlet_count; });
+  var mid = '<div class="hero-s">' + PROTO.carousel(lead) + meta(lead) + "<h1>" + link(lead) + "</h1><p class='dek'>" + E(lead.dek) + "</p>" + srow(lead) +
+    '<ul class="bullets">' + lead.summary.map(function (b) { return "<li>" + E(b) + "</li>"; }).join("") + "</ul>" +
+    '<h2 class="sec-h" style="margin:24px 0 12px; border-top:0; padding-top:0"><span>Framing, at a glance</span></h2>' +
+    '<div class="matrix">' + lead.framing.slice(0, 5).map(function (f) { return '<div class="mrow"><b><i class="fv"></i><span><a class="so" href="/source/' + PROTO.slug(f.outlet) + '">' + E(f.outlet) + "</a></span></b><span>" + E(f.angle) + '</span><span class="t">' + E(f.tag) + "</span></div>"; }).join("") + "</div></div>";
+  function img(s) { return '<div class="side-card">' + ph("3/2") + meta(s) + "<h3>" + link(s) + "</h3>" + srow(s) + "</div>"; }
+  function txt(s) { return '<div class="side-card txt hv">' + meta(s) + "<h3>" + link(s) + "</h3><p>" + E(s.summary[0]) + "</p>" + src(s) + tip(s.id) + "</div>"; }
+  function thumb(s) { return '<div class="side-card th hv"><div>' + meta(s) + "<h3>" + link(s) + "</h3></div>" + ph("1/1") + src(s) + tip(s.id) + "</div>"; }
+  var rank = '<div class="side-card"><h2 class="sec-h"><span>Most covered</span></h2><ol class="rank">' + byCov.slice(0, 6).map(function (s, i) { return '<li class="hv"><span>' + (i + 1) + "</span><a href='/story/" + s.id + "'><small>" + s.category.toUpperCase() + " &middot; " + ago(s.minutes_ago) + " ago</small>" + E(s.headline) + "</a>" + tip(s.id) + "</li>"; }).join("") + "</ol></div>";
+  var latest = '<div class="latest"><h2 class="sec-h"><span>Latest</span></h2>' + S.slice(1, 7).map(function (s) {
+    return '<div class="hv"><a href="/story/' + s.id + '"><small>' + s.category.toUpperCase() + " &middot; " + ago(s.minutes_ago) + " ago</small>" + E(s.headline) + "</a>" + tip(s.id) + "</div>"; }).join("") + "</div>";
+  var colA = latest + o(img, S[7]) + o(thumb, S[8]) + o(txt, S[13]);
+  var colC = o(thumb, S[9]) + o(img, S[10]) + rank + o(txt, S[11]) + o(thumb, S[12]);
+  // Only the top timeline is shown in full, with a hero image, audio and dated
+  // points; the rest are headline-only.
+  var TLS = (c === "All" ? d.timelines : d.timelines.filter(function (t) { return t.category === c; })).slice(0, 3);
+  var EXS = (c === "All" ? d.explainers : d.explainers.filter(function (x) { return x.category === c; })).slice(0, 6);
+  var tl = TLS.map(function (t, i) {
+    if (i) return '<div class="tl tl-plain"><div><div class="meta"><span>' + E(t.updated) + "</span><span>" + t.points.length + " events</span></div><h3><a href=\"/timeline/" + t.id + "\">" + E(t.title) + "</a></h3><p>" + E(t.dek || "") + "</p></div></div>";
+    return '<div class="tl tl-top">' + ph("3/2") + '<h3 style="margin-top:12px"><a href="/timeline/' + t.id + '">' + E(t.title) + '</a></h3><div class="meta"><span>' + E(t.updated) + "</span></div>" + (t.audio ? PROTO.player({ label: t.audio.label, duration: t.audio.duration, id: t.id, kind: "timeline", title: t.title, url: "/timeline/" + t.id }) : "") + "<ol>" +
+      t.points.map(function (p) { return "<li><b>" + E(p.date) + "</b><span>" + E(p.text) + "</span></li>"; }).join("") + "</ol></div>";
+  }).join("");
+  var ex = EXS.map(function (x, i) {
+    // The first explainer is the featured one: a shorter image and more text (an
+    // excerpt and three key points); the rest stay compact.
+    var more = i ? "" : '<p class="ex-body">' + E(x.excerpt || "") + '</p><div class="ex-pts"><b>In brief</b><ul>' + (x.points || []).map(function (t) { return "<li>" + E(t) + "</li>"; }).join("") + '</ul></div><a class="ex-more" href="/explainer/' + x.id + '">Read the explainer &rarr;</a>';
+    return '<div class="ex">' + ph("3/2") + '<div class="meta"><span class="cat">' + E(x.category) + '</span><span>' + E(x.read) + "</span></div><h3><a href=\"/explainer/" + x.id + "\">" + E(x.title) + "</a></h3><p>" + E(x.dek) + "</p>" + more + "</div>";
+  }).join("");
+  var band = '<div class="band sec" id="timelines"><div><h2 class="sec-h"><span>Timelines</span><a href="/timelines">See all &rarr;</a></h2>' + tl + '</div><div><h2 class="sec-h"><span>Explainers</span><a href="/explainers">See all &rarr;</a></h2><div class="exs">' + ex + "</div></div></div>";
+  // Each section gets a different composition so the lower page doesn't read
+  // as one repeated row of four equal cards.
+  function big(s) { return '<article class="g g-big">' + ph("4/3") + meta(s) + "<h3>" + link(s) + "</h3><p>" + E(s.dek) + "</p>" + srow(s) + "</article>"; }
+  function med(s, r) { return '<article class="g">' + ph(r || "3/2") + meta(s) + "<h3>" + link(s) + "</h3>" + srow(s) + "</article>"; }
+  function note(s) { return '<article class="g g-txt hv">' + meta(s) + "<h3>" + link(s) + "</h3><p>" + E(s.summary[0]) + "</p>" + src(s) + tip(s.id) + "</article>"; }
+  // Every section is a row of equal-height columns. The last card in each column
+  // stretches to take up any spare height (see .scol in the CSS), so no column ever
+  // ends short and leaves a hole.
+  function mk(type, s, grow) {
+    var h = type === "big" ? big(s) : type === "note" ? note(s) : type === "sq" ? med(s, "1/1") : med(s);
+    return grow ? h.replace('class="g', 'class="grow g') : h;
+  }
+  // Spread the stories over n columns, make sure each column holds at least one
+  // image card, and mark the last image card in each column as the one that
+  // stretches. Text notes never stretch, so they stay compact.
+  function columns(L, types, n) {
+    var cols = [];
+    for (var i = 0; i < n; i++) cols.push([]);
+    L.forEach(function (s, i) { cols[i % n].push({ t: types[i], s: s }); });
+    return cols.filter(function (c) { return c.length; }).map(function (c) {
+      if (c.every(function (x) { return x.t === "note"; })) c[0].t = "med";
+      var last = -1;
+      c.forEach(function (x, i) { if (x.t !== "note") last = i; });
+      return '<div class="scol">' + c.map(function (x, i) { return mk(x.t, x.s, i === last); }).join("") + "</div>";
+    }).join("");
+  }
+  // Headline-only column: the rest of the category first, topped up with the
+  // newest stories from elsewhere so it is never short.
+  function listCol(k, shown) {
+    var ids = {};
+    shown.forEach(function (s) { ids[s.id] = 1; });
+    var pool = ALL.filter(function (s) { return !ids[s.id] && s.category === k; })
+      .concat(ALL.filter(function (s) { return !ids[s.id] && s.category !== k; })).slice(0, 5);
+    return '<div class="scol list"><h4 class="lh">More headlines</h4>' + pool.map(function (s) {
+      return '<div class="hv"><a href="/story/' + s.id + '"><small>' + E(s.category) + " &middot; " + ago(s.minutes_ago) + " ago</small>" + E(s.headline) + "</a>" + tip(s.id) + "</div>";
+    }).join("") + "</div>";
+  }
+  function featured(L, types, rev, k) {
+    return '<div class="scat' + (rev ? " rev" : "") + '"><div class="scol main">' + mk("big", L[0], true) + "</div>" + columns(L.slice(1), types, 2) + listCol(k, L) + "</div>";
+  }
+  var layouts = [
+    function (L, k) { return featured(L, ["med", "sq", "note", "note"], false, k); },
+    function (L, k) { return featured(L, ["note", "sq", "med", "note"], true, k); },
+    function (L, k) { return '<div class="scat">' + columns(L, ["med", "note", "note", "sq", "med"], 3) + listCol(k, L) + "</div>"; }
+  ];
+  var sections;
+  if (c === "All") {
+    sections = d.categories.slice(1).map(function (k, i) {
+      var L = S.filter(function (s) { return s.category === k; }).slice(0, 5);
+      return L.length ? '<div class="sec"><h2 class="sec-h"><span>' + E(k) + '</span><a href="/?c=' + encodeURIComponent(k) + '">See all &rarr;</a></h2>' + layouts[i % 3](L, k) + "</div>" : "";
+    }).join("");
+  } else {
+    // A category feed: whatever the front page above did not use, in two compositions
+    // (a wide one, then a flat grid for the remainder).
+    var rest = S.slice(13), wide = rest.slice(0, 5);
+    sections = (wide.length ? '<div class="sec"><h2 class="sec-h"><span>' + (c === "For you" ? "More for you" : "More in " + E(c)) + '</span></h2>' + (wide.length >= 5 ? layouts[1](wide, c) : '<div class="cards flat">' + wide.map(card).join("") + "</div>") + "</div>" : "");
+  }
+  var head = c === "All" ? "" : '<div class="feed-h"><h1>' + E(c) + '</h1><p>' + S.length + ' stories &middot; updated ' + ago(S[0].minutes_ago) + ' ago</p></div>' + (forYouNote ? '<p class="feed-note">' + forYouNote + "</p>" : "");
+  var bandOut = TLS.length && EXS.length >= 4 ? band : "";
+  var PHONE = matchMedia("(max-width:700px)").matches;
+  matchMedia("(max-width:700px)").addEventListener("change", function () { location.reload(); });   // switch layouts when the window crosses the breakpoint
+  if (PHONE) {
+    // Phone: the feed only, as in the app. One vertical list of story cards (a hero image card, then
+    // two compact thumbnail rows, repeating), twelve at a time, more as you near the bottom, until the
+    // feed has run out.
+    page.innerHTML = head + '<div class="pfeed" id="pfeed"></div><div class="endless" id="pend" aria-live="polite"></div>';
+    var feed = document.getElementById("pfeed"), pend = document.getElementById("pend"), shown = 0, PAGE = 12;
+    function addMore() {
+      var chunk = S.slice(shown, shown + PAGE);
+      feed.insertAdjacentHTML("beforeend", chunk.map(function (x, i) { return (shown + i) % 3 === 0 ? img(x) : thumb(x); }).join(""));
+      shown += chunk.length;
+      pend.innerHTML = shown < S.length ? '<div class="endless-load"><i class="spin"></i><span>Loading more\u2026</span></div>'
+        : '<div class="endless-end"><b>You\u2019re all caught up</b><span>That was the whole feed, ' + S.length + ' stories.</span><button type="button" class="more-btn" id="to-top">Back to top</button></div>';
+      var t = document.getElementById("to-top");
+      if (t) t.addEventListener("click", function () { scrollTo({ top: 0, behavior: "smooth" }); });
+      check();
+    }
+    function check() { if (shown < S.length && document.documentElement.scrollHeight - scrollY - innerHeight < 900) setTimeout(addMore, 250); }
+    addEventListener("scroll", check, { passive: true });
+    addEventListener("resize", check);
+    addMore();
+  } else {
+  page.innerHTML = head + '<div class="front"><div class="colA">' + colA + '</div><div class="colB">' + mid + '</div><div class="colC">' + colC + "</div></div>" + bandOut + sections;
+  }
+  // The All feed never really ends: as you near the bottom the next category's section is
+  // added (the same compositions as above), one after another, until every category has had
+  // its turn. Then it says so.
+  if (c === "All" && !PHONE) {
+    var queue = (d.moreCategories || []).slice(), layoutAt = d.categories.length - 1, busy = false;
+    var tail = document.createElement("div");
+    tail.className = "endless"; tail.setAttribute("aria-live", "polite");
+    page.appendChild(tail);
+    function status() {
+      tail.innerHTML = queue.length ? '<div class="endless-load"><i class="spin"></i><span>Loading ' + E(queue[0]) + '\u2026</span></div>'
+        : '<div class="endless-end"><b>You\u2019re all caught up</b><span>That was every category, ' + (d.categories.length - 1 + (d.moreCategories || []).length) + ' in all.</span><button type="button" class="more-btn" id="to-top">Back to top</button></div>';
+      var t = document.getElementById("to-top");
+      if (t) t.addEventListener("click", function () { scrollTo({ top: 0, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); });
+    }
+    function loadNext() {
+      if (busy || !queue.length) return;
+      busy = true;
+      var k = queue.shift();
+      setTimeout(function () {                       // a beat of "loading", as a real request would take
+        var L = ALL.filter(function (x) { return x.category === k; }).slice(0, 5);
+        if (L.length) {
+          var sec = document.createElement("div");
+          sec.className = "sec";
+          sec.innerHTML = '<h2 class="sec-h"><span>' + E(k) + '</span><a href="/?c=' + encodeURIComponent(k) + '">See all &rarr;</a></h2>' + layouts[layoutAt % 3](L, k);
+          page.insertBefore(sec, tail); layoutAt++;
+        }
+        busy = false; status(); check();
+      }, 450);
+    }
+    function check() { if (queue.length && !busy && document.documentElement.scrollHeight - scrollY - innerHeight < 900) loadNext(); }
+    addEventListener("scroll", check, { passive: true });
+    addEventListener("resize", check);
+    status(); check();
+  }
+  // Search overlay, modelled on the Android SearchScreen: full-screen blurred
+  // dim backdrop, rounded field + Cancel, tab chips with count badges, results,
+  // and a "Recent" list when the field is empty.
+  var TABS = ["Stories", "Timelines", "Explainers", "Sources"], tab = "Stories", HK = "oin-search-history";
+  var sp = document.createElement("div");
+  sp.className = "spot"; sp.hidden = true;
+  sp.innerHTML = '<div class="spot-col" role="dialog" aria-modal="true" aria-label="Search">' +
+    '<div class="spot-top"><label class="spot-field"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>' +
+    '<input class="spot-in" type="text" placeholder="Search stories, timelines, explainers, sources" aria-label="Search" autocomplete="off">' +
+    '<button type="button" class="spot-clear" aria-label="Clear search" hidden>&times;</button></label>' +
+    '<button type="button" class="spot-cancel">Cancel</button></div>' +
+    '<div class="spot-tabs" role="tablist"></div><div class="spot-res"></div></div>';
+  document.body.appendChild(sp);
+  var inp = sp.querySelector(".spot-in"), clr = sp.querySelector(".spot-clear"), tabsEl = sp.querySelector(".spot-tabs"), res = sp.querySelector(".spot-res"), opener = null;
+
+  var sources = {};
+  S.forEach(function (s) { s.coverage.forEach(function (v) { sources[v.outlet] = (sources[v.outlet] || 0) + 1; }); });
+  var sourceList = Object.keys(sources).sort().map(function (n) { return { name: n, count: sources[n] }; });
+
+  function has(txt, n) { return txt.toLowerCase().indexOf(n) > -1; }
+  function hl(text, n) {
+    if (!n) return E(text);
+    var out = "", low = text.toLowerCase(), i = 0, m;
+    while ((m = low.indexOf(n, i)) > -1) { out += E(text.slice(i, m)) + "<b>" + E(text.slice(m, m + n.length)) + "</b>"; i = m + n.length; }
+    return out + E(text.slice(i));
+  }
+  function snippet(text, n) {
+    var w = text.split(/\s+/), k = -1, i;
+    for (i = 0; i < w.length; i++) if (has(w[i], n)) { k = i; break; }
+    if (k < 0) return "";
+    return "&ldquo;" + hl(w.slice(Math.max(0, k - 5), k + 6).join(" "), n) + "&rdquo;";
+  }
+  function results(n) {
+    return {
+      Stories: S.filter(function (s) { return has(s.headline + " " + s.dek + " " + s.summary.join(" "), n); }),
+      Timelines: d.timelines.filter(function (t) { return has(t.title + " " + t.points.map(function (p) { return p.text; }).join(" "), n); }),
+      Explainers: d.explainers.filter(function (x) { return has(x.title + " " + x.dek, n); }),
+      Sources: sourceList.filter(function (s) { return has(s.name, n); })
+    };
+  }
+  function history() { try { return JSON.parse(localStorage.getItem(HK)) || []; } catch (e) { return []; } }
+  function saveHist(h) { try { localStorage.setItem(HK, JSON.stringify(h.slice(0, 8))); } catch (e) {} }
+
+  function paint() {
+    var n = inp.value.trim().toLowerCase(), R = n ? results(n) : null;
+    clr.hidden = !inp.value;
+    tabsEl.innerHTML = TABS.map(function (t) {
+      var c = R && t !== "Stories" ? R[t].length : 0;
+      return '<button type="button" role="tab" aria-selected="' + (t === tab) + '" class="spot-tab' + (t === tab ? " on" : "") + '" data-tab="' + t + '">' + t + (c ? '<i>' + c + "</i>" : "") + "</button>";
+    }).join("");
+    if (!n) {
+      var h = history();
+      res.innerHTML = h.length ? '<div class="spot-h">Recent</div>' + h.map(function (x) {
+        return '<div class="spot-hist"><a href="/story/' + x.id + '" data-hist="' + x.id + '"><span class="ph" style="width:36px;height:36px;padding:0;border-radius:6px"></span><span>' + E(x.headline) + '</span></a><button type="button" data-del="' + x.id + '" aria-label="Remove ' + E(x.headline) + ' from recent">&times;</button></div>';
+      }).join("") : '<div class="spot-none">Search stories, timelines, explainers and sources.</div>';
+      return;
+    }
+    var L = R[tab];
+    if (!L.length) { res.innerHTML = '<div class="spot-none">No ' + tab.toLowerCase() + ' match.</div>'; return; }
+    res.innerHTML = L.map(function (x) {
+      if (tab === "Stories") {
+        var sn = snippet(x.summary.join(" "), n);
+        return '<a class="spot-row" href="/story/' + x.id + '" data-hist="' + x.id + '"><div><div class="spot-hd">' + hl(x.headline, n) + "</div>" + (sn ? '<div class="spot-sn">' + sn + "</div>" : "") + '</div><div class="ph" style="width:96px;align-self:stretch;min-height:56px">image</div></a>';
+      }
+      if (tab === "Timelines") return '<a class="spot-card" href="/timeline/' + x.id + '"><span class="spot-badge">TIMELINE</span><div class="spot-hd">' + hl(x.title, n) + '</div><div class="spot-sn">' + x.points.length + " events &middot; " + E(x.updated) + (x.audio ? " &middot; Has audio" : "") + "</div></a>";
+      if (tab === "Explainers") return '<a class="spot-card" href="/explainer/' + x.id + '"><span class="spot-badge">EXPLAINER</span><div class="spot-hd">' + hl(x.title, n) + '</div><div class="spot-sn">' + E(x.read) + "</div></a>";
+      return '<a class="spot-row src" href="/?c=All"><span class="ph round" style="width:28px;height:28px;padding:0"></span><div class="spot-hd">' + hl(x.name, n) + '</div><div class="spot-sn" style="margin-left:auto">' + x.count + " stories</div></a>";
+    }).join("");
+  }
+  var closeTimer = null, still = matchMedia("(prefers-reduced-motion: reduce)");
+  function openS() { clearTimeout(closeTimer); sp.classList.remove("closing"); opener = opener && !sp.hidden ? opener : document.activeElement; sp.hidden = false; document.body.style.overflow = "hidden"; inp.value = ""; tab = "Stories"; paint(); inp.focus(); }
+  function closeS() {
+    if (sp.hidden || sp.classList.contains("closing")) return;
+    function done() { sp.hidden = true; sp.classList.remove("closing"); document.body.style.overflow = ""; if (opener && opener.focus) opener.focus(); }
+    if (still.matches) return done();
+    sp.classList.add("closing");
+    closeTimer = setTimeout(done, 420);
+  }
+  document.getElementById("search-open").addEventListener("click", openS);
+  if (qs.get("s") === "1") openS();   // arrives from the search icon on another page (mobile app bar)
+  sp.querySelector(".spot-cancel").addEventListener("click", closeS);
+  clr.addEventListener("click", function () { inp.value = ""; paint(); inp.focus(); });
+  sp.addEventListener("mousedown", function (e) { if (e.target === sp) closeS(); });
+  inp.addEventListener("input", paint);
+  tabsEl.addEventListener("click", function (e) { var b = e.target.closest("[data-tab]"); if (b) { tab = b.dataset.tab; paint(); } });
+  res.addEventListener("click", function (e) {
+    var del = e.target.closest("[data-del]");
+    if (del) { saveHist(history().filter(function (x) { return x.id != del.dataset.del; })); paint(); return; }
+    var a = e.target.closest("[data-hist]");
+    if (a) {
+      var s = S.filter(function (x) { return x.id == a.dataset.hist; })[0];
+      if (s) saveHist([{ id: s.id, headline: s.headline }].concat(history().filter(function (x) { return x.id !== s.id; })));
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); sp.hidden ? openS() : closeS(); return; }
+    if (sp.hidden) return;
+    if (e.key === "Escape") closeS();
+    else if (e.key === "Enter") { var f = res.querySelector("a[href]:not([href='#'])"); if (f && inp.value.trim()) f.click(); }
+  });
+});
+</script>
+</body>
+</html>

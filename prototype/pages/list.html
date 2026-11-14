@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide" id="page" style="padding-bottom:72px"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+// One template for the two screens a story links to: a publisher's page (/source/<name>)
+// and a topic's page (/topic/<name>).
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, ago = PROTO.ago, slug = PROTO.slug, S = d.stories, el = document.getElementById("page");
+  var parts = location.pathname.split("/").filter(Boolean), kind = parts[0], key = decodeURIComponent(parts[1] || "");
+  var FK = "oin-follow";
+  function follows() { try { return JSON.parse(localStorage.getItem(FK)) || []; } catch (e) { return []; } }
+  function isFollowed(k) { return follows().indexOf(k) > -1; }
+  function followBtn(k, label) {
+    var on = isFollowed(k);
+    return '<button type="button" class="fbtn' + (on ? " on" : "") + '" data-follow="' + E(k) + '" aria-pressed="' + on + '">' + (on ? "Following" : "Follow") + (label ? " " + E(label) : "") + "</button>";
+  }
+  function ph(r, t) { return '<div class="ph" style="aspect-ratio:' + r + '">' + (t || "image") + "</div>"; }
+  function meta(x) { return '<div class="meta"><span class="cat">' + E(x.category) + "</span><span>" + ago(x.minutes_ago) + " ago</span></div>"; }
+  function card(x, outlet) {
+    return '<div class="c">' + ph("3/2") + meta(x) + '<h3><a href="/story/' + x.id + '">' + E(x.headline) + "</a></h3>" +
+      (outlet ? '<a class="ext" href="#" target="_blank" rel="noopener">Read on ' + E(outlet) + " &#8599;</a>" : "") + PROTO.srow(x) + "</div>";
+  }
+  var SHOWN = 8, list = [], name = "", head = "", extra = "";
+
+  if (kind === "source") {
+    var outlets = {};
+    S.forEach(function (s) { s.coverage.forEach(function (v) { if (!outlets[slug(v.outlet)]) outlets[slug(v.outlet)] = v.outlet; }); });
+    name = outlets[key];
+    if (name) {
+      list = S.filter(function (s) { return s.coverage.some(function (v) { return v.outlet === name; }); });
+      var hash = 0; name.split("").forEach(function (c) { hash = (hash * 31 + c.charCodeAt(0)) >>> 0; });
+      var region = ["National", "Northeast", "Business", "Regional"][hash % 4], lang = ["EN", "EN", "HI"][hash % 3];
+      var host = slug(name) + ".example";
+      head = '<div class="lh-top"><span class="fv big" aria-hidden="true"></span><div><h1>' + E(name) + '</h1><p class="lh-meta">' + E(region) + " &middot; " + lang + " &middot; " + list.length + ' stories &middot; <a href="#" target="_blank" rel="noopener">Visit ' + E(host) + ' &#8599;</a></p></div>' +
+        '<div class="lh-act">' + followBtn("source:" + key) + '</div></div>' +
+        "<p class=\"lh-desc\">" + E(name) + "&rsquo;s reporting in today&rsquo;s top headlines. Each link opens their own article.</p>";
+      var others = Object.keys(outlets).filter(function (k) { return k !== key; }).slice(0, 4);
+      extra = '<section class="sec"><h2 class="sec-h"><span>Similar sources</span></h2><p class="sty-sub">More publishers covering ' + E(list[0] ? list[0].category : "the news") + '.</p><div class="tiles four">' +
+        others.map(function (k) {
+          var h2 = 0; outlets[k].split("").forEach(function (c) { h2 = (h2 * 31 + c.charCodeAt(0)) >>> 0; });
+          return '<div class="stile"><a class="stile-l" href="/source/' + k + '"><span class="fv big sm"></span><span><b>' + E(outlets[k]) + "</b><small>" + ["National", "Northeast", "Business", "Regional"][h2 % 4] + " &middot; " + ["EN", "EN", "HI"][h2 % 3] + "</small></span></a>" + followBtn("source:" + k) + "</div>";
+        }).join("") + '</div></section><p class="foot-note">Stories open on the publisher&rsquo;s own site, so every read counts for them.</p>';
+    }
+  } else {
+    var topics = {};
+    S.forEach(function (s) { (s.topics || []).forEach(function (t) { if (!topics[slug(t.label)]) topics[slug(t.label)] = t; }); });
+    var t0 = topics[key];
+    if (t0) {
+      name = t0.label;
+      list = S.filter(function (s) { return (s.topics || []).some(function (t) { return slug(t.label) === key; }); });
+      head = '<div class="lh-top"><div><span class="kind">' + E(t0.kind) + "</span><h1>" + E(name) + '</h1><p class="lh-meta">' + list.length + ' stories</p></div><div class="lh-act">' + followBtn("topic:" + key) + "</div></div>";
+      var seen = {}, rel = [];
+      list.forEach(function (s) { s.topics.forEach(function (t) { var k = slug(t.label); if (k !== key && !seen[k]) { seen[k] = 1; rel.push(t); } }); });
+      if (rel.length) extra = '<section class="sec"><h2 class="sec-h"><span>Related topics</span></h2><div class="tiles four">' + rel.slice(0, 8).map(function (t) {
+        return '<a class="tile" href="/topic/' + slug(t.label) + '"><b>' + E(t.label) + "</b><span>" + E(t.kind) + "</span></a>"; }).join("") + "</div></section>";
+    }
+  }
+
+  if (!name) { el.innerHTML = '<p class="empty" style="padding-top:48px">No stories found for &ldquo;' + E(key.replace(/-/g, " ")) + '&rdquo;. <a href="/">Back to top stories</a></p>'; return; }
+  document.title = name + " — Open Indian News";
+  var grid = function (all) { return list.slice(0, all ? list.length : SHOWN).map(function (x) { return card(x, kind === "source" ? name : ""); }).join(""); };
+  el.innerHTML = '<p class="meta crumb" style="padding-top:28px"><a href="/">&larr; Top stories</a></p><header class="lh">' + head + "</header>" +
+    '<section class="sec" style="margin-top:28px"><h2 class="sec-h"><span>' + (kind === "source" ? "Stories" : "Latest on this topic") + '</span><span class="sec-n">' + list.length + ' stories</span></h2><div class="cards flat" id="grid">' + grid(false) + "</div>" +
+    (list.length > SHOWN ? '<button type="button" class="more-btn" id="more" style="max-width:360px;margin:20px auto 0">Show more stories</button>' : "") + "</section>" + extra;
+
+  var more = document.getElementById("more");
+  if (more) more.addEventListener("click", function () { document.getElementById("grid").innerHTML = grid(true); more.remove(); });
+
+  // Follow / Following. Following needs an account (as in the app), so signed-out
+  // visitors are sent to sign-in first.
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-follow]");
+    if (!b) return;
+    if (!PROTO.signedIn()) { PROTO.openLogin(); return; }
+    var k = b.dataset.follow, list2 = follows(), i = list2.indexOf(k), on = i < 0;
+    if (on) list2.push(k); else list2.splice(i, 1);
+    try { localStorage.setItem(FK, JSON.stringify(list2)); } catch (x) {}
+    [].forEach.call(document.querySelectorAll('[data-follow="' + k + '"]'), function (x) {
+      x.classList.toggle("on", on); x.setAttribute("aria-pressed", on);
+      x.firstChild.nodeValue = on ? "Following" : "Follow";
+    });
+  });
+});
+</script>
+</body>
+</html>

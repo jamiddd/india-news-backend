@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profile — Open Indian News (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/site.css">
+<style>
+.pr{padding-top:28px; padding-bottom:120px; max-width:1180px}
+.pr-hero,.pr-stats,.pr-sec,#pr-form,.pr-ok{max-width:860px}
+.pr-hero{display:flex; align-items:center; gap:22px; padding:28px; border:1px solid var(--line); border-radius:22px; background:var(--surface)}
+.pr-av{flex:0 0 auto; width:96px; height:96px; border-radius:50%; display:grid; place-items:center; background:#1976D2; color:#fff; font-size:42px; font-weight:800}
+.pr-av.guest{background:var(--line); color:var(--ink-3)}
+.pr-who{min-width:0; flex:1 1 auto}
+.pr-who h1{margin:0; font-size:clamp(24px,3vw,32px); font-weight:900; letter-spacing:-.03em; line-height:1.1}
+.pr-who .em{margin-top:4px; color:var(--ink-2); font-size:15px; word-break:break-all}
+.pr-who .jn{margin-top:6px; font:500 12px var(--mono); color:var(--ink-3)}
+.pr-hero .btn{flex:0 0 auto}
+.pr-stats{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:14px}
+.pr-stat{display:flex; flex-direction:column; gap:2px; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:var(--surface); color:var(--ink)}
+.pr-stat:hover{text-decoration:none; border-color:var(--ink-3)}
+.pr-stat b{font-size:24px; font-weight:800; letter-spacing:-.02em}
+.pr-stat span{font:600 11px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3)}
+.pr-sec{margin-top:30px}
+.pr-sec > h2{margin:0 0 10px; font-size:18px; font-weight:800; letter-spacing:-.02em; display:flex; justify-content:space-between; align-items:baseline}
+.pr-sec > h2 a{font:600 13px var(--sans,inherit)}
+.pr-card{border:1px solid var(--line); border-radius:16px; background:var(--surface); padding:6px 18px}
+.pr-f{display:flex; flex-direction:column; gap:6px; padding:14px 0; border-bottom:1px solid var(--line)}
+.pr-f:last-of-type{border-bottom:0}
+.pr-f label{font:600 12px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3)}
+.pr-f input{min-height:42px; padding:0 14px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink); font:inherit}
+.pr-f input:focus{outline:2px solid #1976D2; outline-offset:1px; border-color:transparent}
+.pr-f input[readonly]{color:var(--ink-3)}
+.pr-f small{color:var(--ink-3); font-size:12.5px}
+.pr-act{display:flex; gap:10px; align-items:center; padding:14px 0 12px}
+.pr-ok{font-size:13px; font-weight:600; color:var(--success)}
+.pr-chips{display:flex; flex-wrap:wrap; gap:8px}
+.pr-chip{display:inline-flex; align-items:center; gap:8px; height:36px; padding:0 14px; border-radius:18px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font-size:14px; font-weight:600}
+.pr-chip:hover{text-decoration:none; border-color:var(--ink-3)}
+.pr-chip small{font:600 10px var(--mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3)}
+.pr-empty{color:var(--ink-2); font-size:14px; margin:0}
+.pr-links{display:flex; flex-wrap:wrap; gap:10px}
+.pr-out{background:none; border:1px solid var(--line); color:var(--ink); border-radius:999px; min-height:40px; padding:0 18px; font:600 14px inherit; cursor:pointer}
+.pr-out:hover{border-color:var(--ink-3)}
+.pr-del{color:var(--breaking); font-size:14px; font-weight:600; align-self:center}
+.pr-guest{text-align:center; padding:56px 20px}
+.pr-guest h1{margin:18px 0 6px; font-size:28px; font-weight:900; letter-spacing:-.03em}
+.pr-guest p{margin:0 0 20px; color:var(--ink-2)}
+@media (max-width:700px){
+  .pr{padding-top:12px}
+  .pr-hero{flex-direction:column; align-items:flex-start; gap:14px; padding:20px; border-radius:18px}
+  .pr-av{width:72px; height:72px; font-size:30px}
+  .pr-hero .btn{width:100%; justify-content:center}
+  .pr-stat{padding:12px} .pr-stat b{font-size:20px}
+}
+
+/* Saved | History pager, as in the app's profile: simple tabs over a swipeable pair of lists */
+.pr-tabs{display:block; margin-top:22px; border-bottom:1px solid var(--line)}
+.pr-tabs i{display:none}
+.pr-tabs div{display:flex; gap:26px}
+.pr-tabs button{display:inline-flex; align-items:center; gap:6px; padding:14px 0 12px; border:0; border-bottom:3px solid transparent; margin-bottom:-1px; background:none; font:600 14px var(--sans,inherit); color:var(--ink-2); white-space:nowrap; cursor:pointer}
+.pr-tabs button:hover{color:var(--ink); border-bottom-color:var(--line)}
+.pr-tabs button.on{color:var(--ink); border-bottom-color:#1976D2}
+.pr-pg{display:flex; margin-top:6px; overflow-x:auto; overflow-y:hidden; scroll-snap-type:x mandatory; scrollbar-width:none; align-items:flex-start; transition:height .2s}
+.pr-pg::-webkit-scrollbar{display:none}
+.pr-pane{flex:0 0 100%; scroll-snap-align:start; scroll-snap-stop:always; box-sizing:border-box; min-width:0}
+.pr-ph{display:none}
+@media (max-width:1000px){
+  .pr-stats{display:none}
+  .pr-pg{margin:14px -16px 0}
+  .pr-pane{padding:0 16px}
+}
+.pr-rw{display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid var(--line)}
+.pr-rw .th{flex:0 0 104px; aspect-ratio:3/2; border-radius:10px; background:linear-gradient(135deg,var(--line),var(--surface))}
+.pr-rw .tx{flex:1 1 auto; min-width:0}
+.pr-rw .tx a{display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; font-size:15px; font-weight:700; line-height:1.3; color:var(--ink)}
+.pr-rw .tx a:hover{text-decoration:none}
+.pr-rw .tx small{display:block; margin-top:5px; font:500 11.5px var(--mono); color:var(--ink-3)}
+.pr-rw .rm{flex:0 0 auto; width:36px; height:36px; display:grid; place-items:center; border:0; background:none; color:#1976D2; cursor:pointer; margin-right:-8px}
+.pr-rw .rm svg{fill:currentColor}
+.pr-clear{display:block; margin:14px auto 0; background:none; border:1px solid var(--line); color:var(--ink); border-radius:999px; min-height:38px; padding:0 18px; font:600 13px inherit; cursor:pointer}
+.pr-none{padding:40px 12px; text-align:center; color:var(--ink-2); font-size:14px}
+</style>
+</head>
+<body>
+<div id="app-header"></div>
+<div class="signal-bar"><div class="wrap"><span class="tag">NO ADS</span><span>The only news app with no ads. Anywhere.</span></div></div>
+<main class="wide pr" id="page"></main>
+<div id="app-footer"></div>
+<script src="/static/shell.js"></script>
+<script>
+PROTO.ready.then(function (d) {
+  var E = PROTO.esc, el = document.getElementById("page"), editing = false, flash = false;
+  function sess() { try { return JSON.parse(localStorage.getItem("oin-session")); } catch (e) { return null; } }
+  function ls(k) { try { return JSON.parse(localStorage.getItem(k)) || []; } catch (e) { return []; } }
+  function label(k) { return k.split(":")[1].replace(/-/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+
+  var tab = 0;
+  function readIds() { return ls("oin-read"); }
+  function rowFor(sid, kind) {
+    var st = d.stories.filter(function (x) { return x.id === sid; })[0];
+    if (!st) return "";
+    return '<div class="pr-rw"><div class="th" aria-hidden="true"></div><div class="tx"><a href="/story/' + st.id + '">' + E(st.headline) + "</a><small>" + E(st.category) + " &middot; " + PROTO.ago(st.minutes_ago) + " ago</small></div>" +
+      (kind === "saved" ? '<button type="button" class="rm" data-unsave="' + st.id + '" aria-label="Remove from saved"><svg width="20" height="20" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg></button>' : "") + "</div>";
+  }
+  function pager(saved, hist) {
+    var sv = saved.slice().reverse().map(function (i) { return rowFor(i, "saved"); }).join(""),
+        hs = hist.slice().reverse().map(function (i) { return rowFor(i, "hist"); }).join("");
+    var BM = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-6-4.5L6 21z"/></svg>',
+        HI = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.5M3 4v4h4M12 8v4l3 2"/></svg>';
+    return '<div class="pr-tabs' + (tab ? " h" : "") + '" role="tablist"><i></i><div><button type="button" role="tab" data-tab="0" class="' + (tab ? "" : "on") + '">' + "Saved</button><button type=\"button\" role=\"tab\" data-tab=\"1\" class=\"" + (tab ? "on" : "") + '">' + "History</button></div></div>" +
+      '<div class="pr-pg" id="pr-pg"><div class="pr-pane"><h2 class="pr-ph">Saved<span>' + saved.length + "</span></h2>" + (sv || '<p class="pr-none">Nothing saved yet. Tap the bookmark on any story to keep it here.</p>') + "</div>" +
+      '<div class="pr-pane"><h2 class="pr-ph">History<span>' + hist.length + "</span></h2>" + (hs ? hs + '<button type="button" class="pr-clear" id="pr-clear">Clear history</button>' : '<p class="pr-none">Stories you open will show up here.</p>') + "</div></div>";
+  }
+  function fit() {
+    var pg = document.getElementById("pr-pg"); if (!pg) return;
+        var pane = pg.children[tab]; pg.style.height = pane.scrollHeight + "px";
+  }
+  function bindPager() {
+    var pg = document.getElementById("pr-pg"); if (!pg) return;
+    var tabs = el.querySelector(".pr-tabs");
+    pg.scrollLeft = tab * pg.clientWidth; fit();
+    pg.addEventListener("scroll", function () {
+      var n = pg.scrollLeft > pg.clientWidth / 2 ? 1 : 0;
+      if (n !== tab) { tab = n; tabs.classList.toggle("h", !!n); [].forEach.call(tabs.querySelectorAll("button"), function (b) { b.classList.toggle("on", +b.dataset.tab === n); }); fit(); }
+    }, { passive: true });
+  }
+
+  function draw() {
+    var u = sess();
+    if (!u) {
+      el.innerHTML = '<div class="pr-guest"><div class="pr-av guest" style="margin:0 auto" aria-hidden="true"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></div>' +
+        '<h1>Welcome, Reader</h1><p>Sign in to save stories, follow sources and sync across devices.</p><button type="button" class="btn btn-primary" id="pr-login"><span>Sign in or create an account</span></button></div>';
+      return;
+    }
+    var saved = ls("oin-saved").length, fol = ls("oin-follow"), srcs = fol.filter(function (k) { return k.indexOf("source:") === 0; }), tops = fol.filter(function (k) { return k.indexOf("topic:") === 0; });
+    el.innerHTML =
+      '<div class="pr-hero"><div class="pr-av" aria-hidden="true">' + E((u.name || u.email || "?").trim().charAt(0).toUpperCase()) + '</div><div class="pr-who"><h1>' + E(u.name || "Reader") + '</h1><div class="em">' + E(u.email || "") + '</div><div class="jn">Joined ' + E(u.joined || "this month") + "</div></div>" +
+      '<button type="button" class="btn btn-primary btn-sm" id="pr-edit"><span>' + (editing ? "Cancel" : "Edit profile") + "</span></button></div>" +
+      (editing ? '<form class="pr-sec" id="pr-form"><div class="pr-card"><div class="pr-f"><label for="pr-name">Display name</label><input id="pr-name" value="' + E(u.name || "") + '" maxlength="60" autocomplete="name"></div>' +
+        '<div class="pr-f"><label for="pr-mail">Email</label><input id="pr-mail" value="' + E(u.email || "") + '" readonly><small>Your email is how you sign in, so it can&rsquo;t be changed here.</small></div>' +
+        '<div class="pr-act"><button type="submit" class="btn btn-primary btn-sm"><span>Save changes</span></button></div></div></form>' : "") +
+      (flash ? '<p class="pr-ok" role="status" style="margin:12px 4px 0">Profile updated</p>' : "") +
+      pager(ls("oin-saved"), readIds()) +
+      '<div class="pr-stats"><a class="pr-stat" href="/saved"><b>' + saved + '</b><span>Saved</span></a><a class="pr-stat" href="/sources"><b>' + srcs.length + '</b><span>Sources</span></a><a class="pr-stat" href="/sources"><b>' + tops.length + '</b><span>Topics</span></a></div>' +
+      '<section class="pr-sec"><h2>Following<a href="/sources">Find sources &rarr;</a></h2>' +
+      (fol.length ? '<div class="pr-chips">' + fol.map(function (k) { var s = k.split(":"); return '<a class="pr-chip" href="/' + s[0] + "/" + s[1] + '">' + E(label(k)) + "<small>" + s[0] + "</small></a>"; }).join("") + "</div>"
+        : '<p class="pr-empty">You aren&rsquo;t following anything yet. Follow a source or topic and its stories will show up first.</p>') + "</section>" +
+      '<section class="pr-sec"><h2>Account</h2><div class="pr-links"><button type="button" class="pr-out" id="pr-out">Sign out</button><a class="pr-del" href="/delete-account">Delete account</a></div></section>';
+  }
+  el.addEventListener("click", function (e) {
+    if (e.target.closest("#pr-login")) PROTO.openLogin();
+    else if (e.target.closest("#pr-edit")) { editing = !editing; flash = false; draw(); bindPager(); }
+    else if (e.target.closest("[data-tab]")) { var b = e.target.closest("[data-tab]"), pg = document.getElementById("pr-pg"); pg.scrollTo({ left: +b.dataset.tab * pg.clientWidth, behavior: "smooth" }); }
+    else if (e.target.closest("[data-unsave]")) {
+      var id = +e.target.closest("[data-unsave]").dataset.unsave, l = ls("oin-saved").filter(function (x) { return x !== id; });
+      try { localStorage.setItem("oin-saved", JSON.stringify(l)); } catch (x) {} draw(); bindPager();
+    } else if (e.target.closest("#pr-clear")) { try { localStorage.removeItem("oin-read"); } catch (x) {} draw(); bindPager(); }
+    else if (e.target.closest("#pr-out")) { try { localStorage.removeItem("oin-session"); } catch (x) {} location.reload(); }
+  });
+  el.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var u = sess(), n = document.getElementById("pr-name").value.trim();
+    if (!u || !n) { document.getElementById("pr-name").focus(); return; }
+    u.name = n;
+    try {
+      localStorage.setItem("oin-session", JSON.stringify(u));
+      var a = JSON.parse(localStorage.getItem("oin-accounts")) || [];
+      a.forEach(function (x) { if (x.email === u.email) x.name = n; });
+      localStorage.setItem("oin-accounts", JSON.stringify(a));
+    } catch (x) {}
+    editing = false; flash = true; draw(); bindPager();
+  });
+  draw(); bindPager(); addEventListener("resize", fit);
+  var ub = document.getElementById("user");
+  if (ub) new MutationObserver(function () { draw(); }).observe(ub, { childList: true, attributes: true, attributeFilter: ["aria-label"] });
+});
+</script>
+</body>
+</html>

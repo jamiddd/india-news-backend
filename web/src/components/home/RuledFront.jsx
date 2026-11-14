@@ -124,7 +124,7 @@ export default function RuledFront({ S, TLS, EXS, forYou }) {
             {EXS.slice(0, 3).map((x) => <Link key={x.id} to={"/explainer/" + x.id}><span>{x.category} &middot; {x.read}</span>{x.title}</Link>)}
           </section>
         ) : null}
-        <section className="rf-box rf-promo"><h3>Don{"’"}t miss a story.</h3><p>Get the daily brief and follow topics in the app.</p><Link to="/download">Get it now</Link></section>
+        <section className="rf-box rf-promo"><h3>Don{"’"}t miss a story.</h3><p>Get the daily brief and follow topics in the app.</p><a href="https://play.google.com/store/apps/details?id=com.jamid.news" target="_blank" rel="noopener">Get it now</a></section>
       </aside>
     </div>
   );
