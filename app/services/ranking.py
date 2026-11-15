@@ -20,6 +20,7 @@ discarded before shipping: a floor lifts everything beneath it to the same
 value, so a brand-new 1-source story and a brand-new 2-source one scored
 identically, erasing corroboration among exactly the newest stories.
 """
+from app.services.feed_gate import LISTING_MAX_AGE
 
 # Age is measured from COALESCE(became_multi_source_at, first_seen_at):
 # both are written once and never rewritten, unlike last_updated_at, which
@@ -88,7 +89,12 @@ UPDATE_HEADLINE_SCORES_SQL = (
 # clusters inside this window can still lead a feed, so the per-cycle
 # recompute is limited to them; poller.py runs the unrestricted statement
 # above once a day so older rows still decay.
-RECENT_SCORE_WINDOW_DAYS = 14
+#
+# Derived from LISTING_MAX_AGE, which every reader of headline_score filters
+# on with this same anchor: nothing older is ever listed, so its score cannot
+# affect a feed. One extra day of margin keeps a cluster that is about to age
+# out scored right up to the cutoff. Do not hard-code a smaller number.
+RECENT_SCORE_WINDOW_DAYS = LISTING_MAX_AGE.days + 1
 
 UPDATE_RECENT_HEADLINE_SCORES_SQL = (
     f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR} "
