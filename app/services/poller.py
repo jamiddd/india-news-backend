@@ -1,4 +1,5 @@
 import asyncio
+import time
 import logging
 import hashlib
 from collections import defaultdict
@@ -17,7 +18,7 @@ from app.services.entity_graph import canonicalize_entity
 from app.services.decay import ema_update
 from app.services.breaking import process_breaking_cycle
 from app.services.explore_bandit import recompute_explore_promotions
-from app.services.ranking import UPDATE_HEADLINE_SCORES_SQL
+from app.services.ranking import UPDATE_HEADLINE_SCORES_SQL, UPDATE_RECENT_HEADLINE_SCORES_SQL
 from app.services.dedup import (
     MIN_SHARED_TOKENS,
     compute_url_hash,
@@ -674,6 +675,11 @@ async def ingest_source(
 # heartbeat rather than via connection lifetime.
 POLL_LEASE_NAME = "poll_all_sources"
 
+# Unrestricted headline_score rewrite of every cluster, at most this often.
+# None until the first cycle after a process start, which therefore does one.
+FULL_SCORE_SWEEP_INTERVAL_S = 24 * 3600
+_last_full_score_sweep: Optional[float] = None
+
 # --- Feed ranking redesign, piece 1: global importance (entity_stats) ---
 # See app/services/entity_graph.py for canonicalization and the "Feed
 # ranking redesign" design memory for the full reasoning. Both half-lives
@@ -911,7 +917,19 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         # legitimate purpose — the mechanism just could not tell a real
         # development from the 47th outlet posting a recap, and got the
         # trade-off badly wrong in the common case.
-        await session.execute(text(UPDATE_HEADLINE_SCORES_SQL))
+        #
+        # Only recent clusters are rescored each cycle; a full pass runs about
+        # once a day (per process). See UPDATE_RECENT_HEADLINE_SCORES_SQL.
+        global _last_full_score_sweep
+        now_mono = time.monotonic()
+        if (
+            _last_full_score_sweep is None
+            or now_mono - _last_full_score_sweep > FULL_SCORE_SWEEP_INTERVAL_S
+        ):
+            await session.execute(text(UPDATE_HEADLINE_SCORES_SQL))
+            _last_full_score_sweep = now_mono
+        else:
+            await session.execute(text(UPDATE_RECENT_HEADLINE_SCORES_SQL))
 
         # Feed ranking redesign, piece 1: global importance. Same transaction
         # as the headline_score update above, so both are consistent as of

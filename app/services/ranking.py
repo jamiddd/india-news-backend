@@ -82,6 +82,20 @@ UPDATE_HEADLINE_SCORES_SQL = (
     f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR}"
 )
 
+# Every UPDATE writes a new row version, so rewriting all clusters each poll
+# cycle dirtied the whole table and its indexes (~350k rows, ~660 MB) and
+# exhausted the database's disk IO budget with almost no traffic. Only
+# clusters inside this window can still lead a feed, so the per-cycle
+# recompute is limited to them; poller.py runs the unrestricted statement
+# above once a day so older rows still decay.
+RECENT_SCORE_WINDOW_DAYS = 14
+
+UPDATE_RECENT_HEADLINE_SCORES_SQL = (
+    f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR} "
+    f"WHERE COALESCE(became_multi_source_at, first_seen_at) "
+    f"> now() - interval '{RECENT_SCORE_WINDOW_DAYS} days'"
+)
+
 
 def headline_score(distinct_source_count: int, age_hours: float) -> float:
     """Python mirror of HEADLINE_SCORE_EXPR, for tests and analysis.
