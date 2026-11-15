@@ -14,7 +14,9 @@ occasionally return an incomplete set of related stories. Under-showing is
 the accepted failure mode for a discovery feature — see the design doc's
 "Next steps" for the actor-type refinement that would reduce this.
 """
+import asyncio
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -173,6 +175,34 @@ async def load_entity_stats(conn) -> Dict[str, Tuple[float, float, str]]:
     return stats
 
 
+class _SubsumptionIndex:
+    """Same test as `any(len(ids & kept) / len(ids) >= ratio for kept in all_kept)`,
+    but via an id -> kept-set inverted index so each check only touches kept
+    sets that actually share a member (the naive scan was quadratic and took
+    ~2 minutes over the 60-day window)."""
+
+    def __init__(self, ratio: float):
+        self.ratio = ratio
+        self.by_id: Dict[int, List[int]] = {}
+        self.n = 0
+
+    def subsumed(self, ids: Set[int]) -> bool:
+        counts: Dict[int, int] = {}
+        need = self.ratio * len(ids)
+        for i in ids:
+            for k in self.by_id.get(i, ()):
+                c = counts.get(k, 0) + 1
+                if c >= need:
+                    return True
+                counts[k] = c
+        return False
+
+    def add(self, ids: Set[int]) -> None:
+        for i in ids:
+            self.by_id.setdefault(i, []).append(self.n)
+        self.n += 1
+
+
 def build_generic_check(
     clusters: List[Cluster], entity_stats: Dict[str, Tuple[float, float, str]],
     generic_percentile: float, max_df_ratio: float,
@@ -221,18 +251,14 @@ def select_topic_groups(
     candidates.sort(key=lambda kv: len(kv[1]), reverse=True)
 
     kept: List[TopicGroup] = []
-    kept_id_sets: List[Set[int]] = []
+    index = _SubsumptionIndex(subsumption_ratio)
     for key, members in candidates:
         member_ids = {c.id for c in members}
-        subsumed = any(
-            len(member_ids & kept_ids) / len(member_ids) >= subsumption_ratio
-            for kept_ids in kept_id_sets
-        )
-        if subsumed:
+        if index.subsumed(member_ids):
             continue
         display = key.split(":", 1)[1] if ":" in key else key
         kept.append(TopicGroup(actor=key, actor_display=display, members=members))
-        kept_id_sets.append(member_ids)
+        index.add(member_ids)
 
     return kept
 
@@ -290,19 +316,15 @@ def dedup_sub_clusters(
     scored.sort(key=lambda t: t[0], reverse=True)
 
     kept: List[Tuple[TopicGroup, List[Cluster]]] = []
-    kept_id_sets: List[Set[int]] = []
+    index = _SubsumptionIndex(subsumption_ratio)
     for _, (group, members) in scored:
         member_ids = {c.id for c in members}
         if not member_ids:
             continue
-        subsumed = any(
-            len(member_ids & kept_ids) / len(member_ids) >= subsumption_ratio
-            for kept_ids in kept_id_sets
-        )
-        if subsumed:
+        if index.subsumed(member_ids):
             continue
         kept.append((group, members))
-        kept_id_sets.append(member_ids)
+        index.add(member_ids)
 
     return kept
 
@@ -319,6 +341,35 @@ def _relevance_score(cluster: Cluster, group: TopicGroup, entity_stats: Dict[str
     return cluster.distinct_source_count * ratio
 
 
+_GRAPH: Dict[int, Tuple[float, tuple]] = {}
+_GRAPH_TTL = 600.0
+_graph_lock = asyncio.Lock()
+
+
+async def _build_graph(conn, days: int):
+    """The grouped story graph is the same for every cluster_id, so build it
+    once per process per TTL instead of once per request."""
+    hit = _GRAPH.get(days)
+    if hit and time.monotonic() - hit[0] < _GRAPH_TTL:
+        return hit[1]
+    async with _graph_lock:
+        hit = _GRAPH.get(days)
+        if hit and time.monotonic() - hit[0] < _GRAPH_TTL:
+            return hit[1]
+        clusters = await load_clusters(conn, days)
+        by_id = {c.id: c for c in clusters}
+        entity_stats = await load_entity_stats(conn)
+        is_generic = build_generic_check(clusters, entity_stats, GENERIC_PERCENTILE, MAX_DF_RATIO)
+        topic_groups = select_topic_groups(clusters, is_generic, SUBSUMPTION_RATIO)
+        raw = []
+        for group in topic_groups:
+            for members in sub_cluster_topic_group(group, MIN_SHARED):
+                raw.append((group, members))
+        built = (clusters, by_id, is_generic, entity_stats, dedup_sub_clusters(raw, SUBSUMPTION_RATIO))
+        _GRAPH[days] = (time.monotonic(), built)
+        return built
+
+
 async def find_related_clusters(
     conn, cluster_id: int, days: int = DAYS, sort: str = "relevance", limit: int = 20,
 ) -> Tuple[List[Cluster], Optional[str]]:
@@ -327,21 +378,9 @@ async def find_related_clusters(
     returns them sorted plus the winning actor's display name (None if
     `cluster_id` wasn't found in the window at all, distinct from "found but
     no related stories")."""
-    clusters = await load_clusters(conn, days)
-    by_id = {c.id: c for c in clusters}
+    clusters, by_id, is_generic, entity_stats, sub_clusters = await _build_graph(conn, days)
     if cluster_id not in by_id:
         return [], None
-
-    entity_stats = await load_entity_stats(conn)
-    is_generic = build_generic_check(clusters, entity_stats, GENERIC_PERCENTILE, MAX_DF_RATIO)
-    topic_groups = select_topic_groups(clusters, is_generic, SUBSUMPTION_RATIO)
-
-    raw_sub_clusters: List[Tuple[TopicGroup, List[Cluster]]] = []
-    for group in topic_groups:
-        for members in sub_cluster_topic_group(group, MIN_SHARED):
-            raw_sub_clusters.append((group, members))
-
-    sub_clusters = dedup_sub_clusters(raw_sub_clusters, SUBSUMPTION_RATIO)
 
     related: Dict[int, Cluster] = {}
     winning_group: Optional[TopicGroup] = None

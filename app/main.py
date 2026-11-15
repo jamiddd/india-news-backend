@@ -2557,6 +2557,35 @@ async def get_related_clusters(
     by_id = {c.id: c for c in articles_result.scalars().all()}
     items = [_cluster_to_out(by_id[cid]) for cid in cluster_ids if cid in by_id]
 
+    if not items:
+        # Nothing entity-related: fall back to the top recent stories in the
+        # same category so the detail screen never shows an empty section.
+        cats = [r[0] for r in (await db.execute(
+            select(Source.category)
+            .join(Article, Article.source_id == Source.id)
+            .where(Article.cluster_id == cluster_id, Source.category.isnot(None))
+            .group_by(Source.category)
+            .order_by(func.count().desc())
+        )).all()]
+        if cats:
+            cat_subq = (
+                select(Article.cluster_id).join(Source).where(Source.category == cats[0])
+            )
+            fb_query = (
+                select(StoryCluster)
+                .options(selectinload(StoryCluster.articles).selectinload(Article.source))
+                .where(
+                    StoryCluster.id.in_(cat_subq),
+                    StoryCluster.id != cluster_id,
+                    listing_age_anchor() >= utc_now() - LISTING_MAX_AGE,
+                )
+            )
+            fb_query = apply_feed_gate(fb_query).order_by(
+                StoryCluster.headline_score.desc(), StoryCluster.id.desc()
+            ).limit(limit)
+            fb = await db.execute(fb_query)
+            items = [_cluster_to_out(c) for c in fb.scalars().all()]
+
     result_out = RelatedClustersOut(items=items, actor=actor)
     await _cache_set(cache_key, result_out.model_dump_json())
     return result_out
