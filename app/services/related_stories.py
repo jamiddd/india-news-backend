@@ -26,8 +26,8 @@ from app.services.feed_gate import gate_cache_marker, gate_min_sources
 from app.redis_client import get_redis_client
 
 DAYS = 60
-GENERIC_PERCENTILE = 0.95
-MAX_DF_RATIO = 0.015
+GENERIC_PERCENTILE = 0.98
+MAX_DF_RATIO = 0.03
 SUBSUMPTION_RATIO = 0.8
 MIN_SHARED = 1
 
@@ -360,6 +360,23 @@ async def find_related_clusters(
         result.sort(key=lambda c: c.first_seen_at, reverse=True)
     elif winning_group is not None:
         result.sort(key=lambda c: _relevance_score(c, winning_group, entity_stats), reverse=True)
+
+    # Top-up: the group-based pass is deliberately strict and leaves many
+    # stories with nothing (or only a few). Fill the remainder with clusters
+    # that share at least one specific (non-generic) entity with this one,
+    # ranked by how many they share, then recency.
+    if len(result) < limit:
+        mine = {k for k in by_id[cluster_id].entity_keys if not is_generic(k)}
+        if mine:
+            scored = []
+            for c in clusters:
+                if c.id == cluster_id or c.id in related:
+                    continue
+                n = len(mine & c.entity_keys)
+                if n:
+                    scored.append((n, c.last_updated_at, c))
+            scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+            result.extend(c for _, _, c in scored[: limit - len(result)])
 
     winning_actor = winning_group.actor_display if winning_group is not None else None
     return result[:limit], winning_actor

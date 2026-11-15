@@ -438,10 +438,11 @@ export async function loadStoryMain(id) {
 }
 export async function loadRelated(id) {
   if (USE_SAMPLE) return { stories: [] };
-  const [cx, rel] = await Promise.all([
-    ctx(),
-    getJSON(V1 + "/clusters/" + encodeURIComponent(id) + "/related?limit=6").catch(() => ({ items: [] })),
-  ]);
+  const url = V1 + "/clusters/" + encodeURIComponent(id) + "/related?limit=6";
+  // Retry once so a transient failure (rate limit, timeout) isn't shown as "no related stories".
+  const fetchRel = () => getJSON(url).catch(() => new Promise((r) => setTimeout(r, 800)).then(() => getJSON(url)))
+    .catch((e) => { console.warn("related stories failed", e); return { items: [] }; });
+  const [cx, rel] = await Promise.all([ctx(), fetchRel()]);
   return { stories: (rel.items || []).filter((x) => String(x.id) !== String(id)).map((x) => adaptCluster(x, cx)) };
 }
 export async function loadStory(id) {

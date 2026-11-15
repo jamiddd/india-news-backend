@@ -90,7 +90,7 @@ export function CoverageRows({ list, link = false }) {
   return list.map((v, i) => (
     <div key={i} className={"pop-r" + (i === list.length - 1 ? " last" : "")}>
       <span className="pop-t">{ago(v.minutes_ago)}</span><span className={"pop-dot" + (i === 0 ? " first" : "")}></span>
-      <div><div className="pop-n"><Fav name={v.outlet} /><Link className="so" to={"/source/" + slug(v.outlet)}><b>{v.outlet}</b></Link>{i === 0 && <em>FIRST</em>}</div><div className="pop-s">{link ? <a href="#" target="_blank" rel="noopener" style={{ color: "inherit" }} onClick={(e) => e.preventDefault()}>{v.title}</a> : v.title}</div></div>
+      <div><div className="pop-n"><Fav name={v.outlet} /><Link className="so" to={"/source/" + slug(v.outlet)}><b>{v.outlet}</b></Link>{i === 0 && <em>FIRST</em>}</div><div className="pop-s">{link && v.url ? <a href={v.url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>{v.title}</a> : v.title}</div></div>
     </div>
   ));
 }
