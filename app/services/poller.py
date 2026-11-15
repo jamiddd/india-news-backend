@@ -676,9 +676,9 @@ async def ingest_source(
 POLL_LEASE_NAME = "poll_all_sources"
 
 # Unrestricted headline_score rewrite of every cluster, at most this often.
-# None until the first cycle after a process start, which therefore does one.
+# Starts counting at process start, so a restart does not trigger one.
 FULL_SCORE_SWEEP_INTERVAL_S = 24 * 3600
-_last_full_score_sweep: Optional[float] = None
+_last_full_score_sweep: float = time.monotonic()
 
 # --- Feed ranking redesign, piece 1: global importance (entity_stats) ---
 # See app/services/entity_graph.py for canonicalization and the "Feed
@@ -918,18 +918,27 @@ async def _poll_all_sources_locked(session: AsyncSession) -> int:
         # development from the 47th outlet posting a recap, and got the
         # trade-off badly wrong in the common case.
         #
-        # Only recent clusters are rescored each cycle; a full pass runs about
-        # once a day (per process). See UPDATE_RECENT_HEADLINE_SCORES_SQL.
+        # Only recent clusters are rescored each cycle. See
+        # UPDATE_RECENT_HEADLINE_SCORES_SQL.
+        await session.execute(text(UPDATE_RECENT_HEADLINE_SCORES_SQL))
+
+        # A full pass over every cluster runs about once a day (per process,
+        # first one a day after start) so unlisted old rows still decay. It
+        # is best-effort: it rewrites ~350k rows, which exceeds the statement
+        # timeout whenever the database is IO-throttled, and when it ran
+        # inside this transaction a timeout rolled back the whole recompute —
+        # scores, entity stats and explore promotions — on every cycle. So it
+        # gets a savepoint, and the timestamp is taken before the attempt so
+        # a failure waits out the interval instead of retrying every cycle.
         global _last_full_score_sweep
         now_mono = time.monotonic()
-        if (
-            _last_full_score_sweep is None
-            or now_mono - _last_full_score_sweep > FULL_SCORE_SWEEP_INTERVAL_S
-        ):
-            await session.execute(text(UPDATE_HEADLINE_SCORES_SQL))
+        if now_mono - _last_full_score_sweep > FULL_SCORE_SWEEP_INTERVAL_S:
             _last_full_score_sweep = now_mono
-        else:
-            await session.execute(text(UPDATE_RECENT_HEADLINE_SCORES_SQL))
+            try:
+                async with session.begin_nested():
+                    await session.execute(text(UPDATE_HEADLINE_SCORES_SQL))
+            except Exception:
+                logger.warning("Full headline_score sweep failed; will retry next interval.", exc_info=True)
 
         # Feed ranking redesign, piece 1: global importance. Same transaction
         # as the headline_score update above, so both are consistent as of
