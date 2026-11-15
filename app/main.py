@@ -110,7 +110,7 @@ from app.services.feed_gate import (
     gate_cache_marker,
     listing_age_anchor,
 )
-from app.services.related_stories import find_related_clusters
+from app.services.related_stories import find_related_clusters, warm_graph as warm_related_graph
 from app.services.story_chains import get_story_timeline
 from app.services.editorial_backgrounds import project_base_url
 from app.services import user_avatars as avatar_service
@@ -517,6 +517,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS explainer_id INTEGER REFERENCES explainers(id) ON DELETE SET NULL"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_timeline_feature_id ON story_reports (timeline_feature_id)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_story_reports_explainer_id ON story_reports (explainer_id)"))
+    _warm = asyncio.create_task(warm_related_graph())
     yield
 
 app = FastAPI(

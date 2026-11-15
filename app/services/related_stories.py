@@ -346,15 +346,22 @@ _GRAPH_TTL = 600.0
 _graph_lock = asyncio.Lock()
 
 
-async def _build_graph(conn, days: int):
+async def _build_graph(conn, days: int, force: bool = False):
     """The grouped story graph is the same for every cluster_id, so build it
     once per process per TTL instead of once per request."""
     hit = _GRAPH.get(days)
-    if hit and time.monotonic() - hit[0] < _GRAPH_TTL:
+    if hit and not force and time.monotonic() - hit[0] < _GRAPH_TTL:
+        return hit[1]
+    if hit and not force:
+        # Stale-while-revalidate: serve the previous graph now, rebuild behind it,
+        # so no request ever waits on the rebuild after the first.
+        if not _graph_lock.locked():
+            _bg.add(t := asyncio.create_task(_refresh_graph(days)))
+            t.add_done_callback(_bg.discard)
         return hit[1]
     async with _graph_lock:
         hit = _GRAPH.get(days)
-        if hit and time.monotonic() - hit[0] < _GRAPH_TTL:
+        if hit and not force and time.monotonic() - hit[0] < _GRAPH_TTL:
             return hit[1]
         clusters = await load_clusters(conn, days)
         by_id = {c.id: c for c in clusters}
@@ -368,6 +375,23 @@ async def _build_graph(conn, days: int):
         built = (clusters, by_id, is_generic, entity_stats, dedup_sub_clusters(raw, SUBSUMPTION_RATIO))
         _GRAPH[days] = (time.monotonic(), built)
         return built
+
+
+_bg: set = set()
+
+
+async def _refresh_graph(days: int) -> None:
+    from app.database import AsyncSessionLocal
+    try:
+        async with AsyncSessionLocal() as session:
+            await _build_graph(session, days, force=True)
+    except Exception:
+        pass
+
+
+async def warm_graph() -> None:
+    """Build the graph in the background at startup so the first reader isn't the one who waits."""
+    await _refresh_graph(DAYS)
 
 
 async def find_related_clusters(
