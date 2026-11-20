@@ -170,7 +170,7 @@
         ${voiceAndNarrate(d, { narrateId: 'genNarrate', voiceId: 'genVoice', checked: false })}
         <div class="form-acts">${ui.btn('Generate explainer', { act: 'generate', ic: 'sparkle', kind: 'hue' })}</div>
       </div>` : '<p class="note">Attach at least one source to enable generation.</p>');
-    return ui.st(`<div class="grid g-main"><div>${sources}</div><div style="display:flex;flex-direction:column;gap:16px">${control}${detailsPanel(d)}</div></div>`);
+    return ui.st(`<div class="grid g-main"><div>${sources}</div><div style="display:flex;flex-direction:column;gap:16px">${control}${heroPanel(d)}${detailsPanel(d)}</div></div>`);
   };
 
   const detailsPanel = (d) => ui.panel('Details', `<dl class="kv">
@@ -183,13 +183,20 @@
       ${d.publishedAt ? `<dt>Published</dt><dd>${esc(fmt.dateTime(d.publishedAt))}</dd>` : ''}
     </dl>${d.publicUrl ? `<p style="margin:12px 0 0"><a class="link" href="${esc(Admin.publicUrl(d.publicUrl))}" target="_blank" rel="noopener">Public JSON ↗</a></p>` : ''}`);
 
+  const heroPanel = (d) => ui.panel('Hero image', `<div class="form">
+      ${d.heroImageUrl ? `<img class="thumb" src="${esc(d.heroImageUrl)}" alt="">` : '<p class="note" style="margin:0">No hero image yet.</p>'}
+      <div>${d.manualImageUrl ? pill('Manual image', '--teal', true) : pill('Auto image', '--muted')}</div>
+      <p class="hint" style="margin:0">${d.manualImageUrl ? 'Your pick overrides the auto-derived hero and survives regenerating.' : 'Taken from the lead source story. It changes when you regenerate — pick your own to pin it.'}</p>
+      <div class="form-acts"><a class="btn btn-sm btn-line" href="${Admin.href(`explainers/${d.id}/image`)}">${ui.icon('image')}Choose image</a></div>
+    </div>`);
+
   const contentView = (d) => {
     const audio = ui.panel('Narration', `<div class="form">
         ${d.audioUrl ? `<audio controls preload="none" src="${esc(d.audioUrl)}"></audio><small class="muted">${duration(d.audioDurationSeconds)} · ${esc(d.voice || '')}</small>` : '<p class="note">No narration yet.</p>'}
         ${d.audioConfigured && !d.running ? `<div class="form-row" style="align-items:end"><div class="field"><label for="audVoice">Voice</label>${select('audVoice', d.voices, d.voice || 'shubh')}</div><div class="form-acts">${ui.btn(d.audioUrl ? 'Regenerate audio' : 'Generate audio', { act: 'regenAudio', ic: 'mic', kind: 'ghost' })}</div></div>` : ''}
         ${d.audioConfigured ? '' : '<p class="hint">Audio isn\'t configured on this server.</p>'}
       </div>`);
-    const hero = d.heroImageUrl ? ui.panel('Hero image', `<img class="thumb" src="${esc(d.heroImageUrl)}" alt=""><p class="hint" style="margin:8px 0 0">Taken from the lead source story. It changes when you regenerate.</p>`) : '';
+    const hero = heroPanel(d);
     const quick = ui.panel('Quick answer', `<div class="prose">${esc(d.quickAnswer || '')}</div>`);
     const sections = d.sections.map((s, i) => ui.panel(esc(s.heading), `<div class="prose">${esc(s.body)}</div>`,
       ui.btn('Regenerate section', { act: 'regenSection', id: i, size: 'sm', kind: 'line', ic: 'refresh', attrs: d.running ? 'disabled' : '' }))).join('');
@@ -290,6 +297,47 @@
           if (!(await Admin.confirm({ title: 'Restore and republish?', text: 'It goes live in the app again straight away.', ok: 'Restore' }))) return;
           await api.post(`${base}/restore`);
           after('Restored and republished.');
+        },
+      });
+    },
+  });
+
+  /* ---------- hero image picker ---------- */
+  Admin.page({
+    path: 'explainers/:id/image',
+    nav: 'explainers',
+    title: (d) => (d ? `Image · Explainer #${d.id}` : 'Choose image'),
+    load: (p) => api.get(`/explainers/${p.id}/image`),
+    render: (d) => {
+      const status = d.manualImageUrl
+        ? `<div class="form-acts">${pill('Manual override active', '--teal', true)}${ui.btn('Clear override (use auto-derived)', { act: 'clear', size: 'sm', kind: 'line', ic: 'restore' })}</div>`
+        : '<p class="note" style="margin:0">No override set. The hero is auto-derived from the lead source story (best representative image).</p>';
+      const grid = d.candidates.length
+        ? `<div class="thumbs">${d.candidates.map((c, i) => `<button class="thumb-pick${c.current ? ' on' : ''}" ${c.current ? '' : 'data-act="use"'} data-id="${i}" ${c.current ? 'aria-current="true"' : ''} title="${c.current ? 'Currently selected' : 'Use this image'}">
+            <img class="thumb" src="${esc(c.imageUrl)}" loading="lazy" alt="">
+            <small><b>${esc(c.source)}</b>${c.hd ? ' · HD' : ''}</small>
+            <small>${esc(fmt.dateTime(c.publishedAt))}</small>
+            <small>${c.current ? '<b>Currently selected</b>' : 'Use this image'}</small></button>`).join('')}</div>`
+        : ui.empty('No article images found across this explainer\'s sources.');
+      return ui.head('Explainers', `Choose hero image: ${esc(d.question)}`,
+        'Override the auto-derived hero (feed card and detail cover) with any photo carried by an article in this explainer\'s sources. The pick survives regenerating.',
+        `<a class="btn btn-line" href="${Admin.href(`explainers/${d.id}/review`)}">← Back to explainer</a>`)
+        + ui.st(ui.panel('', status))
+        + ui.st(ui.panel(`Available images (${d.candidates.length})`, grid));
+    },
+    mount: (ctx) => {
+      const id = ctx.data.id;
+      ctx.actions({
+        use: async (el) => {
+          const c = ctx.data.candidates[Number(el.dataset.id)];
+          await api.post(`/explainers/${id}/image`, { imageUrl: c.imageUrl });
+          Admin.toast('Hero image set', '--teal');
+          ctx.reload();
+        },
+        clear: async () => {
+          await api.post(`/explainers/${id}/image/clear`);
+          Admin.toast('Override cleared. Auto-deriving again.', '--muted');
+          ctx.reload();
         },
       });
     },

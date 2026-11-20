@@ -511,6 +511,9 @@ async def lifespan(app: FastAPI):
         # answering from admin-attached real stories instead of the model's own
         # knowledge) — see app/services/explainer.py and admin_explainers.py's source picker.
         await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS source_cluster_ids JSON"))
+        # explainers predates the admin hero-image override (manual_image_url,
+        # see app/admin_explainers.py's image picker) — same idempotent add.
+        await conn.execute(text("ALTER TABLE explainers ADD COLUMN IF NOT EXISTS manual_image_url TEXT"))
         # story_reports predates Timeline/Explainer reporting — cluster_id
         # was the only target column until these were added.
         await conn.execute(text("ALTER TABLE story_reports ADD COLUMN IF NOT EXISTS timeline_feature_id INTEGER REFERENCES story_timeline_features(id) ON DELETE SET NULL"))
@@ -1562,7 +1565,7 @@ async def explainer_deep_link(request: Request, explainer_id: int, db: AsyncSess
         title=title,
         description=description,
         page_url=page_url,
-        image_url=row.hero_image_url,
+        image_url=row.manual_image_url or row.hero_image_url,
         cta_label="Get the app to read the full explainer",
     )
 
@@ -2783,7 +2786,7 @@ async def list_explainers(request: Request, db: AsyncSession = Depends(get_db)):
             teaser=_explainer_teaser(row.quick_answer or ""),
             updated_at=row.updated_at,
             has_audio=bool(row.audio_url),
-            image_url=row.hero_image_url,
+            image_url=row.manual_image_url or row.hero_image_url,
         )
         for row in rows
     ])
@@ -2857,7 +2860,7 @@ async def search_explainers(
             teaser=_explainer_teaser(row.quick_answer or ""),
             updated_at=row.updated_at,
             has_audio=bool(row.audio_url),
-            image_url=row.hero_image_url,
+            image_url=row.manual_image_url or row.hero_image_url,
         )
         for row in rows
     ])
@@ -2887,7 +2890,7 @@ async def get_explainer(request: Request, explainer_id: int, db: AsyncSession = 
         quick_answer=row.quick_answer or "",
         sections=[ExplainerSectionOut(**s) for s in (row.sections or [])],
         sources=[ExplainerSourceOut(**s) for s in (row.sources or [])],
-        hero_image_url=row.hero_image_url,
+        hero_image_url=row.manual_image_url or row.hero_image_url,
         audio_url=row.audio_url,
         audio_duration_seconds=row.audio_duration_seconds,
         updated_at=row.updated_at,

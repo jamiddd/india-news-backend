@@ -192,12 +192,14 @@ def _cluster_to_excerpt(cluster: StoryCluster) -> "explainer_script.SourceExcerp
 
 
 def derive_hero_image(clusters: list[StoryCluster]) -> Optional[str]:
-    """The feed/detail hero photo for this explainer — the same
+    """The auto feed/detail hero photo for this explainer — the same
     representative-article image its trigger cluster's own feed card would
     show, tried cluster by cluster (in `clusters`' order, so the trigger
     story wins) until one has an image. None if none of the attached
-    clusters have one; there is no admin override for this yet, so
-    regenerating always recomputes it fresh from the current sources."""
+    clusters have one. Regenerating always recomputes this fresh from the
+    current sources; an admin's manual pick (Explainer.manual_image_url,
+    see admin_explainers.py's image picker) overrides it wherever the
+    hero is shown and is never cleared by a regenerate."""
     for cluster in clusters:
         article = next(
             (a for a in cluster.articles if a.id == cluster.representative_article_id),

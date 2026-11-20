@@ -10,13 +10,14 @@ Claude, Sarvam, Redis and the job lease are all monkeypatched.
 """
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import admin_explainers
 from app.config import settings
 from app.database import get_db
 from app.main import app
-from app.models import Explainer, StoryCluster
+from app.models import Article, Explainer, Source, StoryCluster
 from app.services import explainer as explainer_service
 
 USERNAME = "reviewer"
@@ -101,6 +102,8 @@ async def client():
     async with engine.begin() as conn:
         await conn.run_sync(Explainer.__table__.create)
         await conn.run_sync(StoryCluster.__table__.create)
+        await conn.run_sync(Source.__table__.create)
+        await conn.run_sync(Article.__table__.create)
     Session = async_sessionmaker(engine, expire_on_commit=False)
 
     async def override():
@@ -338,3 +341,69 @@ class TestReview:
         assert (await client.post(f"/admin/api/explainers/{ready}/restore", headers=h)).status_code == 409
         assert [(n, a) for n, a, _ in fake_services["calls"]] == [
             ("publish", (ready,)), ("archive", (ready,)), ("restore", (archived,))]
+
+
+async def seed_article(client, cluster_id, url, *, width=None, height=None, days_ago=0):
+    from datetime import datetime, timedelta, timezone
+    async with client.session_factory() as session:
+        src = (await session.execute(
+            select(Source).where(Source.slug == "wire"))).scalar_one_or_none()
+        if src is None:
+            src = Source(name="Wire", slug="wire", feed_url="https://wire.example/feed")
+            session.add(src)
+            await session.flush()
+        session.add(Article(source_id=src.id, cluster_id=cluster_id, url=url + "/a",
+                            url_hash=url, title="T", image_url=url,
+                            image_width=width, image_height=height,
+                            published_at=datetime.now(timezone.utc) - timedelta(days=days_ago)))
+        await session.commit()
+
+
+class TestHeroImage:
+    async def test_candidates_set_and_clear(self, client):
+        h = await sign_in(client)
+        await seed_cluster(client, 42)
+        await seed_article(client, 42, "https://img/small.jpg", width=400, height=300, days_ago=0)
+        await seed_article(client, 42, "https://img/hd.jpg", width=1920, height=1080, days_ago=1)
+        eid = await seed(client, status="published", source_cluster_ids=[42],
+                         hero_image_url="https://img/small.jpg")
+
+        d = (await client.get(f"/admin/api/explainers/{eid}/image")).json()
+        # HD first, then most recent — same ranking as Timelines/Breaking.
+        assert [c["imageUrl"] for c in d["candidates"]] == ["https://img/hd.jpg", "https://img/small.jpg"]
+        assert d["manualImageUrl"] is None and d["heroImageUrl"] == "https://img/small.jpg"
+        assert d["candidates"][1]["current"] is True  # the auto hero in use
+
+        # An image no source article carries is refused.
+        r = await client.post(f"/admin/api/explainers/{eid}/image", headers=h, json={"imageUrl": "https://evil/x.jpg"})
+        assert r.status_code == 400
+
+        r = await client.post(f"/admin/api/explainers/{eid}/image", headers=h, json={"imageUrl": "https://img/hd.jpg"})
+        assert r.status_code == 200 and r.json()["manualImageUrl"] == "https://img/hd.jpg"
+        d = (await client.get(f"/admin/api/explainers/{eid}")).json()
+        assert d["heroImageUrl"] == "https://img/hd.jpg" and d["manualImageUrl"] == "https://img/hd.jpg"
+
+        r = await client.post(f"/admin/api/explainers/{eid}/image/clear", headers=h)
+        assert r.status_code == 200 and r.json()["manualImageUrl"] is None
+        d = (await client.get(f"/admin/api/explainers/{eid}")).json()
+        assert d["heroImageUrl"] == "https://img/small.jpg" and d["manualImageUrl"] is None
+
+    async def test_public_api_serves_manual_over_auto(self, client, monkeypatch):
+        from app.main import limiter
+        monkeypatch.setattr(limiter, "enabled", False)  # limiter counters live in Redis; not under test
+        eid = await seed(client, status="published", quick_answer="Because.",
+                         sections=[{"heading": "Why", "body": "Reasons."}],
+                         hero_image_url="https://img/auto.jpg",
+                         manual_image_url="https://img/manual.jpg")
+        lst = (await client.get("/api/v1/explainers")).json()
+        assert lst["explainers"][0]["image_url"] == "https://img/manual.jpg"
+        det = (await client.get(f"/api/v1/explainers/{eid}")).json()
+        assert det["hero_image_url"] == "https://img/manual.jpg"
+
+    async def test_image_endpoints_404_and_auth(self, client):
+        assert (await client.get("/admin/api/explainers/999/image")).status_code == 401
+        await sign_in(client)
+        assert (await client.get("/admin/api/explainers/999/image")).status_code == 404
+        eid = await seed(client)
+        assert (await client.post(f"/admin/api/explainers/{eid}/image",
+                                  json={"imageUrl": "https://img/hd.jpg"})).status_code == 403

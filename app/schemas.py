@@ -885,12 +885,13 @@ class ExplainerListItemOut(BaseModel):
     teaser: str
     updated_at: datetime
     has_audio: bool = False
-    # Same value as ExplainerDetailOut.hero_image_url (Explainer.hero_image_url
-    # itself) — derived at generation time from the trigger cluster's own
-    # representative article image (see explainer.py's derive_hero_image),
-    # matching Brief's own feed card design (BriefHeroCard for the first
-    # item, BriefCategoryRow's image for the rest). None only when none of
-    # the attached sources have an image.
+    # Same value as ExplainerDetailOut.hero_image_url: the admin's manual
+    # pick (Explainer.manual_image_url) when one is set, else the
+    # auto-derived hero (Explainer.hero_image_url, from the trigger
+    # cluster's representative article image — see explainer.py's
+    # derive_hero_image), matching Brief's own feed card design
+    # (BriefHeroCard for the first item, BriefCategoryRow's image for the
+    # rest). None only when neither is set.
     image_url: Optional[str] = None
 
 

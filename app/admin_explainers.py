@@ -25,10 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin_session import require_admin, require_admin_write
 from app.database import get_db
-from app.models import Explainer, StoryCluster
+from app.models import Article, Explainer, Source, StoryCluster, utc_now
 from app.services import explainer as explainer_service
 from app.services import explainer_sourcing
 from app.services.cluster_search import search_clusters
+from app.services.image_extractor import is_hd_image
 from app.services.daily_brief_select import CORE_CATEGORIES, FALLBACK_CATEGORIES
 from app.services.timeline_audio import is_configured as audio_is_configured
 from app.services.trending import get_trending_terms
@@ -89,7 +90,9 @@ def _summary(row: Explainer) -> dict:
         "statusLabel": STATUS_LABELS.get(row.status, row.status),
         "sourceCount": len(row.source_cluster_ids or []),
         "hasAudio": bool(row.audio_url),
-        "heroImageUrl": row.hero_image_url,
+        "heroImageUrl": row.manual_image_url or row.hero_image_url,
+        "autoHeroImageUrl": row.hero_image_url,
+        "manualImageUrl": row.manual_image_url,
         "error": row.error,
         "createdAt": _iso(row.created_at),
         "updatedAt": _iso(row.updated_at),
@@ -279,6 +282,105 @@ async def status_json(explainer_id: int):
         "state": "generating" if running else status.get("state", "idle"),
         "message": status.get("message", ""),
     }
+
+
+# ---------- hero image ----------
+
+def _source_cluster_ids(row: Explainer) -> list[int]:
+    """Clusters whose article images may be picked as the hero: the attached
+    sources, falling back to the generated sources snapshot for any row
+    whose attachment list was lost."""
+    ids = list(row.source_cluster_ids or [])
+    if not ids:
+        ids = [s.get("cluster_id") for s in (row.sources or []) if s.get("cluster_id")]
+    seen: set[int] = set()
+    return [i for i in ids if not (i in seen or seen.add(i))]
+
+
+async def _gather_image_candidates(db: AsyncSession, row: Explainer) -> list:
+    """Every distinct-by-image_url article image across this explainer's
+    source clusters, sorted the same way the siblings' pickers rank them
+    (HD first, then most recent) so the best candidates surface first."""
+    cluster_ids = _source_cluster_ids(row)
+    if not cluster_ids:
+        return []
+    rows = (await db.execute(
+        select(Article.image_url, Article.image_width, Article.image_height,
+               Article.published_at, Source.name.label("source_name"))
+        .outerjoin(Source, Source.id == Article.source_id)
+        .where(Article.cluster_id.in_(cluster_ids), Article.image_url.isnot(None))
+    )).all()
+    seen_urls: set[str] = set()
+    candidates = []
+    for r in rows:
+        if not r.image_url or r.image_url in seen_urls:
+            continue
+        seen_urls.add(r.image_url)
+        candidates.append(r)
+    candidates.sort(
+        key=lambda a: (is_hd_image(a.image_width, a.image_height), a.published_at),
+        reverse=True,
+    )
+    return candidates
+
+
+async def _invalidate_explainer_caches(explainer_id: int) -> None:
+    await explainer_service.invalidate_list_cache()
+    await explainer_service.invalidate_detail_cache(explainer_id)
+
+
+@router.get("/{explainer_id}/image")
+async def image_candidates(explainer_id: int, db: AsyncSession = Depends(get_db)):
+    """Lets an admin override the auto-derived hero image (feed card +
+    detail cover — see Explainer.manual_image_url) with any photo actually
+    carried by an article on one of this explainer's source clusters."""
+    row = await _get_row(db, explainer_id)
+    candidates = await _gather_image_candidates(db, row)
+    effective = row.manual_image_url or row.hero_image_url
+    return {
+        "id": row.id,
+        "question": row.question,
+        "heroImageUrl": effective,
+        "autoHeroImageUrl": row.hero_image_url,
+        "manualImageUrl": row.manual_image_url,
+        "candidates": [{
+            "imageUrl": a.image_url,
+            "source": a.source_name or "Unknown",
+            "publishedAt": _iso(a.published_at),
+            "hd": bool(is_hd_image(a.image_width, a.image_height)),
+            "current": a.image_url == effective,
+        } for a in candidates],
+    }
+
+
+class HeroImageIn(BaseModel):
+    imageUrl: str
+
+
+@router.post("/{explainer_id}/image", dependencies=[Depends(require_admin_write)])
+async def set_image(explainer_id: int, body: HeroImageIn, db: AsyncSession = Depends(get_db)):
+    row = await _get_row(db, explainer_id)
+    # Re-derive the candidate set server-side rather than trusting the
+    # posted URL outright — it must be a real image already carried by some
+    # article on a source cluster, not an arbitrary string.
+    candidates = await _gather_image_candidates(db, row)
+    if body.imageUrl not in {a.image_url for a in candidates}:
+        raise HTTPException(status_code=400, detail="That image isn't carried by any article in this explainer's sources.")
+    row.manual_image_url = body.imageUrl
+    row.updated_at = utc_now()
+    await db.commit()
+    await _invalidate_explainer_caches(explainer_id)
+    return {"ok": True, "id": explainer_id, "manualImageUrl": body.imageUrl}
+
+
+@router.post("/{explainer_id}/image/clear", dependencies=[Depends(require_admin_write)])
+async def clear_image(explainer_id: int, db: AsyncSession = Depends(get_db)):
+    row = await _get_row(db, explainer_id)
+    row.manual_image_url = None
+    row.updated_at = utc_now()
+    await db.commit()
+    await _invalidate_explainer_caches(explainer_id)
+    return {"ok": True, "id": explainer_id, "manualImageUrl": None}
 
 
 class SourceIn(BaseModel):

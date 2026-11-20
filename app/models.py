@@ -1427,11 +1427,19 @@ class Explainer(Base):
     # verifiable, unlike a model's self-reported citation list.
     sources = Column(JSON, nullable=True)
     # Derived at generation time from the trigger source cluster's own
-    # representative article image (explainer.py's derive_hero_image) —
-    # not admin-settable, recomputed fresh on every regenerate. Serves both
-    # the app's feed card (GET /explainers) and detail screen (GET
-    # /explainers/{id}); None when none of the attached sources have one.
+    # representative article image (explainer.py's derive_hero_image),
+    # recomputed fresh on every regenerate. Serves both the app's feed card
+    # (GET /explainers) and detail screen (GET /explainers/{id}); None when
+    # none of the attached sources have one.
     hero_image_url = Column(Text, nullable=True)
+    # An admin's manual pick from among the attached source clusters' own
+    # article images (see app/admin_explainers.py's image picker) —
+    # overrides hero_image_url wherever this explainer's image is shown.
+    # NULL means "no override, keep the auto-derived hero". Regenerating
+    # recomputes hero_image_url but never clears this, so a manual pick
+    # survives a regenerate. Same convention as
+    # StoryTimelineFeature.manual_image_url / BreakingStory.manual_image_url.
+    manual_image_url = Column(Text, nullable=True)
     audio_url = Column(Text, nullable=True)
     audio_duration_seconds = Column(Integer, nullable=True)
     # 'shubh' | 'simran' — None when narration wasn't requested/produced.
