@@ -12,7 +12,7 @@ is the whole detection step.
 """
 import logging
 from datetime import datetime, timedelta
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
@@ -74,18 +74,37 @@ async def send_source_updates(session, now: datetime, send: SendFn) -> int:
     # is NOT NULL, and the client opens a push via cluster_id) — an article
     # is briefly unclustered right after ingestion, so it's skipped here and
     # picked up once clustering assigns it one on a later run.
-    articles = (
-        await session.execute(
-            select(Article)
-            .where(Article.source_id.in_(source_ids), Article.cluster_id.isnot(None))
-            .order_by(Article.id)
-        )
-    ).scalars().all()
-    latest_by_source: dict[int, Article] = {}
-    for a in articles:
-        current = latest_by_source.get(a.source_id)
-        if current is None or a.id > current.id:
-            latest_by_source[a.source_id] = a
+    #
+    # Only the newest article per source is ever used, and only four of its
+    # columns. This used to load every clustered article of every followed
+    # source as a full ORM row (including the scraped body) on each notify
+    # run -- ~115k blocks (~0.9 GB) per call on 2026-11-25, which kept an
+    # IO-throttled database from recovering. Instead, per source, walk the id
+    # index backwards and stop at the first clustered article (~300 buffers
+    # for all 11 followed sources, vs ~115k). A follower can only be pushed an
+    # article newer than their last_article_id, so that bounds the walk even
+    # for a source that has stopped publishing.
+    floor_by_source: dict[int, int] = {}
+    for f in follows:
+        floor = f.last_article_id or 0
+        floor_by_source[f.source_id] = min(floor, floor_by_source.get(f.source_id, floor))
+
+    latest_by_source: dict[int, Any] = {}
+    for source_id, floor in floor_by_source.items():
+        row = (
+            await session.execute(
+                select(Article.id, Article.source_id, Article.title, Article.cluster_id)
+                .where(
+                    Article.source_id == source_id,
+                    Article.cluster_id.isnot(None),
+                    Article.id > floor,
+                )
+                .order_by(Article.id.desc())
+                .limit(1)
+            )
+        ).first()
+        if row is not None:
+            latest_by_source[source_id] = row
 
     sources = {
         s.id: s
