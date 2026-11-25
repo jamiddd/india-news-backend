@@ -1612,6 +1612,22 @@ async def download_redirect(request: Request):
     return RedirectResponse(PLAY_STORE_URL, status_code=301)
 
 
+@app.get("/games", include_in_schema=False)
+@app.get("/games/{path:path}", include_in_schema=False)
+@limiter.limit("60/minute")
+async def games_link(request: Request, path: str = ""):
+    """Daily-game App Links (https://openindiannews.com/games/{type}/daily,
+    shared from the app) open in the app when it is installed. Without the app
+    the browser lands here: the web app renders its games page when it is
+    built, and otherwise (WEB_DIST_DIR pointed away, static-pages-only mode
+    since 2026-11-25) the visitor goes to the Play listing instead of a 404.
+    302, not 301: the web app may take these URLs back."""
+    shell = web_spa.render_shell(title="Daily games")
+    if shell is not None:
+        return shell
+    return RedirectResponse(PLAY_STORE_URL, status_code=302)
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 @limiter.limit("60/minute")
 async def privacy_policy(request: Request):
