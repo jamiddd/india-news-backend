@@ -19,17 +19,21 @@
     --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --max:1180px; --radius:2px;
+    /* o-i-n mark colours, as in the app: black body + blue i; dark: white + light blue */
+    --oin-body:#111111; --oin-i:#1976D2;
   }
   :root[data-theme="dark"]{
     --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
     --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
     --accent:#6FA3FF; --on-accent:#0A0A0A; --rule:#E8E8E8; --breaking:#EF5350; --success:#66BB6A;
+    --oin-body:#FFFFFF; --oin-i:#64B5F6;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
       --ink:#E8E8E8; --ink-2:#b6b6b6; --ink-3:#8d8d8d;
       --bg:#121212; --surface:#1E1E24; --line:#2c2c34;
       --accent:#6FA3FF; --on-accent:#0A0A0A; --rule:#E8E8E8; --breaking:#EF5350; --success:#66BB6A;
+      --oin-body:#FFFFFF; --oin-i:#64B5F6;
     }
   }
 
@@ -59,7 +63,8 @@
   .masthead .wrap{display:flex; align-items:center; gap:20px; height:70px}
   .brand{display:flex; align-items:center; gap:11px; min-width:0}
   .brand:hover{text-decoration:none}
-  .brand .mark{width:32px; height:32px; flex:0 0 auto; border-radius:50%; display:block}
+  /* The o-i-n mark is wider than tall (81.389 x 67): size it by height. */
+  .brand .mark{height:30px; width:auto; aspect-ratio:81.389/67; flex:0 0 auto; display:block}
   .brand-text{display:flex; flex-direction:column; min-width:0}
   .wordmark{font-family:var(--serif); font-weight:900; font-size:21px; color:var(--ink);
     letter-spacing:-.03em; white-space:nowrap; line-height:1.15}
@@ -74,7 +79,7 @@
   @media (max-width:620px){
     .masthead .wrap{gap:10px}
     .brand{gap:9px}
-    .brand .mark{width:28px; height:28px}
+    .brand .mark{height:26px}
     .wordmark{font-size:15.5px}
     .brand-sub{font-size:9.5px; line-height:1.35}
   }
