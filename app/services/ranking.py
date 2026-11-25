@@ -92,7 +92,7 @@ HEADLINE_SCORE_EXPR = f"""
 # more; feeds already tolerate a stale score between polls.
 #
 # NULL scores always qualify so a freshly inserted row is filled in.
-RECENT_SCORE_CHANGE_THRESHOLD = 0.02
+RECENT_SCORE_CHANGE_THRESHOLD = 0.05
 # Rows past the recent window are never listed (see below), so the daily sweep
 # only needs to keep them roughly right. At 10% a row stops being rewritten
 # once its daily relative change drops under 10%, around 10 days old.
