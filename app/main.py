@@ -200,6 +200,16 @@ CACHE_TTL_SECONDS = 300
 SOURCES_CACHE_KEY = "cache:sources:v1"
 SOURCES_CACHE_TTL_SECONDS = 300
 
+# GET /search: the same results for every caller (no per-user input), and each
+# distinct query is expensive on a small database. A distributed crawler walking
+# the website's /topic/<slug> pages was sending ~50 unique queries a minute
+# (2026-11-25), so repeats of a topic within the window are worth collapsing:
+# a 10-minute Redis TTL, and a shared-cacheable response (browsers 60 s, a CDN
+# 10 min) in case a CDN cache rule is enabled for it. A CDN only caches this if
+# it is configured to cache the path at all.
+SEARCH_CACHE_TTL_SECONDS = 600
+SEARCH_CACHE_HEADERS = {"Cache-Control": "public, max-age=60, s-maxage=600"}
+
 async def _cache_get(key: str) -> Optional[str]:
     try:
         return await get_redis_client().get(key)
@@ -706,15 +716,30 @@ async def add_etag_and_revalidate(request: Request, call_next):
     body = b"".join([chunk async for chunk in response.body_iterator])
     etag = hashlib.md5(body).hexdigest()
 
+    # A handler that deliberately returns a *public* Cache-Control (today only
+    # GET /search and /robots.txt, whose responses are identical for every
+    # caller) keeps it. Everything else still gets the private revalidate
+    # default, so this can't make any per-user response shared-cacheable.
+    own = response.headers.get("cache-control", "")
+    cache_control = own if own.lower().startswith("public") else "private, max-age=0, must-revalidate"
+
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={
             "ETag": etag,
-            "Cache-Control": "private, max-age=0, must-revalidate",
+            "Cache-Control": cache_control,
         })
 
-    new_headers = dict(response.headers)
+    if own.lower().startswith("public"):
+        # Header names are case-insensitive but dict keys are not: copying the
+        # handler's lowercase "cache-control" and then adding "Cache-Control"
+        # would send both. Drop it so only the public value is sent.
+        new_headers = {k: v for k, v in response.headers.items() if k.lower() != "cache-control"}
+    else:
+        # Unchanged legacy behaviour: the SPA shell and service worker set their
+        # own "no-cache" here and rely on it staying next to the line below.
+        new_headers = dict(response.headers)
     new_headers["ETag"] = etag
-    new_headers["Cache-Control"] = "private, max-age=0, must-revalidate"
+    new_headers["Cache-Control"] = cache_control
     # Content-Length belonged to whatever body shape call_next produced —
     # recomputed for the exact bytes being sent now rather than trusted,
     # since some response paths (e.g. StreamingResponse) never set it.
@@ -1729,6 +1754,23 @@ async def submit_feedback(request: Request, payload: FeedbackRequest, db: AsyncS
     await db.commit()
     return FeedbackResponse()
 
+# The website's /topic/<slug> pages each run a GET /search for the topic, and a
+# distributed headless-Chrome crawler was walking all of them (2026-11-25). Keep
+# well-behaved crawlers out of them. /api/ is deliberately NOT disallowed:
+# Googlebot has to fetch /api/v1/* to render any page of this client-rendered
+# site, so blocking it would hurt how the whole site is indexed.
+ROBOTS_TXT = "User-agent: *\nDisallow: /topic/\n"
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    return Response(
+        content=ROBOTS_TXT,
+        media_type="text/plain",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get(f"{settings.API_V1_STR}/sources", response_model=List[SourceOut])
 @limiter.limit("30/minute")
 async def list_sources(request: Request, db: AsyncSession = Depends(get_db)):
@@ -1839,7 +1881,7 @@ async def search_story_clusters(
     cache_key = f"cache:search:{gate}:{q}:{limit}:{cursor or ''}:{source_id or ''}"
     cached = await _cache_get(cache_key)
     if cached is not None:
-        return Response(content=cached, media_type="application/json")
+        return Response(content=cached, media_type="application/json", headers=SEARCH_CACHE_HEADERS)
 
     clusters = await search_clusters(db, q, limit=limit, cursor=cursor, apply_gate=apply_feed_gate, source_id=source_id)
 
@@ -1854,8 +1896,9 @@ async def search_story_clusters(
         next_cursor=next_cursor,
         has_more=has_more
     )
-    await _cache_set(cache_key, result_out.model_dump_json())
-    return result_out
+    payload = result_out.model_dump_json()
+    await _cache_set(cache_key, payload, ttl=SEARCH_CACHE_TTL_SECONDS)
+    return Response(content=payload, media_type="application/json", headers=SEARCH_CACHE_HEADERS)
 
 
 # Categories the marketing site's homepage hero (below) is allowed to pull
