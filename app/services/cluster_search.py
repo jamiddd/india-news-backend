@@ -7,12 +7,33 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import Column, Integer, MetaData, Table, Text, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models import Article, StoryCluster
 from app.services.topic_filters import keyword_regex, location_keywords_for_query, repeated_keyword_regex
+
+# Search text lives in its own narrow table, kept in sync by a trigger on
+# story_clusters (scripts/add_cluster_search_table.py). The trigram indexes that
+# make ILIKE fast are on this table, not on story_clusters: headline_score is
+# rewritten on thousands of story_clusters rows every poll cycle, and an update
+# that can't be HOT writes a new entry into EVERY index on the row, which with
+# two GIN trigram indexes meant ~28 KB of WAL per rewritten row.
+#
+# Deliberately NOT part of app.database.Base: main.py runs Base.metadata.create_all
+# at startup, which would create an empty, trigger-less table if the code were
+# deployed before the migration -- and search would silently return nothing.
+# Declared on a private MetaData instead, so deploying before the migration
+# fails loudly ("relation cluster_search does not exist") rather than quietly.
+_search_metadata = MetaData()
+cluster_search = Table(
+    "cluster_search",
+    _search_metadata,
+    Column("cluster_id", Integer, primary_key=True),
+    Column("headline", Text),
+    Column("summary", Text),
+)
 
 
 async def search_clusters(
@@ -42,12 +63,22 @@ async def search_clusters(
         # the summary -- not ones that name it once in passing.
         kw = keyword_regex(place_keywords)
         match = or_(
-            StoryCluster.headline.op("~*")(kw),
+            StoryCluster.id.in_(
+                select(cluster_search.c.cluster_id).where(
+                    or_(
+                        cluster_search.c.headline.op("~*")(kw),
+                        cluster_search.c.summary.op("~*")(repeated_keyword_regex(place_keywords)),
+                    )
+                )
+            ),
             StoryCluster.id.in_(select(Article.cluster_id).where(Article.title.op("~*")(kw))),
-            StoryCluster.summary.op("~*")(repeated_keyword_regex(place_keywords)),
         )
     else:
-        match = or_(StoryCluster.headline.ilike(pattern), StoryCluster.summary.ilike(pattern))
+        match = StoryCluster.id.in_(
+            select(cluster_search.c.cluster_id).where(
+                or_(cluster_search.c.headline.ilike(pattern), cluster_search.c.summary.ilike(pattern))
+            )
+        )
     query = (
         select(StoryCluster)
         .options(selectinload(StoryCluster.articles).selectinload(Article.source))
