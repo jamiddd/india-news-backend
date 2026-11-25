@@ -196,6 +196,10 @@ def static_page(name: str) -> str:
 # like before", never a request failure.
 CACHE_TTL_SECONDS = 300
 
+# GET /sources: the full source list, identical for every caller.
+SOURCES_CACHE_KEY = "cache:sources:v1"
+SOURCES_CACHE_TTL_SECONDS = 300
+
 async def _cache_get(key: str) -> Optional[str]:
     try:
         return await get_redis_client().get(key)
@@ -1728,8 +1732,21 @@ async def submit_feedback(request: Request, payload: FeedbackRequest, db: AsyncS
 @app.get(f"{settings.API_V1_STR}/sources", response_model=List[SourceOut])
 @limiter.limit("30/minute")
 async def list_sources(request: Request, db: AsyncSession = Depends(get_db)):
+    # Cached: this returned all ~200 sources (~45 KB from the database) on every
+    # call, and was being hit ~45 times a minute -- ~3 GB/day of database egress
+    # (measured 2026-11-25) for a list that changes only when an admin edits a
+    # source. A source edit shows up within SOURCES_CACHE_TTL_SECONDS. Fails open
+    # on a Redis error like the other caches, so it is never a correctness
+    # dependency.
+    cached = await _cache_get(SOURCES_CACHE_KEY)
+    if cached is not None:
+        return Response(content=cached, media_type="application/json")
     result = await db.execute(select(Source))
-    return result.scalars().all()
+    payload = json.dumps(
+        [SourceOut.model_validate(s).model_dump(mode="json") for s in result.scalars().all()]
+    )
+    await _cache_set(SOURCES_CACHE_KEY, payload, ttl=SOURCES_CACHE_TTL_SECONDS)
+    return Response(content=payload, media_type="application/json")
 
 def require_ingest_secret(x_ingest_secret: Optional[str] = Header(None)) -> None:
     """Gate for operational trigger routes (poll/enrich/notify). These spend
