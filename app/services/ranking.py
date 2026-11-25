@@ -79,8 +79,43 @@ HEADLINE_SCORE_EXPR = f"""
     )
 """
 
+# headline_score is the leading column of two indexes, so no update to it can
+# be a HOT update: every rewritten row writes a new heap tuple, an entry in
+# all of the table's indexes, and WAL. The score decays with age, so an
+# unconditional UPDATE changed every row on every cycle, even when the value
+# moved by a hair. On a Micro instance (1 GB RAM, 11 MB/s baseline disk) that
+# exhausted the IO budget on 2026-11-25 and took the project down.
+#
+# So both statements below only write rows whose score has moved by more than
+# a relative threshold. The stored score may lag the exact value by up to the
+# threshold, which can swap the order of two near-equal stories and nothing
+# more; feeds already tolerate a stale score between polls.
+#
+# NULL scores always qualify so a freshly inserted row is filled in.
+RECENT_SCORE_CHANGE_THRESHOLD = 0.02
+# Rows past the recent window are never listed (see below), so the daily sweep
+# only needs to keep them roughly right. At 10% a row stops being rewritten
+# once its daily relative change drops under 10%, around 10 days old.
+FULL_SWEEP_SCORE_CHANGE_THRESHOLD = 0.10
+
+
+def _changed_by_more_than(threshold: float) -> str:
+    return (
+        f"(headline_score IS NULL OR ABS(({HEADLINE_SCORE_EXPR}) - headline_score) "
+        f"> {threshold} * GREATEST(ABS(headline_score), 1e-9))"
+    )
+
+
+# Clusters older than this are never listed (LISTING_MAX_AGE is days, not
+# months), so their score is irrelevant and the sweep leaves them alone rather
+# than rewriting hundreds of thousands of rows nobody reads.
+FULL_SWEEP_MAX_AGE_DAYS = 10
+
 UPDATE_HEADLINE_SCORES_SQL = (
-    f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR}"
+    f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR} "
+    f"WHERE COALESCE(became_multi_source_at, first_seen_at) "
+    f"> now() - interval '{FULL_SWEEP_MAX_AGE_DAYS} days' "
+    f"AND {_changed_by_more_than(FULL_SWEEP_SCORE_CHANGE_THRESHOLD)}"
 )
 
 # Every UPDATE writes a new row version, so rewriting all clusters each poll
@@ -99,7 +134,8 @@ RECENT_SCORE_WINDOW_DAYS = LISTING_MAX_AGE.days + 1
 UPDATE_RECENT_HEADLINE_SCORES_SQL = (
     f"UPDATE story_clusters SET headline_score = {HEADLINE_SCORE_EXPR} "
     f"WHERE COALESCE(became_multi_source_at, first_seen_at) "
-    f"> now() - interval '{RECENT_SCORE_WINDOW_DAYS} days'"
+    f"> now() - interval '{RECENT_SCORE_WINDOW_DAYS} days' "
+    f"AND {_changed_by_more_than(RECENT_SCORE_CHANGE_THRESHOLD)}"
 )
 
 
