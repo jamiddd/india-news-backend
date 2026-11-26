@@ -2,7 +2,7 @@ export default function Pricing() {
   return (
     <main className="wrap doc">
       <h1>Pricing</h1>
-      <p className="updated">Open Indian News &middot; Last updated: 2 October 2026</p>
+      <p className="updated">Open Indian News &middot; Last updated: 26 November 2026</p>
 
       <div className="box">
         <p>
@@ -23,6 +23,14 @@ export default function Pricing() {
         <tr><td>Daily games and Word of the Day</td><td>Today's only</td><td>Any past date</td></tr>
         <tr><td>Accent colours</td><td>Default</td><td>All 18</td></tr>
       </table>
+
+      <h2>Free trial</h2>
+      <p>
+        Each account can try Premium free for 7 days, once, by signing in and starting the trial in the
+        app. The trial asks for no card or payment details and does not turn into a paid plan by itself:
+        when it ends, Premium switches off unless you buy Monthly or All-Time. The app sends one reminder
+        the day before it ends.
+      </p>
 
       <h2>Premium plans</h2>
       <table>

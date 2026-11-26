@@ -2,7 +2,7 @@ export default function Terms() {
   return (
     <main className="wrap doc">
       <h1>Terms of Service</h1>
-      <p className="updated">Open Indian News · Last updated: 2 October 2026</p>
+      <p className="updated">Open Indian News · Last updated: 26 November 2026</p>
       
       <p>By using Open Indian News (the "app"), you agree to these terms. If you don't agree, please don't use the app.</p>
       
@@ -56,6 +56,10 @@ export default function Terms() {
         <li>Premium is linked to the Google account used for the purchase, and can be restored on a new
             device with <em>Restore purchases</em> in the app. Deleting your Open Indian News account does
             not cancel a subscription; cancel it in Google Play.</li>
+        <li>Each account can start one free 7-day Premium trial in the app while signed in. The trial
+            needs no payment method and is not a subscription: it ends by itself after 7 days and nothing
+            is charged. We may change or withdraw the trial offer for accounts that have not started it.</li>
+
         <li>Refunds are described in our <a href="/refunds">Refund &amp; Cancellation Policy</a>.</li>
       </ul>
       

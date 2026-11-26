@@ -2,7 +2,7 @@ export default function Refunds() {
   return (
     <main className="wrap doc">
       <h1>Refund &amp; Cancellation Policy</h1>
-      <p className="updated">Open Indian News · Last updated: 2 October 2026</p>
+      <p className="updated">Open Indian News · Last updated: 26 November 2026</p>
       
       <p>
         Open Indian News is free to read, with no ads. No payment is needed to read stories, save them,
@@ -30,6 +30,12 @@ export default function Refunds() {
         Premium All-Time is a one-time purchase. It does not renew and there is nothing to cancel.
       </p>
       
+      <h2>Premium: free trial</h2>
+      <p>
+        The free 7-day Premium trial asks for no payment and is not a subscription, so there is nothing to
+        cancel or refund. It ends by itself after 7 days; Premium then switches off unless you buy it.
+      </p>
+
       <h2>Premium: refunds</h2>
       <p>
         Premium purchases are made, billed and refunded through Google Play, so Google Play's refund
